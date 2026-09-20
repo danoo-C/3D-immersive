@@ -10,6 +10,7 @@ from itertools import pairwise
 
 import numpy as np
 from binaural_spike import (
+    BLOCK,
     EAR_NAMES,
     RATE,
     TARGET_EAR_ENERGY,
@@ -19,6 +20,8 @@ from binaural_spike import (
     estimate_itd_onset,
     horizontal_itd,
     nearest_direction,
+    next_pow2,
+    nfft_for,
     resample,
     response,
     sofa_directions,
@@ -202,6 +205,55 @@ def run(hrir: HrirSet) -> int:
         "disagreements track shadow depth",
         float(np.median(worst)) < float(np.median(best)) - 3.0,
         f"worst decile {np.median(worst):+.1f} dB vs best {np.median(best):+.1f} dB",
+    )
+
+    # --- max ITD, and the nfft it sizes -----------------------------------
+    max_itd = hrir.max_itd_samples
+    ok(
+        "max ITD is in the sane range",
+        30 <= max_itd <= 70,
+        f"{max_itd} samples ({max_itd / RATE * 1e3:.3f} ms)",
+    )
+
+    # The largest ITD on a sphere must lie at an interaural pole. Asserting
+    # where the maximum *is* tests all 8802 directions at once: the
+    # front-to-pole ladder above samples four of them, and a spurious peak
+    # anywhere else would walk straight past it.
+    peak_dir = int(np.argmax(hrir.itd))
+    peak_az, peak_el = hrir.az_el[peak_dir]
+    off_pole = min(abs(peak_az - 90.0), abs(peak_az - 270.0))
+    ok(
+        "the largest ITD is at an interaural pole",
+        off_pole <= 10.0 and abs(peak_el) <= 10.0,
+        f"az {peak_az:.0f}, el {peak_el:+.0f}",
+    )
+
+    # "Never hardcoded" is a claim about the code, so it needs a case where a
+    # constant would give the wrong answer. A synthetic pair delayed by 12
+    # samples must produce 12, not this dataset's 39.
+    synth = np.zeros((1, 2, 256), dtype=np.float32)
+    synth[0, 0, 100] = 1.0
+    synth[0, 1, 112] = 1.0
+    synth_mag, _ = estimate_itd(synth)
+    ok(
+        "max ITD is derived, not a constant",
+        int(np.ceil(synth_mag.max())) == 12,
+        f"synthetic 12-sample set gives {int(np.ceil(synth_mag.max()))}",
+    )
+
+    nfft = nfft_for(hrir.n, max_itd)
+    needed = BLOCK + hrir.n + max_itd - 1
+    ok(
+        "nfft follows 05's formula and has slack",
+        nfft == next_pow2(needed) and nfft > needed,
+        f"{nfft} for {needed} needed, {nfft - needed} spare",
+    )
+    # 05-audio-engine.md's cost estimate assumes 1024 at block 512 with a
+    # 256-tap set. Confirmed here, one phase before phase 4 depends on it.
+    ok(
+        "nfft matches the cost estimate in 05",
+        nfft == 1024,
+        f"{nfft} at block {BLOCK}, N {hrir.n}",
     )
 
     # Printed with their directions rather than averaged away, because where

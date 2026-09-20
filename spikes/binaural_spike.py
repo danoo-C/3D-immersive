@@ -35,6 +35,7 @@ SHA256 = "e6c72a84dd947b5ef75438ab96a9c2a32ed10f033472b9c4c11a49aff00a8a31"
 DATA_DIR = Path(__file__).parent / "data"
 
 RATE = 48_000  # docs/05-audio-engine.md, fixed parameters
+BLOCK = 512  # ditto: the default block, and what phase 4 renders at
 
 # Normalisation target: mean per-ear broadband energy. Energy rather than peak,
 # so switching datasets does not change perceived loudness (05-audio-engine.md
@@ -85,6 +86,19 @@ class HrirSet:
     @property
     def n(self) -> int:
         return int(self.ir.shape[2])
+
+    @property
+    def max_itd_samples(self) -> int:
+        """The largest ITD in this set, rounded up.
+
+        Derived from the measured field every time, never a constant. A set
+        recorded on a larger head, or one resampled from a different rate,
+        will not match anybody's estimate — and this number sizes the buffer
+        the ITD phase ramp lives in, so guessing it low is not a small error:
+        a circular delay pushes the tail of the response past the end of the
+        buffer and it reappears at the beginning, ahead of the onset.
+        """
+        return int(np.ceil(self.itd.max()))
 
 
 # --------------------------------------------------------------------------- #
@@ -278,6 +292,27 @@ def estimate_itd_onset(ir: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.abs(lag).astype(np.float32), far
 
 
+def next_pow2(n: int) -> int:
+    return 1 << int(np.ceil(np.log2(n)))
+
+
+def nfft_for(taps: int, max_itd: int, block: int = BLOCK) -> int:
+    """Buffer length for a block of convolution plus its ITD ramp.
+
+    From *Prepare the bank* in docs/05-audio-engine.md. The ramp is a circular
+    delay, so the buffer has to be long enough for the block, the impulse
+    response and the delay together; anything past the end wraps round to the
+    front, which is not a subtle artefact but the tail arriving before the
+    onset.
+
+    `max_itd` is rounded up from the measured field. A fractional delay is not
+    strictly confined to `ceil(tau)` — a phase ramp is sinc interpolation and
+    spreads a little either side — but `next_pow2` leaves hundreds of samples
+    of slack at these sizes, which the caller prints rather than assumes.
+    """
+    return next_pow2(block + taps + max_itd - 1)
+
+
 def nearest_direction(hrir: HrirSet, az: float, el: float = 0.0) -> int:
     """Index of the measurement closest to (az, el), in degrees."""
     d_az = (hrir.az_el[:, 0] - az + 180.0) % 360.0 - 180.0
@@ -362,7 +397,17 @@ peak         {np.abs(hrir.ir).max():.4f}
     print("    azimuth    ITD samples      ms    far ear")
     for az, samples, ms, far in horizontal_itd(hrir):
         print(f"    {az:7.1f}    {samples:11.2f}   {ms:5.3f}    {EAR_NAMES[far]}")
-    print()
+
+    max_itd = hrir.max_itd_samples
+    nfft = nfft_for(hrir.n, max_itd)
+    used = BLOCK + hrir.n + max_itd - 1
+    print(
+        f"""
+max ITD      {max_itd} samples ({max_itd / RATE * 1e3:.3f} ms), from the data
+nfft         {nfft} = next_pow2({BLOCK} + {hrir.n} + {max_itd} - 1)
+             {nfft - used} samples of slack over the {used} needed
+"""
+    )
 
 
 def main() -> int:

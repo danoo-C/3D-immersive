@@ -172,3 +172,33 @@ distinction when it rebuilds this in `audio/hrtf/prepare.py`.
 ⚠️ **The plan's −20 dB threshold was wrong and is now −10 dB.** At −20 dB on
 an unfiltered HRIR the crossing lands in the pre-ringing: far-ear agreement
 collapses to 73% and outliers reach 62 samples. Measured, not assumed.
+
+---
+
+**Step 3 — `max_itd_samples` and the `nfft` it sizes. Done.**
+
+```
+max ITD      39 samples (0.812 ms), from the data
+nfft         1024 = next_pow2(512 + 256 + 39 - 1)
+             218 samples of slack over the 806 needed
+```
+
+**Phase 4's `nfft` is 1024, which is what
+[05-audio-engine.md](../05-audio-engine.md)'s cost estimate assumes.** Settled
+one phase before anything depends on it, which is what this step was for.
+
+The 218 samples of slack matter more than they look. `ceil(max_itd)` is not a
+strict bound on a *fractional* delay — a phase ramp is sinc interpolation and
+spreads a little either side of the nominal sample — so a buffer sized exactly
+to the formula would be relying on `next_pow2` rounding up. Here it rounds up
+by 218 samples, and that is printed rather than assumed.
+
+**The largest ITD in the set is at azimuth 90°, elevation 0° — the interaural
+pole, exactly where it has to be.** That is now asserted, and it is the
+cheapest check in the file: it tests all 8802 directions at once, where the
+front-to-pole ladder from step 1 samples four of them and would walk past a
+spurious peak anywhere else.
+
+"Never hardcoded" is also asserted rather than asked for on trust: a synthetic
+pair delayed by 12 samples must produce 12, which a constant tuned to this
+dataset's 39 would fail.
