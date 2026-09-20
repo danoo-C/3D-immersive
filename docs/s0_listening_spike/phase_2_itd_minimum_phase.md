@@ -35,9 +35,24 @@ resampled data and printed.
 - [ ] The far ear is the contralateral one: a source at +90° azimuth delays the
       ear on the opposite side. Asserted, because a sign error here is
       perfectly audible and perfectly easy to miss.
-- [ ] The two estimators agree within 2 samples for at least 95% of directions;
-      the disagreements are printed with their directions rather than averaged
+- [ ] The two estimators agree on **which ear is far** for at least 99% of the
+      directions where `|ITD| > 3` samples — the question a sign error breaks,
+      asked only where there is a sign to get wrong.
+- [ ] Their signed difference has **no systematic offset**: `|median| < 1`
+      sample. A bias would mean one of them is calibrated wrong.
+- [ ] The p95 of `|difference|` is under 8 samples, and the disagreements are
+      **structured by shadow depth** rather than scattered — asserted by
+      comparing the shadow in the worst decile against the best. Scatter with
+      no structure would mean noise in one of the estimators; structure means
+      they are measuring different things, which they are.
+- [ ] The disagreements are printed with their directions rather than averaged
       away.
+
+> **Amended after measurement.** These four lines replace one: *"the two
+> estimators agree within 2 samples for at least 95% of directions"*. That line
+> cannot be met by an estimator that is independent, and it can only be met by
+> one that is not — see the Notes. Amended explicitly rather than quietly, per
+> [09-workflow.md](../09-workflow.md), and the reasoning is D-69.
 - [ ] `max_itd_samples` is computed from the data, printed, and lands in a
       sanity range of 30–70 samples at 48 kHz. It is never hardcoded.
 - [ ] Minimum-phase magnitude check: `|FFT(minphase)|` matches `|FFT(original)|`
@@ -108,3 +123,52 @@ left ear, 117 in the right) *and* its mirror image, so a convention that is
 backwards cannot pass by being backwards consistently. A positive
 cross-correlation lag means the left ear is the later one. Contralateral
 behaviour on real data is asserted separately at azimuth 90 and 270.
+
+---
+
+**Step 2 — the onset estimator. Done, and it cost this phase an acceptance
+line.** The two estimators are not two estimates of one number, and asking
+them to agree within 2 samples was asking for something that is not true.
+
+| Onset estimator | far-ear agreement | median offset | within 2 sa |
+|---|---|---|---|
+| fullband, −10 dB (independent) | **99.99%** | −0.30 sa | 37% |
+| low-pass 1.5 kHz, −10 dB | 100% | +0.02 sa | 48% |
+| low-pass 700 Hz, −3 dB | 100% | +0.20 sa | **99.3%** |
+
+The last row passes the original line — and is worthless. At 700 Hz with a
+−3 dB threshold the "onset" is the peak of a heavily smoothed envelope, which
+is the quantity the cross-correlation already finds. It would have been two
+runs of the same algorithm agreeing with itself, which the plan had named in
+advance as the thing not to do.
+
+**Why they differ, measured at the worst direction** (azimuth 300°, elevation
++15°, cross-correlation 33.3 samples, onset 20.7):
+
+```
+near ear:  peak 0.6507 at sample  95   -10 dB crossing at  95
+far  ear:  peak 0.0627 at sample 125   -10 dB crossing at 115
+shadow: -20.3 dB
+```
+
+The near ear is impulsive enough that it does not reach −10 dB until its own
+peak. The far ear is shadowed by 20 dB and its −10 dB crossing fires **ten
+samples before its peak**, on a low-level diffracted precursor — the wave that
+bends round the head, arriving earlier and much weaker. So cross-correlation
+measures the *dominant* delay and the onset threshold measures the *first
+arrival*. Both are correct; they are different quantities.
+
+That the divergence is **structure and not noise** is now asserted rather than
+argued: the worst decile of disagreements sits at −19.1 dB of shadow, the best
+decile at −3.6 dB. No threshold removes it, because it is not an error.
+
+The engine uses the dominant delay — it carries the localisation cue and it is
+what the minimum-phase split leaves behind. **D-69** records that, and records
+what the cross-check is worth: 99.99% agreement on which ear is far, which
+catches a sign flip, a spurious correlation peak or a mirrored dataset. Those
+are the errors that would otherwise survive to phase 5. M4 inherits the same
+distinction when it rebuilds this in `audio/hrtf/prepare.py`.
+
+⚠️ **The plan's −20 dB threshold was wrong and is now −10 dB.** At −20 dB on
+an unfiltered HRIR the crossing lands in the pre-ringing: far-ear agreement
+collapses to 73% and outliers reach 62 samples. Measured, not assumed.

@@ -16,6 +16,7 @@ from binaural_spike import (
     HrirSet,
     cartesian_to_sofa,
     estimate_itd,
+    estimate_itd_onset,
     horizontal_itd,
     nearest_direction,
     resample,
@@ -156,6 +157,63 @@ def run(hrir: HrirSet) -> int:
         "itd is an unsigned magnitude",
         bool((hrir.itd >= 0).all()) and set(np.unique(hrir.itd_far_ear)) <= {0, 1},
     )
+
+    # --- the independent onset estimator ---------------------------------
+    onset, onset_far = estimate_itd_onset(hrir.ir)
+    signed_cc = np.where(hrir.itd_far_ear == 0, hrir.itd, -hrir.itd)
+    signed_on = np.where(onset_far == 0, onset, -onset)
+    diff = signed_on.astype(np.float64) - signed_cc
+
+    # Which ear is far is the thing a sign error would break, and it is only a
+    # meaningful question where there is a delay to have a sign about.
+    sided = hrir.itd > 3.0
+    far_agree = float(np.mean(onset_far[sided] == hrir.itd_far_ear[sided])) * 100
+    ok(
+        "estimators agree on the far ear",
+        far_agree >= 99.0,
+        f"{far_agree:.2f}% of {int(sided.sum())} directions with |ITD| > 3 sa",
+    )
+    ok(
+        "estimators have no systematic offset",
+        abs(float(np.median(diff))) < 1.0,
+        f"median {np.median(diff):+.2f} samples",
+    )
+
+    p95 = float(np.percentile(np.abs(diff), 95))
+    ok(
+        "difference p95 under 8 samples",
+        p95 < 8.0,
+        f"p95 {p95:.1f} sa, max {np.abs(diff).max():.1f} sa",
+    )
+
+    # Structure, not scatter. The two estimators diverge where the far ear is
+    # deeply shadowed, because there the onset threshold fires on a diffracted
+    # precursor ten samples ahead of the main energy (D-69). If the worst
+    # disagreements were *not* the most shadowed directions, the divergence
+    # would be noise in one of the estimators and worth chasing.
+    peaks = np.abs(hrir.ir).max(axis=-1)
+    near = np.where(hrir.itd_far_ear == 0, peaks[:, 1], peaks[:, 0])
+    far_pk = np.where(hrir.itd_far_ear == 0, peaks[:, 0], peaks[:, 1])
+    shadow_db = 20 * np.log10(np.maximum(far_pk, 1e-12) / np.maximum(near, 1e-12))
+    order = np.argsort(np.abs(diff))
+    decile = max(1, hrir.m // 10)
+    best, worst = shadow_db[order[:decile]], shadow_db[order[-decile:]]
+    ok(
+        "disagreements track shadow depth",
+        float(np.median(worst)) < float(np.median(best)) - 3.0,
+        f"worst decile {np.median(worst):+.1f} dB vs best {np.median(best):+.1f} dB",
+    )
+
+    # Printed with their directions rather than averaged away, because where
+    # they fail is the finding. A cluster is a property of the method; a
+    # uniform scatter means something is wrong.
+    worst = np.argsort(-np.abs(diff))[:6]
+    print("       worst disagreements (az, el, cross-corr, onset):")
+    for i in worst:
+        print(
+            f"         {hrir.az_el[i, 0]:6.1f} {hrir.az_el[i, 1]:+6.1f}"
+            f"   {signed_cc[i]:+7.2f}  {signed_on[i]:+7.2f}"
+        )
 
     print(f"\n{len(failures)} failed" if failures else "\nall checks passed")
     return 1 if failures else 0

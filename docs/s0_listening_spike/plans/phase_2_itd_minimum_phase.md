@@ -230,6 +230,30 @@ mirrored synthetic probe (a backwards convention cannot pass by being
 backwards consistently) and a monotonic front-to-pole ladder (a spurious peak
 between the sampled azimuths).
 
+**Step 2 done, and it changed the phase's acceptance.** Two departures.
+
+**The threshold is −10 dB, not the −20 dB this plan specified.** Measured:
+at −20 dB on an unfiltered HRIR the crossing lands in the pre-ringing, the two
+estimators agree on which ear is even *far* only 73% of the time, and outliers
+reach 62 samples. −10 dB sits on the real leading edge.
+
+**The "agree within 2 samples for 95%" acceptance line could not be met, and
+has been replaced.** This plan's Approach said the onset estimator's value is
+its independence, and that two estimators agreeing because they are the same
+algorithm twice would be worse than one. That turned out to be the live
+question rather than a rhetorical one: an independent onset estimator agrees
+within 2 samples on 37–48% of directions, and the *only* configurations that
+reach 95% are the ones that have stopped being independent. The divergence is
+structured by shadow depth and is the difference between first arrival and
+dominant delay, not an error in either. The mechanism, the numbers and the
+replacement acceptance are in [the phase doc](../phase_2_itd_minimum_phase.md);
+the decision the engine takes from it is D-69.
+
+Worth saying plainly, because it is the one thing this plan nearly got wrong:
+the 700 Hz / −3 dB configuration was sitting there passing the stated line,
+and taking it would have left the phase green, the acceptance satisfied and
+the cross-check incapable of catching anything.
+
 ## Outcome
 
 Filled in at the end. What actually happened, what this plan got wrong, and

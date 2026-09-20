@@ -236,6 +236,48 @@ def estimate_itd(ir: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.abs(lag).astype(np.float32), far
 
 
+# Onset threshold, relative to each ear's own peak. -20 dB was the plan's
+# figure and measured badly: on an unfiltered HRIR that level is down in the
+# pre-ringing, and the estimator agrees with the correlation about which ear is
+# even *far* only 73% of the time, with outliers 62 samples out. -10 dB sits on
+# the real leading edge. Per-ear rather than a level shared across the pair,
+# because the far ear is head-shadowed and a shared threshold would measure the
+# shadow as much as the delay.
+ITD_ONSET_DB = -10.0
+
+
+def estimate_itd_onset(ir: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """ITD from onset times — the independent cross-check on `estimate_itd`.
+
+    Deliberately shares nothing with the cross-correlation: no low-pass, no
+    FFT, no correlation, no windowing. That is the whole value of it. Two
+    estimators that agreed because they were the same algorithm twice would be
+    worth less than one estimator honestly reported, and tuning this one until
+    it matches is the exact failure it exists to prevent.
+
+    Returns the same `(magnitude, far_ear)` pair as `estimate_itd`.
+    """
+    env = np.abs(ir)
+    threshold = env.max(axis=-1, keepdims=True) * 10 ** (ITD_ONSET_DB / 20.0)
+    first = (env >= threshold).argmax(axis=-1)
+
+    # Linear interpolation between the samples straddling the crossing, so the
+    # estimate is not quantised to whole samples when the comparison it feeds
+    # is measured in samples.
+    m, ear = np.indices(first.shape)
+    prev = np.clip(first - 1, 0, None)
+    low, high = env[m, ear, prev], env[m, ear, first]
+    rising = high > low
+    frac = np.where(
+        rising, (threshold[m, ear, 0] - low) / np.where(rising, high - low, 1.0), 0.0
+    )
+    position = prev + np.clip(frac, 0.0, 1.0)
+
+    lag = position[:, 0] - position[:, 1]
+    far = np.where(lag > 0.0, 0, 1).astype(np.uint8)
+    return np.abs(lag).astype(np.float32), far
+
+
 def nearest_direction(hrir: HrirSet, az: float, el: float = 0.0) -> int:
     """Index of the measurement closest to (az, el), in degrees."""
     d_az = (hrir.az_el[:, 0] - az + 180.0) % 360.0 - 180.0
