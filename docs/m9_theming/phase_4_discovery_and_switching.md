@@ -15,12 +15,26 @@ something a person can actually use.
 **In:** the platform-appropriate user theme directory and its creation on
 first run; scanning it for `*.3dimtheme`; the `View > Theme` menu listing the
 bundled theme and everything found; re-applying the stylesheet live; persisting
-the selection with `QSettings`; showing the phase 2 report when a theme loads
-with problems.
+the selection with `QSettings`; **the notice centre** — the status-bar line,
+the unread count and the list behind it, per the *Notices* section of
+[04-ui-spec.md](../04-ui-spec.md) — and showing the phase 2 report through it.
 
 **Out:** the Preferences dialog, which is M8 and will promote this menu rather
-than replace it. Hot-reload on file change — a nice trick, no one asked for it,
-and it is a file watcher's worth of complexity for a file people edit twice.
+than replace it. The per-notice *actions* (relink, reveal, choose device) and
+the first-run polish around them, which are M8. Hot-reload on file change — a
+nice trick, no one asked for it, and it is a file watcher's worth of
+complexity for a file people edit twice.
+
+### Scope amended before the milestone started
+
+The notice centre was added here by the gap review, from M8. It is not scope
+creep: this phase's acceptance already required a broken theme to report "its
+problems **in the UI**", 04 already promised that meant "not a line on stderr
+nobody reads", and there was no surface anywhere in the specification for it
+to appear on until M8 — six milestones later. Either this phase built one or
+it could not pass. See D-65. Amended while M9 was still *not started*, which
+is when [09-workflow.md](../09-workflow.md) says a phase's scope may change
+freely.
 
 ## Acceptance
 
@@ -35,6 +49,12 @@ and it is a file watcher's worth of complexity for a file people edit twice.
 - [ ] A deliberately broken theme file — the one from phase 2's tests — appears
       in the menu, is selectable, reports its problems **in the UI**, and
       leaves the application running on what it could salvage.
+- [ ] That report reaches a person: the status bar shows the most recent
+      problem, the unread count is non-zero and in `warn`, and the list behind
+      it holds one entry per problem the phase 2 report contained. Nothing is
+      modal, and nothing is only on stderr (F-56).
+- [ ] The notice count is invisible at zero, the same rule the xrun counter
+      already follows.
 - [ ] The theme directory is created if missing, and an empty one is not an
       error.
 - [ ] Widgets that cache colours at construction repaint. Whatever is found
@@ -43,10 +63,10 @@ and it is a file watcher's worth of complexity for a file people edit twice.
 
 ## Implements
 
-F-48, F-47. The `View` menu is specified in
-[04-ui-spec.md](../04-ui-spec.md); `QSettings` here is the same mechanism M8's
-session persistence will use, chosen now so M8 adopts it rather than migrating
-off something else.
+F-48, F-47, F-56, D-65. The `View` menu and the *Notices* surface are both
+specified in [04-ui-spec.md](../04-ui-spec.md); `QSettings` here is the same
+mechanism M8's session persistence will use, chosen now so M8 adopts it rather
+than migrating off something else.
 
 ## Notes
 

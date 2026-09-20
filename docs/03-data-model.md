@@ -45,6 +45,34 @@ Everything else is a view:
 
 BPM never affects playback. It exists only to draw a grid and quantise edits.
 
+### ⚠️ Changing the BPM moves the grid, not the material
+
+Because positions are stored in samples, changing the tempo re-draws the grid
+underneath an arrangement that does not move (D-52). Material lined up to bars
+at 120 BPM is **not** lined up at 124: the clips are where they always were,
+and the bar lines have slid out from under them.
+
+This is the direct consequence of the sentence above, and it is written here
+rather than left to be inferred because the opposite is what most people
+expect. The alternative — rescaling every clip start and keyframe time with
+the tempo — would make BPM a destructive edit that changes where everything is
+while changing nothing about how anything sounds, and it rounds badly whenever
+a clip's length is not a whole number of ticks.
+
+Set the tempo before arranging. The grid is a ruler, not a transform.
+
+### Length
+
+A project's length is **derived, not stored** (D-53): it is the end of the last
+clip on any channel, and zero for a project with no clips. Nothing has to be
+maintained when a clip moves, and there is no stored end marker that can
+disagree with the material.
+
+Automation extending past the last clip is retained but does not extend the
+length — a curve with nothing to move is not content. Where a render needs to
+run past the last clip, that is the render range's job (F-53), not a property
+of the project.
+
 ## Entities
 
 ```
@@ -69,7 +97,7 @@ MediaFile
 └── hash             for relink and cache invalidation
 
 Channel
-├── id, name, index
+├── id, name
 ├── color            hex, from the channel palette
 ├── gain_db, mute, solo
 ├── hrtf_bypass      bool   true → straight to the stereo bus, unprocessed
@@ -102,6 +130,10 @@ Keyframe
 
 ### Rules
 
+- A channel's position in `Project.channels` **is** its order, top to bottom.
+  There is no stored `index` (D-61) — two homes for one fact is the thing
+  [doc-system.md](doc-system.md) §2 exists to prevent, and a file whose list
+  order and index fields disagreed had no defined meaning.
 - Clips on one channel never overlap. Dropping onto an occupied span trims the
   existing clip (magnetic behaviour); a modifier opts out and rejects the drop.
 - `offset + length` must not exceed `MediaFile.frames`.
@@ -124,6 +156,12 @@ Keyframe
 - `pan` is meaningful only under bypass. On a mono source it is a
   constant-power pan; on a stereo source it is a balance, attenuating the
   opposite side rather than folding the image.
+- **Solo is additive** (D-62): several channels can be soloed at once, and
+  while any of them is, every non-soloed channel is silent. A channel that is
+  both soloed and muted stays muted — mute is the more deliberate gesture, and
+  somebody who muted a channel and then soloed it was auditioning the rest.
+  Bypassed channels obey solo like any other; bypass is about spatialisation,
+  not about the mix bus (D-33).
 
 ### Evaluating a curve
 
@@ -161,9 +199,18 @@ git. A `schema_version` integer drives forward migration on load. Fields added
 later default on read — a project written before `hrtf_bypass` existed loads
 with it `false`, which is the previous behaviour.
 
+Beside it, `app_version` records the build that wrote the file (D-60). It is
+not `schema_version` and does not drive anything: two builds can both write
+schema 1 and disagree about a default, and when a project loads wrong the
+writing version is the first thing anyone asks for. There are deliberately
+**no timestamps** — a `modified` field would change on every save and produce
+a diff even when nothing about the music did, which costs exactly the
+git-friendliness D-13 was for. The filesystem already knows.
+
 ```json
 {
   "schema_version": 1,
+  "app_version": "0.1.0",
   "sample_rate": 48000,
   "bpm": 124.0,
   "time_signature": [4, 4],
@@ -180,7 +227,7 @@ with it `false`, which is the previous behaviour.
   ],
   "channels": [
     {
-      "id": "c-01", "name": "Kick", "index": 0, "color": "#A855F7",
+      "id": "c-01", "name": "Kick", "color": "#A855F7",
       "gain_db": -3.0, "mute": false, "solo": false,
       "hrtf_bypass": false, "pan": 0.0,
       "snap_override": null,
@@ -203,7 +250,7 @@ with it `false`, which is the previous behaviour.
       ]
     },
     {
-      "id": "c-02", "name": "Backing mix", "index": 1, "color": "#22D3EE",
+      "id": "c-02", "name": "Backing mix", "color": "#22D3EE",
       "gain_db": 0.0, "mute": false, "solo": false,
       "hrtf_bypass": true, "pan": 0.0,
       "snap_override": null,
@@ -228,10 +275,36 @@ it.
 
 ## Caches, not project data
 
-Kept beside the project in `.3dim-cache/`, safe to delete, never committed:
+One **user-level** cache directory, safe to delete at any time, never
+committed and never beside the project (D-59):
+
+| Platform | Location |
+|---|---|
+| Linux | `$XDG_CACHE_HOME/3dimmersive`, default `~/.cache/3dimmersive` |
+| macOS | `~/Library/Caches/3dimmersive` |
+| Windows | `%LOCALAPPDATA%\3dImmersive\Cache` |
 
 - Peak pyramids per media file, keyed by content hash.
 - Decoded + resampled audio, if we later decide re-decoding on load is too slow.
 - Prepared HRTF banks (ITD + minimum-phase + FFT), keyed by SOFA hash and
   block size. Preparing a bank takes a second or two; caching it makes project
   load feel instant.
+
+Every one of those is keyed by the hash of its *input*, so none of it is
+specific to a project — which is why an earlier `.3dim-cache/` beside the
+project was wrong twice over. Two projects using the same sample each computed
+their own peak pyramid, against F-9's "computed once per file"; and a project
+that has never been saved has nothing to sit beside, so the first import into
+a new project had nowhere to write.
+
+### The autosave sidecar
+
+Not a cache, and not project data either: `<project>.3dim.recover`, written
+beside the project while it has unsaved changes and removed on a clean save or
+a clean exit (F-49, D-64). An unsaved project's sidecar goes to the cache
+directory above, for exactly the reason the caches moved there.
+
+It is a **sidecar and never the project file**. Autosave that rewrites the
+project in place is the one form of it that can lose work rather than save it,
+and it breaks the promise that `Ctrl+S` is the moment a decision becomes
+permanent. Finding one on startup offers a recovery; it never loads silently.

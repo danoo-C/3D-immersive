@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QDockWidget, QSplitter, QToolBar
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QLabel,
+    QMenu,
+    QSplitter,
+    QToolBar,
+    QToolButton,
+)
 
 from immersive.app import build_application
 from immersive.ui.main_window import MainWindow
@@ -87,11 +95,121 @@ def test_transport_buttons_have_icons_not_ascii(app: object) -> None:
         assert not set(action.text()) & set("|<>[]"), action.text()
 
 
+def _menu_actions(window: MainWindow) -> list[QAction]:
+    """Every non-separator action in the menu bar.
+
+    Callers must keep `window` alive for as long as they use the result:
+    the QActions are owned by it, and shiboken deletes the C++ side the
+    moment the last Python reference to the window goes.
+    """
+    return [
+        action
+        for entry in window.menuBar().actions()
+        if isinstance(menu := entry.menu(), QMenu)
+        for action in menu.actions()
+        if not action.isSeparator()
+    ]
+
+
 def test_disabled_actions_explain_themselves(app: object) -> None:
-    """A dead button with no tooltip is the thing that reads as unfinished."""
+    """A dead control with no tooltip is the thing that reads as unfinished.
+
+    04-ui-spec.md, Craft: a not-yet-implemented action is disabled and says
+    why in its tooltip. This walked only the toolbar for a while, which is
+    exactly where the rule already held - all nineteen disabled *menu*
+    actions were bare, and the rule was tested where it could not fail.
+    """
     window = MainWindow()
     toolbar = window.findChildren(QToolBar)[0]
-    for action in toolbar.actions():
-        if action.isSeparator() or not action.text():
-            continue
-        assert action.toolTip(), action.text()
+    controls: list[QAction] = [
+        action
+        for action in toolbar.actions()
+        if not action.isSeparator() and action.text()
+    ]
+    controls += _menu_actions(window)
+    assert len(controls) > 20, "the walk stopped finding controls"
+
+    for action in controls:
+        label = action.text().replace("&", "")
+        assert action.toolTip(), label
+        if not action.isEnabled():
+            assert "Not built yet" in action.toolTip(), label
+
+
+def test_menus_actually_show_their_tooltips(app: object) -> None:
+    """Qt suppresses tooltips inside a QMenu unless asked.
+
+    Without this the explanations above exist in the object model and reach
+    nobody — which reads as done and is not.
+    """
+    window = MainWindow()
+    for entry in window.menuBar().actions():
+        menu = entry.menu()
+        assert isinstance(menu, QMenu)
+        assert menu.toolTipsVisible(), entry.text()
+
+
+def test_tooltips_carry_the_shortcut(app: object) -> None:
+    """04-ui-spec.md, Craft: tooltips carry the shortcut as `Action  (Key)`."""
+    window = MainWindow()
+    for action in _menu_actions(window):
+        key = action.shortcut().toString()
+        if key:
+            assert f"({key})" in action.toolTip(), action.text()
+
+
+def test_undo_and_redo_match_the_specified_keys(app: object) -> None:
+    """04-ui-spec.md's keyboard table says Ctrl+Z / Ctrl+Shift+Z.
+
+    QKeySequence.StandardKey.Redo resolves to Ctrl+Y on Linux and Windows,
+    which disagreed with both the spec and the toolbar's own tooltip inside
+    the same window.
+    """
+    window = MainWindow()
+    keys = {
+        action.text().replace("&", ""): action.shortcut().toString()
+        for action in _menu_actions(window)
+    }
+    assert keys["Undo"] == "Ctrl+Z"
+    assert keys["Redo"] == "Ctrl+Shift+Z"
+
+
+def test_quit_has_a_shortcut_on_every_platform(app: object) -> None:
+    """StandardKey.Quit resolves to nothing under some Linux platform themes.
+
+    It left the only action in the application that actually works as the
+    only one with no key at all.
+    """
+    window = MainWindow()
+    quit_action = next(
+        action
+        for action in _menu_actions(window)
+        if action.text().replace("&", "") == "Quit"
+    )
+    assert quit_action.isEnabled()
+    assert not quit_action.shortcut().isEmpty()
+
+
+def test_the_window_carries_an_icon(app: object) -> None:
+    """Otherwise the taskbar and alt-tab show Qt's default placeholder."""
+    window = MainWindow()
+    icon = window.windowIcon()
+    assert not icon.isNull()
+    assert not icon.pixmap(256, 256).isNull()
+
+
+def test_no_control_is_a_label_dressed_as_a_button(app: object) -> None:
+    """The ARM toggle was a bordered QLabel: the one dead control that looked
+    alive, in a toolbar of visibly greyed ones."""
+    window = MainWindow()
+    toolbar = window.findChildren(QToolBar)[0]
+    for label in toolbar.findChildren(QLabel):
+        style = label.styleSheet()
+        assert "border:" not in style, label.text()
+
+    arm = next(
+        button for button in toolbar.findChildren(QToolButton) if button.text() == "ARM"
+    )
+    assert arm.isCheckable()
+    assert not arm.isEnabled()
+    assert not arm.icon().isNull()

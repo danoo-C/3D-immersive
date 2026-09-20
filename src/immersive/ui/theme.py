@@ -134,6 +134,18 @@ QTabBar::tab:selected {{
     border-top: 2px solid {accent};
 }}
 
+/* 04-ui-spec.md lists the focus ring among the accent's jobs. Without a rule
+   here it falls back to whatever Fusion draws, which is neither purple nor
+   consistent between platforms - and "no information by colour alone" cuts
+   both ways: a focus indicator nobody can see fails keyboard users first.
+
+   The tab bar is deliberately left out: its selected tab already carries an
+   accent rule, and a box around it on focus puts two indicators on one widget
+   and undoes the flatness the block above is for. */
+*:focus {{ outline: none; }}
+QToolButton:focus, QPushButton:focus {{ border: 1px solid {accent}; }}
+QMenuBar::item:focus {{ background-color: {bg_3}; }}
+
 QSplitter::handle {{ background-color: {border}; }}
 QSplitter::handle:horizontal {{ width: 1px; }}
 QSplitter::handle:vertical {{ height: 1px; }}

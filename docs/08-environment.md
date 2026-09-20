@@ -8,7 +8,8 @@
 | `launch.py` | ✅ working, with `--install` |
 | `.gitignore` | ✅ written |
 | `pyproject.toml` | ✅ hatchling, src-layout, ruff/mypy/pytest configured |
-| Dependencies | ✅ installed |
+| `LICENSE` | ✅ MIT, declared and packaged; third-party notices beside it |
+| Dependencies | ✅ installed; floors in `pyproject.toml`, exact versions in `uv.lock` |
 | `src/immersive/` | ✅ M0 skeleton + themed shell |
 | CI | ✅ `.github/workflows/ci.yml`, 3 platforms × 2 Python versions |
 | `installer.py` | 📄 specified below, **not built** |
@@ -61,6 +62,39 @@ machine, including WSL.
 **CPython 3.11 minimum, 3.13 in use.** Reasons for the floor: `tomllib` in the
 stdlib, the `X | None` syntax used throughout, and improved error messages.
 
+### Floors here, exact versions in the lock file
+
+`pyproject.toml` declares **floors** — `numpy>=2.0` and the rest — because a
+wheel that pins exact versions in its metadata is uninstallable alongside
+anything else, and because the floors that matter have reasons attached
+(`numpy>=2.0` is D-38, not a preference).
+
+Reproducibility is a separate question, and it lives in a committed
+`uv.lock`:
+
+```bash
+uv lock                 # regenerate after editing pyproject.toml
+uv sync --extra dev     # recreate the environment exactly
+```
+
+The lock resolves for every supported platform and Python version, not just
+the one that generated it, which is why it is `uv`'s and not `pip freeze`'s.
+Recorded as D-67, because [06-roadmap.md](06-roadmap.md) listed "pinned
+dependencies" as delivered at M0 while neither a pin nor a lock existed.
+
+### Licence files
+
+`LICENSE` is MIT and is declared with PEP 639's `license` / `license-files`
+keys, so it ships inside the wheel — the older `license = { text = "MIT" }`
+form put no licence in the distribution at all.
+
+`THIRD-PARTY-NOTICES.md` ships beside it. It matters at M8 rather than now:
+a PyInstaller bundle redistributes Qt, libsndfile and soxr, all LGPL, and
+will redistribute an HRTF dataset under whatever licence M4 settles on
+(QA-30). Those obligations are easy to meet and easy to forget at release
+time, which is why the file exists before there is a bundle to attach it to.
+`tests/test_docs.py` asserts it lists every runtime dependency.
+
 ### numpy version
 
 **`numpy>=2.0` is a hard floor, not a preference** (D-38). The realtime
@@ -70,9 +104,10 @@ upcasting — both of which arrived in numpy 2.0. On 1.x every block allocates a
 fresh float64 array inside the audio callback. The pin belongs in
 `pyproject.toml`; it is the first task of M1.
 
-⚠️ To verify at M0: PySide6 wheel availability for 3.13 on all three targets.
-If any platform lags, the whole project pins to 3.12 — which is fine, nothing
-here needs 3.13.
+**Verified at M0:** PySide6 wheels exist for 3.11 and 3.13 on all three
+targets — CI builds green on Linux, macOS and Windows across both. The
+contingency this line used to carry, dropping the project to 3.12, is not
+needed and nothing here would have required 3.13 anyway.
 
 ### You are on WSL2
 
@@ -80,6 +115,15 @@ here needs 3.13.
 N-5 exists. The realtime preview and the M4 benchmark do **not** belong here —
 WSLg audio has poor latency and limited device control. Run those on Windows
 native Python (WASAPI, ideally ASIO) or a native Linux install.
+
+From M3 on, `--device` and `--block` pick the output device and buffer size
+without a preferences UI (F-55, D-63), which is what makes "run it on the
+other machine to listen" a one-line change rather than a code edit:
+
+```bash
+python3 launch.py -- --device "Speakers (Realtek)" --block 512
+python3 launch.py -- --device ?        # list what this machine offers
+```
 
 ---
 

@@ -22,6 +22,7 @@ plans belongs there.
 | `docs/00`–`09` | **The canon.** The specification of the product and its process | Deliberately, with a reason |
 | `docs/<milestone>/` | Working documents: phases and plans, per [09](09-workflow.md) | Constantly, while that milestone is live |
 | `.github/workflows/README.md` | Colocated notes for a thing that is not the product | With that thing |
+| `LICENSE`, `THIRD-PARTY-NOTICES.md` | Legal facts, not documentation. Kept at the root because that is where tools and people look for them | When a dependency or a bundled dataset changes |
 | Docstrings | How a specific module works | With the code |
 
 ### The canon
@@ -65,17 +66,22 @@ Four schemes, all monotonic, all permanent.
 
 | Prefix | Meaning | Lives in | Current high-water |
 |---|---|---|---|
-| `F-n` | Functional requirement | `01-requirements` §Functional | F-48 |
+| `F-n` | Functional requirement | `01-requirements` §Functional | F-56 |
 | `N-n` | Non-functional requirement | `01-requirements` §Non-functional | N-6 |
-| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-51 |
+| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-68 |
 | `QA-n` | A question asked during spec review, and its answer | `07-qa-archive` | QA-38 |
+
+These four numbers are themselves the kind of fact §2 is about, so they are
+asserted by `tests/test_docs.py` rather than maintained by hand.
 
 Milestones use `M0`–`M8` and `S0`, defined in `06-roadmap`.
 
 ### The rules that make identifiers worth having
 
-- **Numbers only ever go up.** The next decision is D-52 regardless of what
-  happened to D-12.
+- **Numbers only ever go up.** The next decision takes the next free number
+  regardless of what happened to D-12. (Deliberately not written here as a
+  literal — a forward reference to an identifier that does not exist yet is
+  the one thing §7's dangling-reference check cannot tell from a mistake.)
 - **Never renumber.** A commit that renumbers identifiers invalidates every
   reference in every other document, every commit message and every code
   comment, and the damage is silent.
@@ -191,15 +197,22 @@ These must hold at every commit:
   it (per [09](09-workflow.md)).
 - The table in `docs/README.md` lists every numbered document, and no others.
 
-Today these are checked with a short script run by hand. They are mechanical
-and belong in `tests/` as a documentation test; that is not yet done, and until
-it is, this list is a checklist rather than a guarantee.
+These are enforced by `tests/test_docs.py` and run in CI with everything else,
+so the list above is a guarantee rather than a checklist. It also checks two
+things this section did not originally ask for: that the high-water marks in
+§3 are current, and that no prefix's sequence has a hole in it — a gap means
+an identifier was deleted by hand, which §3 forbids.
 
-Two notes for whoever automates it. Strip fenced code blocks and inline code
-spans before matching, or every template and every quoted pattern registers as
-a broken link. And check all four identifier prefixes: the `QA-` rule above was
-added after a hand check found a dangling `QA-43` in `07` that an `F`/`N`/`D`
--only pass had walked straight past.
+Both notes that were left for whoever automated it turned out to matter.
+Fenced code blocks and inline code spans are stripped before matching, or
+every template and every quoted pattern in this file and in `09` registers as
+a broken link. And all four identifier prefixes are checked: the `QA-` rule
+above was added after a hand check found a dangling reference in `07` that an
+`F`/`N`/`D`-only pass had walked straight past.
+
+One consequence worth knowing before it bites: an identifier written as a
+*forward* reference — "the next decision will be …" — is indistinguishable
+from a typo, and the check will reject it. Write the rule without the number.
 
 ## 8. Anti-patterns
 

@@ -33,6 +33,7 @@ Copied verbatim from the roadmap's "Done when":
 |---|---|
 | A complete token vocabulary | Impossible now — the widgets for M3–M6 do not exist. Each milestone adds its own groups to `04` as it builds them |
 | The Preferences dialog | M8. M9 ships a `View > Theme` menu, which M8 promotes |
+| Per-notice actions — relink, reveal, choose device | M8. M9 builds the notice surface itself, because phase 4 cannot pass without one (D-65) |
 | Light mode, or any second shipped theme | Nobody asked for one. The system allows it; shipping one is a decision, not a consequence |
 | Per-channel colour editing | Already F-10's channel colour, and already in the data model — themes provide the *palette*, not the assignment |
 | Fonts, spacing, icon sets | Colour only. A theme that can restyle layout is a skinning engine, and that is a different project |

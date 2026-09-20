@@ -28,6 +28,12 @@ _INK = "currentColor"
 #: screen. Qt picks the nearest and scales down, which is the cheap direction.
 _SIZES = (16, 32)
 
+#: The window and taskbar icon is asked for at sizes no toolbar ever needs -
+#: alt-tab and dock previews go well past 32 - so it is rendered from its own
+#: ladder rather than widening _SIZES and paying for a 256 px copy of every
+#: transport glyph that will never be drawn at that size.
+_APP_SIZES = (16, 32, 48, 64, 128, 256)
+
 
 @cache
 def _source(name: str) -> str:
@@ -61,6 +67,20 @@ def icon(name: str, colour: str | None = None, disabled: str | None = None) -> Q
         result.addPixmap(
             _render(name, disabled or theme.TEXT_DIM, size), QIcon.Mode.Disabled
         )
+    return result
+
+
+@cache
+def app_icon() -> QIcon:
+    """The application icon: a source placed on a ring around the listener.
+
+    Accent-coloured rather than `text-hi`, because this one is not a control
+    on a toolbar - it is the application's mark in a taskbar and an alt-tab
+    list, where it has to carry identity rather than blend into a panel.
+    """
+    result = QIcon()
+    for size in _APP_SIZES:
+        result.addPixmap(_render("app", theme.ACCENT, size), QIcon.Mode.Normal)
     return result
 
 

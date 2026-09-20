@@ -14,8 +14,21 @@ from immersive.ui import icons, theme
 pytestmark = pytest.mark.gui
 
 # 04-ui-spec.md, the Icons table. Every one of these is referenced by the
-# toolbar, so a missing file is a blank button rather than a crash.
-EXPECTED = ("loop", "pause", "play", "redo", "stop", "transport_start", "undo")
+# toolbar or the window, so a missing file is a blank button rather than a
+# crash. `app` is the window and taskbar mark; `arm` is the dot 04 draws as
+# "● ARM", an icon rather than a glyph so the Craft rule against ASCII-as-UI
+# holds for it too.
+EXPECTED = (
+    "app",
+    "arm",
+    "loop",
+    "pause",
+    "play",
+    "redo",
+    "stop",
+    "transport_start",
+    "undo",
+)
 
 
 @pytest.fixture(scope="module")

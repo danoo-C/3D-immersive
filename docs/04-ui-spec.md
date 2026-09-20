@@ -9,7 +9,7 @@ layout itself is fixed (D-15).
 ┌──────────────────────────────────────────────────────────────────────┐
 │  File   Edit   View   Transport   Render   Help                      │
 ├──────────────────────────────────────────────────────────────────────┤
-│  ⏮  ▶  ⏹  ↻     │  120.0 BPM  4/4  │  Snap 1/16 ▾  │  ⟲ ⟳  │  ● ARM │
+│  ⏮ ▶ ⏹ ↻ │ 1.1.000 │ 120.0 BPM  4/4 │  Snap 1/16 ▾ │  ⟲ ⟳  │  ● ARM │
 ├───────────────┬──────────────────────────────────┬───────────────────┤
 │  MEDIA POOL   │ ┌ Top / Front ┬──── 3D ───┐     │  KEYFRAME EDITOR  │
 │               │ ├─────────────┴───────────┴───┐ │                   │
@@ -32,6 +32,11 @@ layout itself is fixed (D-15).
 
 Panel sizes, splitter positions, last project and window geometry persist
 between sessions.
+
+`1.1.000` is the **playhead readout** (F-52): bars.beats.ticks, or
+minutes:seconds when the ruler is switched, drag-scrubbable and typeable like
+every other numeric field. The ruler shows where the playhead is; only this
+gives a value you can read off, note down or type back in.
 
 ### The workspace is tabbed
 
@@ -111,7 +116,16 @@ icon in the application without shipping a second copy of any of them.
 | Ink | `currentColor`, substituted at load |
 | Normal state | `text-hi` |
 | Disabled state | `text-dim`, supplied explicitly |
-| Shipped today | `transport_start` `play` `pause` `stop` `loop` `undo` `redo` |
+| Shipped today | `transport_start` `play` `pause` `stop` `loop` `undo` `redo` `arm` `app` |
+
+Two of those are not toolbar glyphs. `arm` is the dot this document draws as
+`● ARM`, an icon rather than a character so that the Craft rule against ASCII
+glyphs as UI holds for it too — and so a theme retints it with everything
+else. `app` is the application's own mark, used for the window and taskbar
+icon; it is the one icon drawn in `accent` rather than `text-hi`, because it
+has to carry identity rather than sit quietly in a panel, and it renders from
+its own size ladder up to 256 px since alt-tab and dock previews ask for sizes
+no toolbar ever does.
 
 Disabled icons are rendered from the palette rather than left to Qt, whose
 default is to wash the normal pixmap out until it reads as a rendering fault
@@ -129,7 +143,15 @@ Standard desktop behaviour, stated because one half of it is easy to lose:
 - Hovering does **not** open the first menu. A menu bar that springs open as
   the pointer crosses it on the way to the toolbar is not helpful.
 - An action that is not yet implemented is disabled and says why in its
-  tooltip. A menu of enabled items that do nothing is worse than a grey one.
+  tooltip — not "not yet", but which milestone brings it. A menu of enabled
+  items that do nothing is worse than a grey one; a grey one with no
+  explanation is only slightly better. `tests/test_main_window.py` walks every
+  action in the menus *and* the toolbar and asserts it, because for a while
+  the rule was tested only on the toolbar, where it already held, while all
+  nineteen disabled menu actions were bare.
+- Qt suppresses tooltips inside a `QMenu` unless asked (`setToolTipsVisible`).
+  Worth stating because the failure mode is invisible: the explanations exist
+  on the actions, reach nobody, and the code looks finished.
 
 ## Craft
 
@@ -273,6 +295,26 @@ not exist until M3-M6. **Each milestone adds its own groups to this section as
 it builds them.** That is a standing obligation of every milestone from here
 on, not a task belonging to M9.
 
+To make that obligation something you can check rather than remember, here is
+who owns what. M9 is built *third*, before all of them:
+
+| Groups | Owner |
+|---|---|
+| window, panel, menu, toolbar, button, splitter, scrollbar, status bar, tooltip | M9 — the widgets that exist when the system is built |
+| notice line, notice count, notice list | M9 — it builds them (D-65) |
+| tree view, header, filter field, waveform thumbnail | M2 |
+| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 |
+| head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
+| curve, keyframe diamond, bezier handle, value axis | M6 |
+| dialog, progress bar, input field, spin box, check box, slider, combo box | M8 — the first milestone with dialogs and a preferences form |
+
+The QSS today styles none of the input widgets in that last row, which is
+correct — nothing renders one yet. It is listed so that the milestone which
+first does knows the groups are its to add, rather than discovering a
+`QLineEdit` drawn in the toolkit's default light grey on a dark panel and
+reaching for a literal hex to fix it. That reach is the failure mode this
+whole milestone exists to prevent.
+
 ## Media pool (left, top)
 
 Folder tree of imported audio. Per row: name, duration, a one-line waveform
@@ -402,7 +444,23 @@ always show the same time span even though they are separate widgets.
   mode bezier handles appear and can be dragged.
 - Box-select multiple keyframes; drag or scale the selection as a group.
 - A vertical playhead line mirrors the timeline's.
-- The value axis auto-ranges per parameter, with a lock toggle.
+
+### The value axis, with several curves overlaid
+
+One axis cannot carry `pos.x` in metres, `gain` in dB and `pan` in −1…+1 at
+once, so with more than one curve shown **each is normalised to its own
+range** and the axis labels the **focused** curve — the one whose keyframes
+respond to the mouse, picked in the parameter selector (D-66).
+
+That keeps both halves of what the overlay is actually for. Across curves you
+are comparing *shape and timing* — does the gain dip while it passes behind
+you — which normalisation preserves exactly. For the one you are editing, the
+numbers on the axis are its real units.
+
+A lock toggle freezes the ranges so a curve does not re-scale under the cursor
+while you drag a keyframe past its previous extreme. With a single curve shown
+this is all invisible: it auto-ranges to that parameter and the axis is its
+own.
 
 ## Transport and the ARM toggle
 
@@ -418,11 +476,14 @@ do to you.
 | Key | Action |
 |---|---|
 | `Space` | play / pause |
+| `Esc` | stop |
 | `Enter` | return playhead to start |
 | `L` | toggle loop |
 | `S` | split selected clip at playhead |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
+| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | cut / copy / paste clips |
 | `Ctrl+D` | duplicate selection |
+| `Ctrl+A` | select all clips on the focused channel |
 | `Delete` | delete selection |
 | `Alt` (held) | bypass snap |
 | `Shift` (held, dragging clip) | bring automation along |
@@ -430,6 +491,105 @@ do to you.
 | `Ctrl+R` | render |
 | `1` `2` `3` | focus top / front / 3D view |
 | `B` | toggle HRTF bypass on the selected channel |
+
+This table is the specification, and where a toolkit default disagrees with it
+the table wins: `QKeySequence.StandardKey.Redo` resolves to `Ctrl+Y` on Linux
+and Windows, so redo is written out rather than taken from it (D-68). Qt maps
+`Ctrl+` onto Command on macOS by itself, so one spelling is correct on all
+three platforms.
+
+## Notices — where "reported" goes
+
+Several requirements promise that something is *reported*: missing media
+(F-3), a theme that is missing, malformed or contains bad colours (F-47), a
+decode that failed, a device that would not open (F-56). All of them mean the
+same thing — visible in the UI, not a line on stderr nobody reads — and none
+of them had anywhere to appear. This section is that place (D-65).
+
+It is **one surface, not a dialog per caller.** A modal for a cosmetic theme
+typo is the behaviour F-47 exists to prevent; a `print()` is the behaviour it
+exists to prevent in the other direction.
+
+### The shape
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Backing.wav could not be found                        ⚠ 3   xruns 0  │
+└──────────────────────────────────────────────────────────────────────┘
+                                                        ▲
+                             click to open the list of everything reported
+```
+
+- The **status bar** carries the most recent notice as one line, and a count
+  of unread ones beside the xrun counter. The count is `warn` for warnings,
+  `error` for errors, and invisible at zero — the same rule the xrun counter
+  already follows.
+- Clicking the count opens the **notice list**: a popover of everything
+  reported this session, newest first, each with its severity, its time, its
+  message and, where there is one, an action — *Relink…* for missing media,
+  *Reveal* for a theme file, *Choose device…* for a stream that would not
+  open.
+- Notices persist for the session and are cleared explicitly. A message you
+  can only read in the second it appears has not been reported to anybody.
+
+### Severity
+
+| | Means | Example |
+|---|---|---|
+| `error` | something the user asked for did not happen | project failed to load, device would not open |
+| `warn` | it happened, with a caveat they need to know | media missing and greyed, theme key ignored, clipping |
+| info | it happened | render finished, theme applied |
+
+Nothing here is modal. The one confirmation in the application stays the one
+named under *Accessibility and feel* below: discarding an unsaved project.
+
+### Built at M9, not M8
+
+The general error surfaces were an M8 bullet, and M9 — built third — needs
+this to satisfy its own acceptance line about a broken theme reporting itself.
+F-3 needs it at M2. Building it where the first requirement for it lands costs
+a small widget; leaving it at M8 means six milestones each invent their own
+message box. See D-65.
+
+## Master meter
+
+A stereo peak meter sits in the status bar, left of the notice count: two
+narrow bars, peak-hold for 1.5 s, and a clip indicator that latches in `warn`
+until clicked (F-54).
+
+It is small and always visible, because the thing it answers is not a question
+anyone thinks to ask until the render is already clipped: thirty-two sources
+summing in the frequency domain, each scaled by a distance attenuation that
+*moves while it plays*, do not have a predictable sum. A channel's fader
+position tells you nothing about what reaches the bus.
+
+Per-channel meters are deliberately not provided (D-55) — that is a mixing
+console, which [00-overview.md](00-overview.md) puts out of scope, and solo
+plus the parameters pane answers the same question at the rate this
+application needs it answered.
+
+## Selection
+
+One kind of thing at a time, plural within that kind (D-57).
+
+| | |
+|---|---|
+| Kinds | clips · keyframes · channels · media files |
+| Switching kind | clears the previous one — selecting a clip deselects every keyframe |
+| Plural | click, `Shift+click` for a range, `Ctrl+click` to toggle one |
+| Rubber band | drag on empty lane space in the timeline, or on empty space in the keyframe editor |
+| Across channels | yes, for clips and keyframes |
+| `Ctrl+A` | every clip on the focused channel; again for every clip in the project |
+| Clearing | click empty space, or `Esc` when the transport is stopped |
+
+Mixing kinds was considered and rejected: `Delete` with a clip *and* a
+keyframe selected has no answer a modifier can rescue, and every edit verb in
+the application belongs to exactly one kind.
+
+The parameters pane follows the selection. With several things of one kind
+selected it shows the fields they have in common, and a field whose value
+differs across the selection reads `—` until it is set, at which point it is
+set on all of them.
 
 ## Accessibility and feel
 
@@ -442,3 +602,10 @@ do to you.
 - Every destructive action is undoable, so no confirmation dialogs except for
   discarding an unsaved project.
 - The xrun counter sits in the status bar, quiet when zero, `error` when not.
+  Beside it, left to right: the master meter, the notice count, the version.
+- **Keyboard focus is always visible**, as a 1 px `accent` ring. Left to the
+  toolkit it is neither purple nor consistent across platforms, and "no
+  information by colour alone" cuts both ways — a focus indicator nobody can
+  see fails keyboard users first. The tab bar is the one exception, because
+  its selected tab already carries an accent rule and a second indicator on
+  one widget is noise.

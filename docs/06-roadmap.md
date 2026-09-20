@@ -21,11 +21,12 @@ choice of Python.
 ## M0 — Scaffolding ✅ *complete*
 *Nothing audible.*
 
-- `pyproject.toml` (hatchling), `uv` environment, pinned dependencies
+- `pyproject.toml` (hatchling), `uv` environment, dependency floors with
+  reasons plus a committed `uv.lock` for reproducibility (D-67)
 - `pip install -e ".[dev]"`; absolute imports enforced by `ruff` `TID252`
 - Package skeleton per [02-architecture.md](02-architecture.md)
 - `ruff` + `mypy` + `pytest` configured, CI running them on Linux/macOS/Windows
-- `theme.py` with the palette, and a main window with the three splitters and
+- `theme.py` with the palette, and a main window with the splitter layout and
   empty labelled panels
 
 **Done when:** `python -m immersive` shows the dark, empty, correctly-proportioned shell.
@@ -36,9 +37,19 @@ configured and passing, GitHub Actions across Linux/macOS/Windows on 3.11 and
 3.13, `theme.py` holding the palette, and a `MainWindow` with all seven regions
 as labelled placeholders — since revised: the workspace became two tabs (D-49),
 the transport grew an SVG icon set (D-50) and the palette moved to VS Code's
-greys (D-44). 26 tests pass, including the import-graph test —
+greys (D-44). The suite passes, and covers the palette's contrast rules, the
+icon set, the shell's structure, the packaged distribution, the documentation
+invariants from [doc-system.md](doc-system.md) §7, and the import-graph test —
 which carries its own test proving the detector is not passing vacuously while
-`core/` is still empty.
+`core/` is still empty. Deliberately no test count here: it is exactly the
+kind of number §2 of that document warns about.
+
+**Corrected after a gap review.** Three claims above were not true when they
+were written: dependencies were floors with no lock file (now D-67 and a
+committed `uv.lock`), `pyproject.toml` declared MIT with no `LICENSE` in the
+tree, and CI installed the package editable — which is the one path that does
+*not* exercise the wheel, so D-27's stated benefit was not being collected.
+CI now builds the wheel and installs it into a clean environment.
 
 ---
 
@@ -84,7 +95,9 @@ else. Not generalised, not tidied, not moved into `src/` afterwards. If it
 turns out to be useful twice, it gets rewritten properly inside the package.
 
 **Done when:** the four files exist, they have been listened to on headphones,
-and a default SOFA set has been chosen. Feeds QA-30 and M4.
+and the set the spike ran on is recorded — by name, version and licence — as
+the leading candidate for the bundled default. Choosing that default stays
+QA-30's, at M4. Feeds QA-30 and M4.
 
 ---
 
@@ -123,8 +136,14 @@ three spatial views all reaching for colours that no file names.
   same path as a user's (D-47), via `importlib.resources` (D-30)
 - Discovery of the user theme directory, and switching without a restart
   (F-48) from a `View > Theme` menu — the **Preferences** UI stays at M8
+- **The notice centre** (F-56, D-65): the status-bar line, the unread count
+  and the list behind it, specified in the *Notices* section of
+  [04-ui-spec.md](04-ui-spec.md). It lands here because this is the first
+  milestone that has something to report and a requirement — F-47 — that says
+  it must be visible in the UI. M2's missing media (F-3) is the next caller,
+  and M2 comes after this one
 - Failure handling: missing, malformed, unknown keys, bad colours, newer
-  schema — all non-fatal and all reported (F-47, D-48)
+  schema — all non-fatal and all reported through that surface (F-47, D-48)
 - A contrast report for a loaded theme, advisory for user themes and enforced
   by test for the built-in
 
@@ -169,8 +188,17 @@ a sample.
 - `QGraphicsView` timeline with ruler, grid, playhead, loop region
 - Drop from pool → clip; move, trim, split, duplicate, delete
 - Snap with global setting, per-channel override, and `Alt` bypass
-- Transport and keyboard shortcuts
+- Selection: multi-select across channels, rubber band, and the one-kind rule
+  (F-51, D-57)
+- Cut / copy / paste of clips within and between channels (F-50, D-58)
+- Transport and keyboard shortcuts, including the playhead readout (F-52)
 - **Non-spatial** playback: scheduler + clip reads + gains → straight stereo
+- The master meter and its clip indicator (F-54) — the first milestone that
+  produces a level at all, and the last comfortable one to add it before M4
+  starts summing 32 sources
+- `--device` and `--block` command-line flags, and the 48 kHz stream rule
+  (F-55, D-63). Preferences promotes them at M8; the gap between the first
+  sound and M8 is otherwise five milestones with no way to pick a device
 
 **Done when:** you can build an arrangement and hear it play back flat. This
 validates the whole realtime plumbing — command ring, snapshot swap, xrun
@@ -197,6 +225,9 @@ counting — *before* any HRTF complexity is layered on top.
   measured with the xrun counter **while the UI is actively repainting** —
   an idle UI will show no difference and prove nothing
 - The bypass path: stereo-preserving reads, pan law, summing after the iFFT
+- The master bus: gain, and the fixed-design limiter with its lookahead
+  compensated internally (D-54) — the compensation is what keeps M7's
+  stems-sum test honest, since stems skip the limiter (D-41)
 - Implicit 32-sample edge fades in the scheduler (D-42)
 - The zero-allocation test on `process()`
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
@@ -238,7 +269,10 @@ trail, the curve and the sound agree.
 
 ## M7 — Render
 - Offline render reusing `Engine.process`, no device
-- Render dialog: range, block size, stems toggle, output path
+- Render dialog: range, block size, stems toggle, output path. The range is
+  the whole project (derived, D-53), the loop region, or typed (F-53)
+- Seeded TPDF dither on the 24-bit conversion (D-56) — unseeded would make
+  F-36's determinism test fail as a mystery rather than as a decision
 - Progress + cancel on a worker thread
 - 24-bit WAV writing
 - Per-channel stems, rendered **pre-limiter** (D-41). The render dialog says
@@ -254,10 +288,15 @@ trail, the curve and the sound agree.
 
 ## M8 — Polish & ship
 - Preferences: audio device, block size, HRTF set, and the theme picker
-  promoted out of the `View` menu (the theme *system* is M9)
+  promoted out of the `View` menu (the theme *system* is M9). The device and
+  block flags from M3 become fields here (F-55)
 - Session persistence: window geometry, splitters, recent projects
-- Missing-media relink dialog
-- Error surfaces: xrun indicator, load failures, clipping warning
+- Autosave and crash recovery: the sidecar file, and the offer on next launch
+  (F-49, D-64)
+- Missing-media relink dialog, hung off the notice built at M9
+- Error surfaces **promoted, not invented**: the notice centre is M9 (D-65);
+  M8 adds the actions that hang off individual notices and the first-run
+  polish around them
 - Empty states and a first-run sample project
 - `PyInstaller` bundles for Windows, macOS and Linux
 - README with install instructions per platform

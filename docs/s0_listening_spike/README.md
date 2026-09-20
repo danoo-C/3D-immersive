@@ -29,15 +29,17 @@ the reason the other four exist.
 
 Copied verbatim from the roadmap's "Done when":
 
-> the four files exist, they have been listened to on headphones, and a default
-> SOFA set has been chosen. Feeds QA-30 and M4.
+> the four files exist, they have been listened to on headphones, and the set
+> the spike ran on is recorded — by name, version and licence — as the leading
+> candidate for the bundled default. Choosing that default stays QA-30's, at
+> M4. Feeds QA-30 and M4.
 
-⚠️ That last clause and QA-30 in [07-qa-archive.md](../07-qa-archive.md) do not
-quite agree: QA-30 resolves the default dataset by listening test **during M4**.
-The reading taken here is that S0 chooses the set it *runs on* and records it as
-the leading candidate, and QA-30's pick stays an M4 task — which is what "feeds
-QA-30" implies. If that reading is wrong, the roadmap's wording is the thing to
-fix, not this file.
+This previously read "and a default SOFA set has been chosen", which did not
+agree with QA-30 in [07-qa-archive.md](../07-qa-archive.md) — that resolves
+the bundled default by listening test **during M4**. The reading recorded here
+was that S0 chooses the set it *runs on* and records it as the leading
+candidate, which is what "feeds QA-30" implies; the roadmap's wording has now
+been corrected to say so, which is where the fix belonged.
 
 ## What this spike deliberately does not do
 

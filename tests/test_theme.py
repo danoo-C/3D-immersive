@@ -58,6 +58,36 @@ def test_stylesheet_substitutes_every_placeholder() -> None:
     assert theme.BG_0 in qss
 
 
+def test_stylesheet_parses(capfd: pytest.CaptureFixture[str]) -> None:
+    """Qt must accept the QSS, not merely receive it.
+
+    The substitution test above passes on a stylesheet Qt cannot parse — one
+    stray `*/` is enough — and Qt's only complaint is "Could not parse
+    application stylesheet", after which the entire application silently
+    renders unstyled. `capfd`, not `capsys`: that warning comes out of Qt's
+    C++ message handler at the file-descriptor level and never passes through
+    Python's sys.stderr, so capsys sees nothing and the test would pass on a
+    broken sheet — which is the exact failure it exists to catch.
+    """
+    from PySide6.QtWidgets import QToolButton, QWidget
+
+    from immersive.app import build_application
+
+    app = build_application([])
+    app.setStyleSheet(theme.stylesheet())
+
+    # Qt parses the sheet when it first polishes a widget against it, not when
+    # it is set, so asserting straight after setStyleSheet catches nothing.
+    capfd.readouterr()
+    probe = QWidget()
+    QToolButton(probe)
+    probe.show()
+    app.processEvents()
+
+    assert "Could not parse" not in capfd.readouterr().err
+    assert app.styleSheet() == theme.stylesheet()
+
+
 def _luminance(hex_colour: str) -> float:
     channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
     linear = [
