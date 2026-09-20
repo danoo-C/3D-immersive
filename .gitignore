@@ -1,0 +1,102 @@
+# ---- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# ---- Environments ----------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---- Packaging / build -----------------------------------------------------
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+share/python-wheels/
+*.egg-info/
+*.egg
+.installed.cfg
+MANIFEST
+
+# PyInstaller (see docs/08-environment.md)
+*.manifest
+*.spec.bak
+
+# ---- Testing / coverage ----------------------------------------------------
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+nosetests.xml
+*.cover
+
+# ---- Type checking / linting -----------------------------------------------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+.ruff_cache/
+
+# ---- Editors / IDEs --------------------------------------------------------
+.idea
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+*.swp
+*.swo
+*~
+.\#*
+\#*\#
+
+# ---- OS --------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ---- Project-specific ------------------------------------------------------
+
+# Peak pyramids, prepared HRTF banks, decoded audio. Regenerable, often large.
+.3dim-cache/
+*.3dim-cache/
+
+# Bundled HRTF datasets are fetched, not committed — some are hundreds of MB.
+# See docs/07-qa-archive.md QA-30.
+src/immersive/assets/hrtf/*.sofa
+
+# Rendered output and scratch projects
+/render/
+/out/
+*.wav
+*.aiff
+*.flac
+!tests/fixtures/**/*.wav
+
+# Local, machine-specific overrides
+.env
+.env.local
+local_settings.py
+launch.local.json
+
+# Claude Code local state
+.claude/settings.local.json

@@ -1,0 +1,118 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# --------------------------------------------------------------------------- #
+# project
+# --------------------------------------------------------------------------- #
+
+[project]
+name = "immersive"
+description = "A graphical 3D sound creator: arrange samples in space and render binaurally."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dynamic = ["version"]
+
+dependencies = [
+    "PySide6>=6.8",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12",
+    "soxr>=0.3.7",
+    "sofar>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+immersive = "immersive.__main__:cli"
+
+[project.urls]
+Documentation = "https://github.com/dano/3d_imersive/tree/main/docs"
+
+# --------------------------------------------------------------------------- #
+# build  (D-27 src-layout, D-31 hatchling)
+# --------------------------------------------------------------------------- #
+
+[tool.hatch.version]
+path = "src/immersive/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/immersive"]
+
+# HRTF datasets are fetched, not committed (QA-30), so they are gitignored —
+# and hatchling excludes gitignored files by default. Without this the wheel
+# would silently ship with no HRTF data at all.
+[tool.hatch.build]
+artifacts = ["src/immersive/assets/hrtf/*.sofa"]
+
+# --------------------------------------------------------------------------- #
+# ruff
+# --------------------------------------------------------------------------- #
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = [".claude", ".venv", "build", "dist", ".3dim-cache"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "TID",  # tidy-imports  -> TID252 bans relative imports (D-28)
+    "RUF",
+    "SIM",
+    "C4",
+    "PTH",
+]
+
+# D-28: absolute imports everywhere. This is the rule that keeps the import
+# graph machine-checkable, which is what enforces the layering in N-5.
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["immersive"]
+
+# --------------------------------------------------------------------------- #
+# mypy
+# --------------------------------------------------------------------------- #
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+no_implicit_optional = true
+strict_equality = true
+
+# These ship no type information.
+[[tool.mypy.overrides]]
+module = ["sounddevice.*", "soundfile.*", "soxr.*", "sofar.*", "scipy.*"]
+ignore_missing_imports = true
+
+# --------------------------------------------------------------------------- #
+# pytest
+# --------------------------------------------------------------------------- #
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "gui: needs a Qt application instance",
+]

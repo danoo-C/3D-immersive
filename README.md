@@ -22,3 +22,26 @@
 ## how the explorer looks
 - explorer is spit into 2 parts, the main part on the top and middle, and the bottom part
 - the bottom part is a resisable config/param
+
+---
+
+## documentation
+
+Full specification, architecture and build plan live in [`docs/`](docs/).
+Start with [`docs/00-overview.md`](docs/00-overview.md), or
+[`docs/06-roadmap.md`](docs/06-roadmap.md) for the build order.
+
+**Decided since this file was written:** Python (PySide6 + numpy + sounddevice),
+cross-platform, realtime binaural preview, full 3D including elevation. The
+workspace is two editable orthographic views (top X/Y and front X/Z) plus a
+read-only 3D view. A channel is a track holding many clips. Keyframes are pinned
+to timeline time, with Shift+drag to bring them along. Rationale for each is in
+[`docs/01-requirements.md`](docs/01-requirements.md).
+
+⚠️ The "how the explorer looks" section above is **truncated mid-sentence**. The
+missing text was never recovered; the pane has been specced as a
+selection-driven parameters pane — a reconstruction, not a transcription. See
+[`docs/07-qa-archive.md`](docs/07-qa-archive.md) QA-29.
+
+Every question raised during spec review is answered and merged. The archive of
+those questions and answers is [`docs/07-qa-archive.md`](docs/07-qa-archive.md).
