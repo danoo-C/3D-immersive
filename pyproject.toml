@@ -11,7 +11,10 @@ name = "immersive"
 description = "A graphical 3D sound creator: arrange samples in space and render binaurally."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+# PEP 639: an SPDX expression plus the files to ship. The `{ text = "MIT" }`
+# form is deprecated, and on its own it put no licence in the wheel at all.
+license = "MIT"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 dynamic = ["version"]
 
 dependencies = [
