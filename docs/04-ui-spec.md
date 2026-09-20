@@ -11,14 +11,14 @@ layout itself is fixed (D-15).
 ├──────────────────────────────────────────────────────────────────────┤
 │  ⏮  ▶  ⏹  ↻     │  120.0 BPM  4/4  │  Snap 1/16 ▾  │  ⟲ ⟳  │  ● ARM │
 ├───────────────┬──────────────────────────────────┬───────────────────┤
-│  MEDIA POOL   │           WORKSPACE              │  KEYFRAME EDITOR  │
-│               │ ┌──────────┬──────────┬────────┐ │                   │
-│  ▾ drums      │ │   TOP    │  FRONT   │   3D   │ │  ╭─╮              │
-│    ▪ kick.wav │ │  (X / Y) │  (X / Z) │ (read) │ │ _╯ ╰──╮           │
-│    ▪ hat.wav  │ │          │          │        │ │       ╰───        │
-│  ▾ pads       │ │   (o_o)  │  ──o──   │  ╱o╲   │ │                   │
-│    ▪ warm.wav │ │  o    o  │   (o)    │ (o_o)  │ │  ├──┼──┼──┼──┤    │
-│               │ └──────────┴──────────┴────────┘ │                   │
+│  MEDIA POOL   │ ┌ Top / Front ┬──── 3D ───┐     │  KEYFRAME EDITOR  │
+│               │ ├─────────────┴───────────┴───┐ │                   │
+│  ▾ drums      │ │     TOP        │    FRONT   │ │  ╭─╮              │
+│    ▪ kick.wav │ │    (X / Y)     │   (X / Z)  │ │ _╯ ╰──╮           │
+│    ▪ hat.wav  │ │                │            │ │       ╰───        │
+│  ▾ pads       │ │     (o_o)      │    ──o──   │ │                   │
+│    ▪ warm.wav │ │    o     o     │     (o)    │ │  ├──┼──┼──┼──┤    │
+│               │ └────────────────┴────────────┘ │                   │
 ├───────────────┤                                  │                   │
 │  PARAMETERS   │                                  │                   │
 │  (selection)  │                                  │                   │
@@ -33,23 +33,53 @@ layout itself is fixed (D-15).
 Panel sizes, splitter positions, last project and window geometry persist
 between sessions.
 
+### The workspace is tabbed
+
+Two tabs, not three side-by-side views (D-49):
+
+| Tab | Holds | Why together |
+|---|---|---|
+| **Top / Front** | the two editable ortho views, split vertically | Placing a source is one gesture across both — X/Y here, then height there. Separating them would make every position edit a tab switch |
+| **3D** | the read-only isometric view | It is for *reading* the scene, never for editing, so it does not compete for the pixels the editable views need |
+
+Keys `1` and `2` focus the top and front views, selecting the first tab if it
+is not already showing; `3` selects the 3D tab. The tab selection persists with
+the rest of the layout.
+
+Three views side by side each got about a third of the workspace, which at
+1500 px is too narrow to drag anything precisely in — and a third of that space
+was going to a view that cannot be dragged in at all.
+
 ## Colour palette
+
+Surfaces are VS Code's dark greys; the accent stays purple (D-44). The
+surfaces are monotonic — `bg-0` is the deepest and each step is lighter — and
+widgets must rely on that ordering rather than on the literal values, because
+a theme may replace them ([theming](#theming)).
 
 | Token | Hex | Use |
 |---|---|---|
-| `bg-0` | `#0E0B14` | application background, deepest |
-| `bg-1` | `#16121F` | panel surfaces |
-| `bg-2` | `#1E1929` | headers, raised elements |
-| `bg-3` | `#2A2338` | hover, selected row |
-| `border` | `#332B44` | 1px separators, splitter handles |
-| `text-hi` | `#E8E4F0` | primary text |
-| `text-lo` | `#9A93AC` | labels, secondary text |
-| `text-dim` | `#635C75` | disabled |
-| `accent` | `#A855F7` | primary purple: playhead, focus, active toggle |
+| `bg-0` | `#181818` | application background, deepest |
+| `bg-1` | `#1F1F1F` | panel surfaces |
+| `bg-2` | `#252526` | headers, raised elements |
+| `bg-3` | `#2D2D2D` | hover, selected row |
+| `border` | `#3C3C3C` | 1px separators, splitter handles |
+| `text-hi` | `#CCCCCC` | primary text |
+| `text-lo` | `#9D9D9D` | labels, secondary text |
+| `text-dim` | `#6E6E6E` | disabled |
+| `accent` | `#A855F7` | purple **fills and strokes**: playhead, focus ring, active toggle |
 | `accent-dim` | `#7E3FF2` | pressed state |
-| `accent-glow` | `#C77DFF` | hover, keyframe highlight |
+| `accent-glow` | `#C77DFF` | hover, keyframe highlight, and **any purple that carries text** |
 | `warn` | `#F59E0B` | clipping, missing media |
-| `error` | `#EF4444` | xruns, load failures |
+| `error` | `#F88A8A` | xruns, load failures |
+
+⚠️ `accent` is 4.17:1 against `bg-1` — enough for a UI component, not enough
+for text. That is why it is specified as a fill and stroke colour and why
+`accent-glow` (6.13:1) exists as the text-safe purple. On the previous
+purple-black surfaces `accent` cleared 4.5:1; against lighter greys it does
+not, and the same shift is why `error` moved from `#EF4444` (4.38:1, failing)
+to VS Code's own error-text red. `tests/test_theme.py` computes these ratios,
+so the rule cannot rot quietly.
 
 ### Channel palette
 
@@ -62,6 +92,186 @@ A channel's colour is used for: its header chip, its clips, its icon in all
 three spatial views, and its curves in the keyframe editor. That colour thread
 is the main navigational aid in the app — it is the one visual rule to never
 break.
+
+## Icons
+
+Icons ship as **SVG**, one file per icon in `assets/icons/`, drawn on a 16 px
+grid. Each one paints its ink with the literal token `currentColor`, which is
+substituted for a palette colour when the icon is loaded (D-50). Qt's SVG
+renderer does not resolve `currentColor` itself, so this is a textual
+substitution before rendering, not a CSS cascade.
+
+That indirection is what makes the set themeable: one asset per icon, recoloured
+at load, rather than a folder of PNGs per theme. It also means M9 retints every
+icon in the application without shipping a second copy of any of them.
+
+| | |
+|---|---|
+| Grid | 16 px, rendered at 16 and 32 for hidpi |
+| Ink | `currentColor`, substituted at load |
+| Normal state | `text-hi` |
+| Disabled state | `text-dim`, supplied explicitly |
+| Shipped today | `transport_start` `play` `pause` `stop` `loop` `undo` `redo` |
+
+Disabled icons are rendered from the palette rather than left to Qt, whose
+default is to wash the normal pixmap out until it reads as a rendering fault
+rather than a state.
+
+## Menus
+
+Standard desktop behaviour, stated because one half of it is easy to lose:
+
+- A menu opens on **click**.
+- With a menu already open, moving along the menu bar **walks between menus**.
+  Qt normally provides this, but the open popup grabs the mouse and on some
+  compositors — WSLg among them — the moves never reach the menu bar, so the
+  application implements it explicitly (D-51).
+- Hovering does **not** open the first menu. A menu bar that springs open as
+  the pointer crosses it on the way to the toolbar is not helpful.
+- An action that is not yet implemented is disabled and says why in its
+  tooltip. A menu of enabled items that do nothing is worse than a grey one.
+
+## Craft
+
+The difference between "dark and minimal" and "cheap" is mostly a handful of
+rules applied consistently. These are not suggestions; a panel that breaks one
+looks broken next to the panels that do not.
+
+| Rule | Because |
+|---|---|
+| Every panel has a **header bar** — small caps, `text-lo` on `bg-2`, 1 px bottom border — not a caption floating in the middle | A titled panel reads as a region of an application; a centred label reads as an empty box |
+| **No ASCII glyphs as UI.** `|<` and `[]` are placeholders, never shipped | They are the single loudest signal that something is unfinished |
+| One **font stack**, resolved per platform, never a single named family | Naming one family gets an unchosen fallback on the two platforms that lack it |
+| Spacing is a multiple of 2 px, padding of 4 | Arbitrary offsets read as misalignment even when nobody can say why |
+| **Tooltips carry the shortcut**, in the form `Action  (Key)` | The keyboard table below is the specification; the tooltip is how anyone finds out |
+| Disabled states are drawn deliberately, from the palette | See the icons note above |
+| Accent is used sparingly — selection, playhead, focus, the active tab | An accent on everything is an accent on nothing |
+
+## Theming
+
+The palette above is the **default** theme, not the only one. Every colour the
+application draws is named, and a `.3dimtheme` file can replace any of those
+names (F-44, F-45). The built-in default is itself such a file, loaded through
+the same path as a user's (D-47) — a format that cannot express the default
+theme is already broken, and this is how we find that out in a test rather
+than in a bug report.
+
+Built here rather than at M8: see M9 in [06-roadmap.md](06-roadmap.md).
+
+### Two layers
+
+A theme has `tokens` and `groups`, and the split is the whole design (D-46).
+
+**Tokens** are named colours — the thirteen in the palette table above, plus
+the channel list. Change eight of them and the whole application is coherently
+retinted, because everything else refers to them by name.
+
+**Groups** are per-widget roles: what a button's background is, what a clip's
+selected border is, what colour a keyframe diamond takes. A group's value is
+either a **token name** or a literal `#RRGGBB`. Referring to a token by name
+is strongly preferred; a literal is the escape hatch for the one case a theme
+author wants to break the family.
+
+Without groups, a theme could not say "this one thing is different". Without
+tokens, a theme would be a list of several hundred colours that nobody would
+edit by hand. Both layers earn their place.
+
+### The file
+
+```json
+{
+  "schema_version": 1,
+  "name": "VS Code Dark",
+  "author": "3d immersive",
+  "tokens": {
+    "surface.window": "#181818",
+    "surface.panel": "#1F1F1F",
+    "surface.raised": "#252526",
+    "surface.hover": "#2D2D2D",
+    "border": "#3C3C3C",
+    "text.primary": "#CCCCCC",
+    "text.secondary": "#9D9D9D",
+    "text.disabled": "#6E6E6E",
+    "accent": "#A855F7",
+    "accent.pressed": "#7E3FF2",
+    "accent.text": "#C77DFF",
+    "warn": "#F59E0B",
+    "error": "#F88A8A"
+  },
+  "channels": ["#A855F7", "#22D3EE", "#F59E0B", "#34D399",
+               "#F472B6", "#60A5FA", "#FB923C", "#A3E635"],
+  "groups": {
+    "button": {
+      "background": "surface.hover",
+      "text": "text.primary",
+      "border": "border",
+      "hover.border": "accent.text",
+      "pressed.background": "accent.pressed"
+    },
+    "timeline": {
+      "playhead": "accent",
+      "grid": "border",
+      "loop.region": "accent.pressed"
+    },
+    "clip": {
+      "body": "channel",
+      "selected.border": "accent",
+      "fade.handle": "text.secondary"
+    }
+  }
+}
+```
+
+`"channel"` is the one reserved value: it means *this channel's own colour*,
+resolved per channel at paint time. It is what keeps the colour thread from
+the Channel palette section intact under any theme.
+
+`schema_version` carries the same migration discipline as `.3dim` — see
+[03-data-model.md](03-data-model.md).
+
+### Precedence
+
+A loaded theme is **merged over** the built-in default, key by key (D-45):
+
+```
+built-in default  ->  the theme file's tokens  ->  the theme file's groups
+```
+
+So a two-line theme that sets only `accent` is valid, and — the property that
+matters — it is *still* valid after a later milestone adds tokens for widgets
+that did not exist when it was written. A theme that replaced the palette
+wholesale would break on every release that added a colour.
+
+### When a theme is wrong
+
+Never fatally (F-47, D-48). A theme file is cosmetic, and a typo in one must
+not stand between someone and their project.
+
+| Problem | What happens |
+|---|---|
+| File missing or unreadable | Default theme, reported |
+| Malformed JSON | Default theme, reported with the parse error |
+| Unknown token or group key | Ignored, reported — it is probably a newer theme |
+| Invalid colour value | That key falls back to the default, reported |
+| `schema_version` newer than we know | Load what we recognise, report the rest |
+
+"Reported" means visible in the UI, not a line on stderr nobody reads.
+
+### Contrast is checked, not enforced
+
+A theme is validated against the 4.5:1 rule in *Accessibility and feel* below
+and any failure is reported to its author — but it still loads. Enforcing the
+rule would mean refusing somebody's own theme on their own machine, which is
+not a call this application gets to make. The **default** theme is a different
+matter: it is held to the rule by `tests/test_theme.py`.
+
+### The vocabulary grows
+
+There is no complete list of groups today, and writing one now would be
+fiction: the widgets for clips, waveforms, keyframes and the spatial views do
+not exist until M3-M6. **Each milestone adds its own groups to this section as
+it builds them.** That is a standing obligation of every milestone from here
+on, not a task belonging to M9.
 
 ## Media pool (left, top)
 
@@ -225,8 +435,10 @@ do to you.
 
 - No information conveyed by colour alone: mute, solo, arm, bypass and
   missing-media all carry an icon or text as well as a colour.
-- Minimum 4.5:1 contrast for text against its surface; the palette above is
-  chosen to hold that.
+- Minimum 4.5:1 contrast for text against its surface, on every surface from
+  `bg-0` to `bg-3`, asserted by `tests/test_theme.py`. Two documented
+  exemptions, both standard: `text-dim`, which is disabled text, and `accent`,
+  which is not a text colour — see the palette note above.
 - Every destructive action is undoable, so no confirmation dialogs except for
   discarding an unsaved project.
 - The xrun counter sits in the status bar, quiet when zero, `error` when not.

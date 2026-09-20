@@ -82,6 +82,20 @@
 - F-43 Bypassed channels are visually distinct in the channel header, the
   parameters pane, the spatial views and the keyframe editor.
 
+### Theming
+- F-44 Every colour the application draws comes from a **theme**, not from a
+  literal value in a widget. The token vocabulary is in
+  [04-ui-spec.md](04-ui-spec.md).
+- F-45 A theme is a `.3dimtheme` file: JSON, versioned, human-editable.
+- F-46 A theme file may be **partial**. Anything it omits falls back to the
+  built-in default, so a two-line theme that changes only the accent is valid
+  and stays valid when the application adds tokens.
+- F-47 A theme that is missing, malformed or contains invalid colours is
+  reported and the application starts on the default. A theme file can never
+  prevent the app from running.
+- F-48 Themes in the user's theme directory are discovered and can be selected
+  and applied without restarting.
+
 ## Non-functional requirements
 
 - N-1 Preview must sustain **32 simultaneously moving sources** at 48 kHz with a
@@ -144,3 +158,11 @@ The questions behind them, with the answers as given, are archived in
 | D-41 | Stems render pre-limiter | The limiter is nonlinear and responds to the summed signal, so its gain reduction cannot be decomposed per stem. Stems that sum exactly are worth more than stems that match the delivered master sample-for-sample. |
 | D-42 | Implicit 32-sample fade on clip edges away from media boundaries | A zero-length fade mid-waveform clicks, and split/trim produce such edges by definition. Exempting true file start and end keeps a full-length bypassed stem bit-transparent. |
 | D-43 | `ruff format` does not format Markdown (`[tool.ruff.format] exclude`) | Since ruff 0.13 the formatter rewrites Python blocks inside `.md`. The listings in `docs/` are spec pseudocode — `05`'s per-block engine calls methods that do not exist yet — so formatting them is a category error, and it had already turned CI's format step red. Linting still covers `docs/`; only formatting is opted out. |
+| D-44 | Surfaces are VS Code's dark greys; the accent stays purple | The original purple-black surfaces read as a toy. Neutral greys are what the people who will use this already stare at all day, and a purple playhead is more visible on grey than on purple-black. The cost is real and is paid in `04`: against lighter greys `accent` no longer clears 4.5:1, so it is specified as a fill and stroke colour with `accent-glow` as the text-safe purple, and `error` moved to VS Code's error-text red. `tests/test_theme.py` asserts the ratios. |
+| D-45 | A theme is a versioned JSON `.3dimtheme` file, merged over the built-in default | JSON because it is diffable, hand-editable and already the project format's language. Merged rather than replacing, so a partial theme is valid and — the part that matters — a theme written today keeps working when a later milestone adds tokens for widgets that did not exist yet. A replace-everything theme would break on every release. |
+| D-46 | Two layers: `tokens` (named colours) and `groups` (per-widget roles) | One flat list of every colour in the app would be hundreds of entries and unusable by hand; one list of eight tokens could not express "this one button is different". Tokens give a coherent theme from a handful of edits; groups give fine control, and reference tokens by name so the coherence survives. |
+| D-47 | The built-in theme ships as a `.3dimtheme` and loads through the same path as a user's | Dogfooding the format is the only way to know it can express what the app actually needs. A format that cannot describe the default theme is already broken, and without this the discovery is a bug report from a user rather than a failing test. |
+| D-48 | A theme never blocks startup: unknown keys are ignored, bad values fall back, everything is reported | Strict parsing of a cosmetic file means a typo in a colour locks someone out of their own project. Lenient parsing with a visible report gets the same information to the author without that. This is the same instinct as F-3's non-fatal missing media. |
+| D-49 | The workspace is two tabs — *Top / Front* and *3D* — not three side-by-side views | Three views each took about a third of the workspace, which at 1500 px is too narrow to drag a source precisely in, and one of those thirds went to a view that cannot be dragged in at all. The two editable ortho views stay together because placing a source is one gesture across both: X/Y, then height. The read-only 3D view is for reading the scene, so it does not compete for the same pixels. Supersedes the three-pane arrangement in the original layout, not D-5, which is about *which* views exist. |
+| D-50 | Icons are SVG, tinted at load by substituting a `currentColor` token | One asset per icon instead of a folder of PNGs per theme, crisp at any DPI, and M9 recolours the whole set without shipping a second copy of it. Qt's SVG renderer does not resolve `currentColor`, so the substitution is textual and happens before rendering - which is worth writing down, because the token looks like it should work on its own. |
+| D-51 | The menu bar implements hover-to-switch itself rather than relying on the platform | With a menu open, moving along the bar must walk between menus - every desktop does this. Qt usually provides it, but the open popup grabs the mouse and on some compositors (WSLg) the moves never reach the menu bar, so the behaviour silently goes missing. One event filter removes the dependence on what is underneath. Hovering deliberately does *not* open the first menu. |

@@ -1,7 +1,13 @@
 # 06 — Roadmap
 
-Nine milestones. Each ends at something you can actually run and judge, not at
+Ten milestones. Each ends at something you can actually run and judge, not at
 an internal refactor.
+
+**The file order is the build order; the numbers are identifiers, not
+positions.** M9 is built third, straight after M1, and sits below it here.
+It is numbered 9 because renumbering M2-M8 to make room would invalidate every
+reference to them in every document, commit message and code comment - see
+[doc-system.md](doc-system.md) §3.
 
 This file stays at the milestone level and is the index of truth for milestone
 status. The phase-by-phase breakdown of a milestone lives in its own directory
@@ -28,7 +34,9 @@ choice of Python.
 relative imports), the full package skeleton, `ruff` + `mypy` + `pytest`
 configured and passing, GitHub Actions across Linux/macOS/Windows on 3.11 and
 3.13, `theme.py` holding the palette, and a `MainWindow` with all seven regions
-as labelled placeholders. 26 tests pass, including the import-graph test —
+as labelled placeholders — since revised: the workspace became two tabs (D-49),
+the transport grew an SVG icon set (D-50) and the palette moved to VS Code's
+greys (D-44). 26 tests pass, including the import-graph test —
 which carries its own test proving the detector is not passing vacuously while
 `core/` is still empty.
 
@@ -99,6 +107,50 @@ and compared equal — all in pytest, with no window open.
 
 ---
 
+## M9 — Theming
+*Built after M1. Numbered last, built third — see the note at the top.*
+
+Colour is currently thirteen constants in `theme.py` and a QSS template. That
+is enough for a shell and not enough for an application: it cannot be changed
+without editing source, and by M6 there will be clips, waveforms, keyframes and
+three spatial views all reaching for colours that no file names.
+
+- A `Theme` object with `tokens` and `groups`, replacing the flat constants.
+  No widget anywhere names a hex (F-44)
+- The `.3dimtheme` format: versioned JSON, parsed, validated, merged over the
+  built-in default (F-45, F-46, D-45, D-46)
+- The built-in theme moved out into a bundled `.3dimtheme`, loaded through the
+  same path as a user's (D-47), via `importlib.resources` (D-30)
+- Discovery of the user theme directory, and switching without a restart
+  (F-48) from a `View > Theme` menu — the **Preferences** UI stays at M8
+- Failure handling: missing, malformed, unknown keys, bad colours, newer
+  schema — all non-fatal and all reported (F-47, D-48)
+- A contrast report for a loaded theme, advisory for user themes and enforced
+  by test for the built-in
+
+Full specification in the *Theming* section of
+[04-ui-spec.md](04-ui-spec.md).
+
+**Why here and not at M8:** every milestone after this one paints new widgets.
+If the vocabulary does not exist yet, each of them invents its own colours and
+M8 becomes an archaeology exercise across six milestones of hardcoded hexes.
+Doing it after M1 costs one milestone now and saves that.
+
+**Why not before M1:** the model comes first, and the two phases that need
+widgets to point at would have nothing to name.
+
+⚠️ M9 does **not** deliver a complete token vocabulary — it cannot. The
+widgets for M3-M6 do not exist yet. It delivers the *system*, and every
+milestone from here on adds its own groups to `04` as it builds them. That
+obligation is written into the spec, because the failure mode of a theme
+system is a widget quietly hardcoding a colour two milestones later.
+
+**Done when:** the application's entire palette lives in a bundled
+`.3dimtheme`, a user theme file that changes only the accent visibly works,
+and a deliberately broken theme file is reported without preventing startup.
+
+---
+
 ## M2 — Media
 - Decode via `soundfile`, resample to 48 kHz via `soxr`, hold in RAM
 - Content hashing, relink handling
@@ -156,10 +208,11 @@ with the port seam still tiny, rather than after the UI is built on top.
 ---
 
 ## M5 — Spatial workspace
-- Top (X/Y) and front (X/Z) ortho views: head glyph, rings, channel icons
+- Top (X/Y) and front (X/Z) ortho views, sharing the workspace's first tab
+  (D-49): head glyph, rings, channel icons
 - Drag to position, live during playback
 - Motion trails and keyframe diamonds drawn from the curves
-- Read-only isometric 3D view via `QPainter`
+- Read-only isometric 3D view via `QPainter`, in the workspace's second tab
 - Distance-as-radius, gain-as-opacity, mute/solo states
 - The bypass strip under the top view, and bypassed channels leaving the canvases
 - Position spinboxes in the parameters pane, two-way bound
@@ -200,7 +253,8 @@ trail, the curve and the sound agree.
 ---
 
 ## M8 — Polish & ship
-- Preferences: audio device, block size, HRTF set, theme details
+- Preferences: audio device, block size, HRTF set, and the theme picker
+  promoted out of the `View` menu (the theme *system* is M9)
 - Session persistence: window geometry, splitters, recent projects
 - Missing-media relink dialog
 - Error surfaces: xrun indicator, load failures, clipping warning

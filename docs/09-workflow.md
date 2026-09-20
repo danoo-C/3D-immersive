@@ -72,6 +72,7 @@ these exist yet except where a milestone is underway:
 | `m6_automation/` | |
 | `m7_render/` | |
 | `m8_polish_and_ship/` | |
+| `m9_theming/` | built after M1, not last — see [06](06-roadmap.md) |
 
 ## Sizing a phase
 

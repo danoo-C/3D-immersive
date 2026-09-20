@@ -56,3 +56,49 @@ def test_stylesheet_substitutes_every_placeholder() -> None:
     assert not re.search(r"\{[a-z_]+\}", qss)
     assert theme.ACCENT in qss
     assert theme.BG_0 in qss
+
+
+def _luminance(hex_colour: str) -> float:
+    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [
+        c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast(a: str, b: str) -> float:
+    """WCAG contrast ratio between two hex colours."""
+    la, lb = _luminance(a), _luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+SURFACES = (theme.BG_0, theme.BG_1, theme.BG_2, theme.BG_3)
+
+# 04-ui-spec.md promises 4.5:1 for text on every surface. TEXT_DIM (disabled)
+# and ACCENT (a fill and stroke colour, never text) are the two documented
+# exemptions; ACCENT_GLOW is the text-safe purple and is held to the rule.
+TEXT_TOKENS = (theme.TEXT_HI, theme.TEXT_LO, theme.ACCENT_GLOW, theme.WARN, theme.ERROR)
+
+
+@pytest.mark.parametrize("colour", TEXT_TOKENS)
+@pytest.mark.parametrize("surface", SURFACES)
+def test_text_contrast_meets_the_spec(colour: str, surface: str) -> None:
+    assert contrast(colour, surface) >= 4.5, f"{colour} on {surface}"
+
+
+@pytest.mark.parametrize("colour", theme.CHANNEL_COLORS)
+def test_channel_colours_are_legible_on_panels(colour: str) -> None:
+    """04-ui-spec.md: channel colours must stay legible on bg-1."""
+    assert contrast(colour, theme.BG_1) >= 3.0, colour
+
+
+def test_accent_clears_the_ui_component_threshold() -> None:
+    """ACCENT is not text, but a playhead nobody can see is still a bug."""
+    for surface in SURFACES:
+        assert contrast(theme.ACCENT, surface) >= 3.0, surface
+
+
+def test_surfaces_are_monotonic() -> None:
+    """bg-0 is deepest and each step is lighter; widgets rely on the ordering."""
+    levels = [_luminance(s) for s in SURFACES]
+    assert levels == sorted(levels), levels

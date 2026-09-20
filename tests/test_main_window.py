@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QDockWidget, QSplitter
+from PySide6.QtWidgets import QDockWidget, QSplitter, QToolBar
 
 from immersive.app import build_application
 from immersive.ui.main_window import MainWindow
@@ -45,3 +45,53 @@ def test_every_region_is_present(app: object) -> None:
     window = MainWindow()
     panels = window.findChildren(Placeholder)
     assert len(panels) == 7  # pool, params, top, front, 3d, keyframes, timeline
+
+
+def test_workspace_is_two_tabs(app: object) -> None:
+    """D-49: Top/Front together, 3D on its own."""
+    from PySide6.QtWidgets import QTabWidget
+
+    window = MainWindow()
+    tabs = window.findChildren(QTabWidget)
+    assert len(tabs) == 1
+    workspace = tabs[0]
+    assert [workspace.tabText(i) for i in range(workspace.count())] == [
+        "Top / Front",
+        "3D",
+    ]
+
+
+def test_the_ortho_views_share_the_first_tab(app: object) -> None:
+    from PySide6.QtWidgets import QTabWidget
+
+    from immersive.ui.widgets.placeholder import Placeholder
+
+    window = MainWindow()
+    workspace = window.findChildren(QTabWidget)[0]
+    ortho, view3d = workspace.widget(0), workspace.widget(1)
+    assert ortho is not None and view3d is not None
+    assert len(ortho.findChildren(Placeholder)) == 2
+    assert view3d.findChildren(Placeholder) == []  # the 3D tab *is* the panel
+    assert isinstance(view3d, Placeholder)
+
+
+def test_transport_buttons_have_icons_not_ascii(app: object) -> None:
+    """04-ui-spec.md, Craft: no ASCII glyphs as UI."""
+    window = MainWindow()
+    toolbar = window.findChildren(QToolBar)[0]
+    actions = [a for a in toolbar.actions() if not a.isSeparator() and a.text()]
+    assert actions, "toolbar has no actions"
+    for action in actions:
+        assert not action.icon().isNull(), action.text()
+        assert action.text().isprintable()
+        assert not set(action.text()) & set("|<>[]"), action.text()
+
+
+def test_disabled_actions_explain_themselves(app: object) -> None:
+    """A dead button with no tooltip is the thing that reads as unfinished."""
+    window = MainWindow()
+    toolbar = window.findChildren(QToolBar)[0]
+    for action in toolbar.actions():
+        if action.isSeparator() or not action.text():
+            continue
+        assert action.toolTip(), action.text()
