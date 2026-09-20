@@ -1,7 +1,7 @@
 # S0 · Phase 3 — Spherical interpolation
 
-**Status:** not started · **Plan:** not written yet —
-`plans/phase_3_interpolation.md`
+**Status:** in progress · **Plan:**
+[plans/phase_3_interpolation.md](plans/phase_3_interpolation.md)
 
 ## Goal
 
