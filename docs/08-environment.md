@@ -61,6 +61,15 @@ machine, including WSL.
 **CPython 3.11 minimum, 3.13 in use.** Reasons for the floor: `tomllib` in the
 stdlib, the `X | None` syntax used throughout, and improved error messages.
 
+### numpy version
+
+**`numpy>=2.0` is a hard floor, not a preference** (D-38). The realtime
+callback is required to allocate nothing, and that is only achievable because
+`np.fft.rfft` and `np.fft.irfft` accept `out=` and operate on float32 without
+upcasting — both of which arrived in numpy 2.0. On 1.x every block allocates a
+fresh float64 array inside the audio callback. The pin belongs in
+`pyproject.toml`; it is the first task of M1.
+
 ⚠️ To verify at M0: PySide6 wheel availability for 3.13 on all three targets.
 If any platform lags, the whole project pins to 3.12 — which is fine, nothing
 here needs 3.13.
@@ -309,14 +318,28 @@ short, this is the escalation ladder:
 
 | # | Lever | Expected gain | Cost |
 |---|---|---|---|
+| 0 | **`sys.setswitchinterval(0.001)`** at startup | Bounds each GIL wait to ~1 ms instead of 5 | One line (D-39) |
 | 1 | **`scipy.fft` with `workers=`, or pyFFTW with a saved plan** | Often meaningful for repeated same-size transforms — FFTW plans once for our fixed `nfft` and reuses it forever | A dependency, a few lines |
 | 2 | **Raise the block size** 512 → 1024 | Halves per-block Python overhead | +10 ms latency, still fine for auditioning |
 | 3 | **Profile and kill remaining per-block allocations** | The zero-alloc test should already prevent these | Free |
 | 4 | **Cython / nanobind on `Engine.process`** | Removes Python from the callback entirely | A few hundred lines, a build step — the documented seam in [02-architecture.md](02-architecture.md) |
 
-Note that #1 is the *first* thing to try and touches four lines, while the
-nuclear option at #4 is still bounded and pre-planned. That ladder is why
-choosing Python was safe.
+**Row 0 deserves more than a table cell.** CPython releases the GIL every
+5 ms by default. A Python-side paint event on the UI thread can therefore make
+the audio callback wait up to 5 ms for the GIL — half of a 10.7 ms budget,
+spent doing nothing. Dropping the switch interval to 1 ms bounds that wait to
+roughly a fifth of what it was, at the price of slightly more thread-switch
+overhead on the UI thread, which has milliseconds to spare and does not care.
+
+It is one line in `app.py`, before the audio stream opens. It is also the only
+row on this ladder that addresses the *actual* failure mode identified below —
+contention, not throughput — which is why it sits at 0 rather than being
+buried at the bottom. Its effect is not assumed: the M4 benchmark measures the
+xrun counter with and without it **while the UI is actively repainting**,
+because an idle UI will show no difference and prove nothing.
+
+Note that #1 touches four lines, while the nuclear option at #4 is still
+bounded and pre-planned. That ladder is why choosing Python was safe.
 
 ### The thing genuinely worth watching
 

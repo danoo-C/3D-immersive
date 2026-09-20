@@ -327,7 +327,8 @@ command on mouse-release, coalescing the intermediate states.
 | Package | For |
 |---|---|
 | `PySide6` | UI |
-| `numpy`, `scipy` | DSP, FFT, spherical triangulation |
+| `numpy>=2.0` | DSP, FFT. **The floor is hard:** `rfft`/`irfft` only accept `out=` and stay in float32 from 2.0, and without that the audio callback allocates every block (D-38). |
+| `scipy` | spherical triangulation, optional faster FFT |
 | `sounddevice` | PortAudio bindings |
 | `soundfile` | libsndfile decode/encode |
 | `soxr` | high-quality resampling |

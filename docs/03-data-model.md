@@ -115,6 +115,12 @@ Keyframe
   but preserved**. Nothing is deleted, and turning bypass off restores the
   previous spatial behaviour exactly (F-42). The same holds in reverse for
   `pan` — it survives while the channel is spatialised.
+- A clip edge that does not coincide with the media file's own start
+  (`offset == 0`) or end (`offset + length == MediaFile.frames`) receives an
+  **implicit 32-sample linear fade** at playback time (D-42). It is not stored
+  here, not shown in the UI, and an explicit fade replaces rather than adds to
+  it. A full-length clip placed at 0 is therefore bit-transparent, which is
+  what the bypassed-stem case needs.
 - `pan` is meaningful only under bypass. On a mono source it is a
   constant-power pan; on a stereo source it is a balance, attenuating the
   opposite side rather than folding the image.
@@ -130,6 +136,23 @@ Keyframe
   can never double back in time.
 
 The engine calls this once per channel per parameter per block.
+
+### ⚠️ Linear interpolation passes through the head
+
+The `pos.*` curves interpolate X, Y and Z independently, in cartesian space. A
+move between two points on opposite sides of the listener therefore travels in
+a straight line **through the origin**, not around it.
+
+The 0.2 m clamp (see *Coordinate system*) stops the distance gain from blowing
+up, but the perceived direction still flips abruptly as the source crosses from
+one side to the other. This is expected behaviour, not a bug — it is a direct
+consequence of having no motion-path presets in v1 (D-25).
+
+The fix, when path presets arrive, is **orbit interpolation**: interpolating
+azimuth and radius rather than cartesian coordinates, so a source moving from
+left to right arcs around the listener at constant distance. That is the first
+candidate on the list; see the "later, maybe" section of
+[00-overview.md](00-overview.md).
 
 ## Project file
 

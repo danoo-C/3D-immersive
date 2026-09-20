@@ -78,4 +78,8 @@ Ordered roughly by how much they'd be missed:
 - Ambisonic (B-format) export alongside binaural
 - Tempo map
 - Per-listener HRTF personalisation beyond just picking a SOFA file
-- Motion path presets (orbit, flyby, random walk)
+- Motion path presets (orbit, flyby, random walk), and with them **orbit
+  interpolation** — interpolating azimuth and radius instead of cartesian
+  coordinates, so a source crossing from left to right arcs around the
+  listener instead of passing through their head (see
+  [03-data-model.md](03-data-model.md))

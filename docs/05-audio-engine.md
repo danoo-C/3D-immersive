@@ -53,10 +53,39 @@ candidates, then an exact barycentric test.
 
 ### 4. Prepare the bank
 
-Each minimum-phase HRIR is zero-padded to `nfft = next_pow2(block + N - 1)` and
-forward-transformed once. The whole bank lives in memory as
-`[M, 2, nfft//2 + 1]` complex64, and is cached to disk keyed by SOFA hash and
-block size, so project load does not pay for it twice.
+Each minimum-phase HRIR is zero-padded to `nfft` and forward-transformed once.
+The whole bank lives in memory as `[M, 2, nfft//2 + 1]` complex64, and is
+cached to disk keyed by SOFA hash and block size, so project load does not pay
+for it twice.
+
+#### Buffer length must account for the ITD
+
+The ITD is applied as a frequency-domain phase ramp (see the per-block
+pseudocode), and a phase ramp is a **circular** delay. Anything pushed past the
+end of the buffer wraps around to the beginning, which is not a subtle
+artefact — it is the tail of the response arriving before the onset.
+
+```
+nfft = next_pow2(block + N + max_itd_samples - 1)
+```
+
+`max_itd_samples` is the largest ITD in the loaded dataset *after* resampling
+— roughly 1 ms, about 48 samples at 48 kHz. It is **computed from the data
+at load time, never hardcoded**: a dataset measured on a larger head, or one
+resampled from a different rate, will not match the estimate.
+
+#### Delays must be non-negative on both ears
+
+An ITD is a *difference*, so it is natural to write it as +τ on one ear and −τ
+on the other. Do not. A negative phase ramp is an advance, and it wraps the
+start of the response around to the end of the buffer — the same failure as
+above, at the other edge.
+
+Apply the full `|ITD|` as a delay on the **far** ear and `0` on the near ear.
+The interaural difference is identical, both ramps are non-negative, and
+nothing wraps. The only cost is a constant common delay of up to ~1 ms on the
+whole binaural path, which is inaudible and already noted in the bypass
+time-alignment caveat below.
 
 ## Per-block processing
 
@@ -83,15 +112,27 @@ def process(self, out_l, out_r):  # no allocation below this line
     w, idx = self.bank.weights(az, el)  # barycentric, [n, 3] each
     itd = (self.bank.itd[idx] * w).sum(1)
 
-    # 3. convolution ----------------------------------------------------
-    X = rfft(src, n=self.nfft, axis=1)  # batched, [n, bins]
-    H = (self.bank.H[idx] * w[:, :, None, None]).sum(1)  # [n, 2, bins]
-    H = H * itd_phase(itd, self.freqs)  # fractional delay
+    H_cur = (self.bank.H[idx] * w[:, :, None, None]).sum(1)  # [n, 2, bins]
+    H_cur = H_cur * itd_phase(itd, self.freqs)  # non-negative ramp, far ear
 
-    Y = (X[:, None, :] * H).sum(axis=0)  # SUM OVER SOURCES
-    y = irfft(Y, n=self.nfft, axis=1)  # only 2 iFFTs, ever
+    # 3. convolution, with the filter crossfade ---------------------------
+    # The input is windowed, not the output: each source contributes two
+    # copies, one fading out against last block's filter and one fading in
+    # against this block's. Both are full-length convolutions, so their
+    # tails add correctly and nothing is discontinuous anywhere.
+    xf = self.xfade_buf  # [2n, block], preallocated
+    xf[0::2] = src * self.w_out  # w_out = 1 - w_in
+    xf[1::2] = src * self.w_in  # w_in  = linspace(0, 1, block)
 
-    # 4. overlap-save, master -------------------------------------------
+    X = rfft(xf, n=self.nfft, axis=1)  # batched, [2n, bins]
+    Y = (X[0::2, None, :] * self.H_prev).sum(axis=0) + (
+        X[1::2, None, :] * H_cur
+    ).sum(axis=0)  # SUM OVER SOURCES, both halves
+    y = irfft(Y, n=self.nfft, axis=1)  # 4 iFFTs worth of work, ever
+
+    self.H_prev[:] = H_cur  # carry this block's filter forward
+
+    # 4. overlap-add, master ----------------------------------------------
     y[:, : self.block] += self.tail
     self.tail[:] = y[:, self.block : self.block + self.tail_len]
     y[:, : self.block] += byp.sum(axis=0)  # bypass joins after convolution
@@ -109,21 +150,30 @@ them outward; it is tuned by ear, not derived.
 
 - **`.sum(axis=0)` before the inverse transform.** Convolution is linear, so
   sources can be summed in the frequency domain. The inverse FFT cost is then
-  constant — two transforms whether you have 4 channels or 64. This is the
-  single reason a Python engine meets N-1 comfortably.
-- **The forward FFT is batched**, one call over a 2D array, not a loop of `n`
+  constant — the same four transforms whether you have 4 channels or 64. This
+  is the single reason a Python engine meets N-1 comfortably.
+- **The forward FFT is batched**, one call over a 2D array, not a loop of `2n`
   calls. numpy's overhead per call dominates at these sizes; batching is worth
   roughly an order of magnitude.
 - **ITD is applied as a phase ramp** in the frequency domain, which gives
   sub-sample delay resolution for free. Sample-quantised ITD produces an audible
-  stair-step as a source pans.
+  stair-step as a source pans. The ramp is non-negative on both ears and `nfft`
+  is sized for it — see *Prepare the bank*.
+- **The crossfade is unconditional**, every block, for every source. Why is in
+  *Parameter smoothing* below; it is not an optimisation to skip when a source
+  is "barely moving".
 
 ### Cost estimate
 
-At 512 frames, `nfft` = 1024, 32 sources: one batched 32×1024 rFFT, a
-[32, 3, 2, 513] gather-and-weight, one complex multiply-accumulate, two 1024
-iFFTs. That is a few hundred microseconds against a 10.7 ms budget. The margin
-is large, which is the point — Python's variance needs headroom, not a tight fit.
+At 512 frames, `nfft` = 1024, 32 sources: one batched 64×1024 rFFT (two
+windowed copies per source), a [32, 3, 2, 513] gather-and-weight, two complex
+multiply-accumulates, and two 1024-point inverse transforms over a 2-row array
+— four iFFTs of work. That is well under a millisecond against a 10.7 ms
+budget.
+
+The crossfade roughly doubles the FFT work versus a naive uncrossfaded design.
+It is still constant in source count, and the margin is still large — which is
+the point. Python's variance needs headroom, not a tight fit.
 
 ## HRTF bypass
 
@@ -187,15 +237,55 @@ which is a small addition — not a redesign.
 
 ## Parameter smoothing
 
-Positions change at block boundaries, which would click. Two defences:
+Positions are evaluated once per block, so without care every parameter in the
+graph steps discontinuously ~94 times a second. Two separate mechanisms.
 
-- Gains (channel, distance, pan, master) are smoothed per sample with a
-  one-pole ramp across the block.
-- HRTF changes are handled by the overlap-save tail itself: because the previous
-  block's tail was produced with the previous filter and is summed into this
-  block, the transition is already a short crossfade. For large jumps — a source
-  teleported across the head — we detect an angular delta over a threshold and
-  do an explicit two-filter crossfade over the block.
+### Gains: a per-sample ramp
+
+Channel, distance, pan and master gains are smoothed per sample with a one-pole
+ramp across the block. Cheap, and scalar gains have no memory, so nothing more
+is needed.
+
+### Filters: an unconditional per-block crossfade
+
+⚠️ **The overlap-add tail does not smooth a filter change.** It is tempting to
+think it does — the previous block's tail was produced with the previous filter
+and is summed into this one — but the tail only carries the *decay* of the
+response. The direct sound of block *k* is convolved entirely with `H_k`, so at
+every block boundary the direct path switches filters instantly. HRIRs put
+nearly all of their energy in the first millisecond, so that is an abrupt
+switch, 94 times per second.
+
+It is not a corner case. A source orbiting once per second moves about 4° per
+block, which is roughly a one-sample ITD step per block on the far ear. On
+transient material you may not notice; on sustained material — pads, strings, a
+held tone — it is a clearly audible buzz at the block rate. A threshold on
+"large angular jumps" does not catch it, because no individual step is large.
+
+So the crossfade is **unconditional: every block, every source** (D-37).
+
+Crossfade by windowing the **input**, not the output:
+
+```
+y = (x_k · w_out) * H_prev  +  (x_k · w_in) * H_cur
+
+w_in  = linspace(0, 1, block)
+w_out = 1 - w_in
+```
+
+Windowing the input rather than the output is what makes this correct rather
+than merely better. Both halves are full-length convolutions, so each carries
+its own correctly-tapered tail into the next block, and the sum is continuous
+everywhere — including in the tail, which an output crossfade would chop.
+
+Bookkeeping:
+
+- `H_prev` — the per-source filter weights *and* ITD from the previous block —
+  is stored alongside the engine state and updated at the end of each block.
+- On seek, and after an atomic snapshot swap, set `H_prev = H_cur` so the first
+  block after the discontinuity does not crossfade from a stale filter.
+- There is no large-jump special case. A teleported source is handled by the
+  same code path as a slowly drifting one; it simply crossfades over one block.
 
 ## Scheduler
 
@@ -206,7 +296,24 @@ Clip reads are `numpy` slices out of the resident decoded array at
 `offset + (t - start)`, with fade envelopes multiplied in from precomputed
 tables.
 
-Seeking resets cursors and zeroes the overlap-save tails.
+### Implicit edge fades
+
+A clip edge with `fade.length = 0` starts or stops the waveform at whatever
+value it happens to hold, which clicks — and after a split or a trim, edges
+land mid-waveform by definition.
+
+So the scheduler applies an **implicit 32-sample linear fade** at any clip edge
+that is not at the media file's own boundary — that is, unless `offset == 0`
+for the head, or `offset + length == MediaFile.frames` for the tail. A
+full-length stem placed at 0 therefore stays bit-transparent, which matters
+because that is exactly the bypassed-backing-track case (D-32).
+
+The implicit fade is not stored in the project and not drawn in the UI. An
+explicit fade replaces it rather than adding to it. See the Rules in
+[03-data-model.md](03-data-model.md).
+
+Seeking resets cursors, zeroes the overlap-add tails, and sets
+`H_prev = H_cur`.
 
 ## Offline render
 
@@ -217,11 +324,25 @@ is what keeps preview and export from diverging. Differences, all opt-in:
 - Longer HRIRs if the dataset offers them.
 - Optional 2× oversampling of the limiter.
 - Per-channel stems by rendering with all but one channel muted, reusing the
-  same automation — so stems sum exactly to the master. A bypassed channel's
-  stem is simply its dry audio, and the sum still reconciles.
+  same automation. A bypassed channel's stem is simply its dry audio.
+
+### Stems are rendered pre-limiter
+
+Stems sum to the **pre-limiter** master, not to the delivered master file
+(D-41). The limiter is nonlinear: it responds to the summed signal, so the
+gain reduction applied to a full mix cannot be decomposed into per-stem
+contributions. Rendering stems through it and claiming they sum would be
+false whenever it engages — which is to say, whenever it matters.
+
+Stems are therefore unlimited. The master render applies the limiter; the stem
+render skips it. The exactness property is preserved against a pre-limiter
+master, and that is what the M7 test asserts.
 
 Determinism (F-36) comes from: fixed rate and block, no wall-clock anywhere in
-the graph, no threads inside `process`, and float32 ops in a fixed order.
+the graph, no threads inside `process`, and float32 ops in a fixed order. That
+guarantees bit-identical output **across runs on one machine and build** — not
+across platforms, where FFT library versions and SIMD dispatch legitimately
+differ in the last bits.
 
 ## Realtime safety checklist
 
@@ -233,6 +354,11 @@ Enforced by review and by a test that runs `process()` under
   snapshot swap.
 - `gc.freeze()` after load; explicit collection on the UI thread only.
 - Every numpy op writes into a preallocated buffer via `out=`.
+- **numpy ≥ 2.0 is required, not merely preferred.** The rule above is only
+  achievable because `np.fft.rfft` and `np.fft.irfft` accept `out=` and operate
+  on float32 without silently upcasting to float64. Both arrived in numpy 2.0.
+  On numpy 1.x the FFT calls allocate a fresh float64 array every block, inside
+  the callback, which is precisely what this checklist exists to forbid.
 - Xruns counted and surfaced in the status bar.
 
 ## If Python is not enough

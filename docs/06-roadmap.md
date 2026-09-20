@@ -29,9 +29,55 @@ which carries its own test proving the detector is not passing vacuously while
 
 ---
 
+## S0 — Listening spike (throwaway)
+*Not a milestone. A script whose only job is to be listened to.*
+
+Nothing in the plan puts a moving source in anyone's ears until M4, three
+milestones away. That is a long time to be building on an unheard assumption,
+and the two riskiest decisions in the whole design — the ITD/minimum-phase
+split and the per-block crossfade — are decisions only listening can confirm.
+
+So: one script, `spikes/binaural_spike.py`, **outside `src/`**. Not part of the
+package, not imported by anything, excluded from the wheel. It needs no audio
+device, so it runs here on WSL and writes WAV files to listen to on headphones.
+
+**What it does**
+
+- Load a full-sphere SOFA set (SADIE II D1 or ARI) and print its licence.
+- Resample to 48 kHz, level-normalise.
+- ITD extraction and minimum-phase split, per
+  [05-audio-engine.md](05-audio-engine.md) §2.
+- Triangulation and barycentric lookup, per §3.
+- The per-block engine for **one** source at block 512, including the
+  input-windowed crossfade (D-37) and the ITD buffer-length and sign
+  constraints from *Prepare the bank*.
+
+**What it produces** — four files, 8 s each, in `spikes/out/`:
+
+| File | Content | What it proves |
+|---|---|---|
+| `orbit_noise.wav` | pink noise, 100 ms on/off bursts, orbiting 1 rev/s at ear level, 1.5 m | localisation is convincing at all |
+| `orbit_tone.wav` | sustained 440 Hz sawtooth, same orbit | **the zipper test** — must be smooth |
+| `orbit_tone_nocrossfade.wav` | same, crossfade disabled | the A/B that shows what D-37 buys |
+| `front_back_clicks.wav` | click train sweeping front → overhead → behind | elevation and front/back work |
+
+It also prints per-block processing time, mean and p99 — an early data point
+for the M4 benchmark.
+
+**Constraints:** under ~300 lines. numpy/scipy plus `sofar` and `soxr`, nothing
+else. Not generalised, not tidied, not moved into `src/` afterwards. If it
+turns out to be useful twice, it gets rewritten properly inside the package.
+
+**Done when:** the four files exist, they have been listened to on headphones,
+and a default SOFA set has been chosen. Feeds QA-30 and M4.
+
+---
+
 ## M1 — Core model, headless
 *No UI work at all.*
 
+- Pin `numpy>=2.0` in `pyproject.toml` — a hard floor, not a preference
+  (D-38); the realtime zero-allocation rule depends on it
 - `model.py`, `curves.py`, `time.py` dataclasses
 - Curve evaluation: linear, hold, ease with bezier solve
 - Snapping and bars:beats ↔ samples conversion
@@ -80,9 +126,18 @@ counting — *before* any HRTF complexity is layered on top.
 - Spherical triangulation + barycentric interpolation + KD-tree lookup
 - Frequency-domain bank, disk cache
 - Batched FFT convolution with frequency-domain summation
-- Distance attenuation with tunable rolloff (D-21), fractional-delay ITD,
-  parameter smoothing
+- Distance attenuation with tunable rolloff (D-21), fractional-delay ITD with
+  non-negative ramps and `nfft` sized for the dataset's maximum ITD
+- The unconditional per-block input-windowed filter crossfade (D-37), with a
+  named listening test: a sustained 440 Hz sawtooth orbiting at 1 rev/s must
+  have **no buzz at the block rate**. Render the same pass with the crossfade
+  disabled and A/B them — if the two are indistinguishable, the crossfade is
+  not actually running
+- `sys.setswitchinterval(0.001)` in `app.py` before the stream opens (D-39),
+  measured with the xrun counter **while the UI is actively repainting** —
+  an idle UI will show no difference and prove nothing
 - The bypass path: stereo-preserving reads, pan law, summing after the iFFT
+- Implicit 32-sample edge fades in the scheduler (D-42)
 - The zero-allocation test on `process()`
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
 
@@ -125,8 +180,12 @@ trail, the curve and the sound agree.
 - Render dialog: range, block size, stems toggle, output path
 - Progress + cancel on a worker thread
 - 24-bit WAV writing
-- Per-channel stems that sum exactly to the master
-- A determinism test: render twice, assert bit-identical
+- Per-channel stems, rendered **pre-limiter** (D-41). The render dialog says
+  so on screen: *"stems are unlimited; they sum to the pre-limiter master"*
+- An exactness test: stems sum sample-for-sample to a **pre-limiter** master
+  render
+- A determinism test: render twice **on the same machine and build**, assert
+  bit-identical. Not asserted across platforms (D-40)
 
 **Done when:** the exported file matches what the preview sounded like.
 
@@ -150,7 +209,7 @@ trail, the curve and the sound agree.
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | Python realtime dropouts | Medium | M4 benchmarks it before anything is built on top; zero-alloc test; the `Engine.process` port seam is deliberately small |
-| HRTF interpolation artifacts (comb filtering on moving sources) | **High if done naively** | ITD/minimum-phase split is non-optional, specified in [05-audio-engine.md](05-audio-engine.md) |
+| HRTF interpolation artifacts on moving sources | **High if done naively** | Two halves, both non-optional and both specified in [05-audio-engine.md](05-audio-engine.md): the ITD/minimum-phase split, which prevents comb filtering *within* a block's filter, and the unconditional input-windowed crossfade (D-37), which prevents zipper noise *between* blocks. Neither covers the other. S0 puts both in someone's ears before M1 rather than after M4 |
 | Timeline repaint performance at hundreds of clips | Medium | `QGraphicsView` + cached pixmaps + zoom LOD from the start, not retrofitted |
 | Cross-platform audio backend differences (WASAPI/CoreAudio/PipeWire) | Medium | Device picker with explicit backend choice; CI can't test audio, so manual smoke test per platform per milestone |
 | macOS packaging and notarisation | Medium | Deferred entirely to M8; do not let it leak earlier |

@@ -62,7 +62,8 @@
 - F-33 Realtime binaural preview following the playhead.
 - F-34 Offline render to 24-bit stereo WAV at project rate.
 - F-35 Optional per-channel binaural stems in the same render pass.
-- F-36 Render is deterministic and bit-identical across runs and platforms.
+- F-36 Render is deterministic and bit-identical across runs on the same
+  machine and build. Cross-platform bit-identity is not promised (D-40).
 - F-37 Render shows progress and can be cancelled.
 
 ### HRTF bypass
@@ -136,3 +137,9 @@ The questions behind them, with the answers as given, are archived in
 | D-34 | Bypass is not automatable | Switching between a convolved and a dry signal mid-playback is a discontinuity that clicks. Anyone who wants the effect can crossfade two channels, which is what they actually mean. |
 | D-35 | Bypassed channels gain a `pan` parameter, automatable | Without it a bypassed mono sample is stuck dead centre, which makes the feature much less useful than it should be. |
 | D-36 | Bypassed channels leave the spatial canvases and appear in a strip | They have no meaningful position, so drawing them on the canvas is a lie; parking them all at the origin would pile them into an unreadable heap. |
+| D-37 | Unconditional per-block input-windowed filter crossfade | Block-rate filter switching without a crossfade produces zipper noise on moving sources; the overlap-add tail does not cover the direct path, only the decay. Windowing the input keeps both halves full-length convolutions so their tails add correctly. Costs 2 extra iFFTs per block, constant in source count. |
+| D-38 | `numpy>=2.0` is a hard requirement | `np.fft.rfft`/`irfft` only accept `out=` and stay in float32 from numpy 2.0. Below that the FFTs allocate a float64 array inside the audio callback every block, which breaks the zero-allocation rule outright. |
+| D-39 | `sys.setswitchinterval(0.001)` at application startup | CPython's 5 ms default lets a UI paint hold the GIL for half the audio budget. One line in `app.py`, before the stream opens, bounds each wait to ~1 ms. |
+| D-40 | Determinism is per machine and build, not cross-platform | FFT library versions and SIMD dispatch differ legitimately between platforms. Promising bit-identity across them would make F-36 a test we could only pass by weakening it. |
+| D-41 | Stems render pre-limiter | The limiter is nonlinear and responds to the summed signal, so its gain reduction cannot be decomposed per stem. Stems that sum exactly are worth more than stems that match the delivered master sample-for-sample. |
+| D-42 | Implicit 32-sample fade on clip edges away from media boundaries | A zero-length fade mid-waveform clicks, and split/trim produce such edges by definition. Exempting true file start and end keeps a full-length bypassed stem bit-transparent. |
