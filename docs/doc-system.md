@@ -67,14 +67,14 @@ Four schemes, all monotonic, all permanent.
 |---|---|---|---|
 | `F-n` | Functional requirement | `01-requirements` §Functional | F-43 |
 | `N-n` | Non-functional requirement | `01-requirements` §Non-functional | N-6 |
-| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-42 |
+| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-43 |
 | `QA-n` | A question asked during spec review, and its answer | `07-qa-archive` | QA-38 |
 
 Milestones use `M0`–`M8` and `S0`, defined in `06-roadmap`.
 
 ### The rules that make identifiers worth having
 
-- **Numbers only ever go up.** The next decision is D-43 regardless of what
+- **Numbers only ever go up.** The next decision is D-44 regardless of what
   happened to D-12.
 - **Never renumber.** A commit that renumbers identifiers invalidates every
   reference in every other document, every commit message and every code

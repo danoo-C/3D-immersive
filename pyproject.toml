@@ -66,6 +66,13 @@ target-version = "py311"
 src = ["src", "tests"]
 extend-exclude = [".claude", ".venv", "build", "dist", ".3dim-cache"]
 
+# ruff's formatter reformats Python blocks inside Markdown as of 0.13. The
+# listings in docs/ are spec pseudocode, not source — 05's per-block engine
+# references names that do not exist yet — so the formatter has no business
+# rewrapping them. Linting still covers docs/; only formatting is opted out.
+[tool.ruff.format]
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = [
     "E",    # pycodestyle

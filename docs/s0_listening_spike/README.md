@@ -15,7 +15,7 @@ M4.
 
 | Phase | Status |
 |---|---|
-| [1 — SOFA load](phase_1_sofa_load.md) | not started |
+| [1 — SOFA load](phase_1_sofa_load.md) | ✅ |
 | [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | not started |
 | [3 — Spherical interpolation](phase_3_interpolation.md) | not started |
 | [4 — Block engine and renders](phase_4_block_engine.md) | not started |
@@ -53,4 +53,8 @@ fix, not this file.
 
 ## Notes
 
-Appended as phases complete.
+**Phase 1.** Running on SADIE II D1 (KEMAR), 8802 positions, full sphere,
+48 kHz, 256 taps — and **Apache 2.0**, which is permissive enough to bundle if
+M4 wants it. `Data_Delay` is zero, so there is no stored delay for phase 2 to
+fold into the ITD, and N = 256 puts phase 4's `nfft` at 1024 as the cost
+estimate assumes. Details in [phase 1's Notes](phase_1_sofa_load.md).
