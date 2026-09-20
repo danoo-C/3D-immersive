@@ -11,6 +11,12 @@
 | [06 — Roadmap](06-roadmap.md) | Nine milestones and the risk register |
 | [07 — QA Archive](07-qa-archive.md) | Closed: every question asked, the answer given, and where it landed |
 | [08 — Environment](08-environment.md) | venv, `launch.py`, the `installer.py` spec, and why not PyPy |
+| [09 — Workflow](09-workflow.md) | How a milestone gets built: per-milestone directories, phases and plans |
+
+Alongside these, each milestone under way has its own directory —
+`m1_core_model/` and so on — holding one document per build phase and a
+`plans/` subdirectory beside them. [09](09-workflow.md) defines that system;
+the directories are created one milestone at a time, as work reaches them.
 
 The original hand-written spec is in [`../README.md`](../README.md) and is kept
 as the source of intent; where it and these documents disagree, these win —
@@ -20,6 +26,7 @@ but the disagreement should be recorded in the decision log.
 
 New to the project: 00 → 01 → 06.
 Setting up to run it: 08.
+About to build something: 09, then the current milestone's directory.
 Implementing: 02 → 03 → the document for the area you're in.
 Deciding something: check the decision log in 01 before re-opening it, and
 [07](07-qa-archive.md) for why it went that way.

@@ -1,7 +1,12 @@
 # 06 — Roadmap
 
 Nine milestones. Each ends at something you can actually run and judge, not at
-an internal refactor. The ordering is driven by one principle: **de-risk the
+an internal refactor.
+
+This file stays at the milestone level and is the index of truth for milestone
+status. The phase-by-phase breakdown of a milestone lives in its own directory
+— `docs/m1_core_model/` and so on — created when that milestone starts. See
+[09-workflow.md](09-workflow.md). The ordering is driven by one principle: **de-risk the
 audio engine early**, because it is the only part that could invalidate the
 choice of Python.
 
