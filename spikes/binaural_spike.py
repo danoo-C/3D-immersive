@@ -6,6 +6,7 @@ Throwaway. Not part of the package, not imported by anything, never moved into
 
 Phase 1: fetch a SOFA set, validate it, convert its directions, resample to
 48 kHz and normalise the level.
+Phase 2: split each measurement into a broadband ITD and a minimum-phase HRIR.
 
     python spikes/binaural_spike.py --info
     python spikes/binaural_spike.py --check
@@ -24,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import sofar
 import soxr
+from scipy import signal
 
 # SADIE II D1 — the KEMAR dummy head, already 48 kHz, 256 taps. The York URL
 # in the roadmap's prose is dead; this is the sofacoustics.org mirror. The
@@ -41,6 +43,25 @@ RATE = 48_000  # docs/05-audio-engine.md, fixed parameters
 # actually does is checked, not assumed - at 0.5 this set peaks at 1.06.
 TARGET_EAR_ENERGY = 0.25
 
+# ITD is a low-frequency cue. Above roughly 1.5 kHz the head shadow puts ripple
+# on the cross-correlation that makes its peak broad and sometimes bimodal,
+# which is how an otherwise plausible ITD field acquires a handful of
+# directions that are a millisecond out. Zero-phase, so the filter adds no
+# delay of its own to the thing being measured.
+ITD_LOWPASS_HZ = 1500.0
+
+# Only lags this far out are searched. The largest human ITD is around 50
+# samples at 48 kHz, so 128 is loose enough not to constrain the answer and
+# tight enough to reject a spurious peak somewhere in the tail.
+ITD_MAX_LAG = 128
+
+#: SOFA azimuths, in the order the horizontal-plane table prints them.
+#: 0 is front and azimuth increases anticlockwise, so 90 is the listener's
+#: left and 270 their right (docs/03-data-model.md).
+HORIZONTAL_AZIMUTHS = (0.0, 30.0, 60.0, 90.0, 270.0, 300.0, 330.0)
+
+EAR_NAMES = ("left", "right")
+
 
 @dataclass
 class HrirSet:
@@ -54,6 +75,8 @@ class HrirSet:
     source_rate: int
     delay: np.ndarray  # Data_Delay as stored, samples
     gain: float  # normalisation gain that was applied
+    itd: np.ndarray  # [M] float32, unsigned magnitude in samples
+    itd_far_ear: np.ndarray  # [M] uint8, 0 = left, 1 = right
 
     @property
     def m(self) -> int:
@@ -153,6 +176,90 @@ def normalise(ir: np.ndarray) -> tuple[np.ndarray, float]:
     return (ir * gain).astype(np.float32), gain
 
 
+# --------------------------------------------------------------------------- #
+# phase 2, step 1 — ITD by cross-correlation
+# --------------------------------------------------------------------------- #
+
+
+def lowpass(ir: np.ndarray, cutoff: float = ITD_LOWPASS_HZ) -> np.ndarray:
+    """Zero-phase low-pass along the last axis."""
+    b, a = signal.butter(4, cutoff, btype="low", fs=RATE)
+    return signal.filtfilt(b, a, ir.astype(np.float64), axis=-1)
+
+
+def estimate_itd(ir: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Broadband ITD per direction, by cross-correlation of the two ears.
+
+    Returns `(magnitude, far_ear)`: an unsigned delay in samples, and which
+    ear it belongs to. That representation is not incidental — 05-audio-engine
+    §4 applies the delay as a frequency-domain phase ramp, and a ramp with a
+    negative sign is an *advance*, which wraps the start of the response round
+    to the end of the buffer. Carrying the sign as "which ear" instead lets
+    phase 4 apply the full magnitude to the far ear and zero to the near one,
+    so both ramps stay non-negative and nothing wraps.
+
+    The magnitude is fractional. Phase 4's ramp gives sub-sample delay for
+    free, and phase 3 has to interpolate this field and show it is continuous
+    to better than a sample, which a sample-quantised field cannot be.
+    """
+    lp = lowpass(ir)
+    nfft = 1 << int(np.ceil(np.log2(2 * lp.shape[-1])))
+    left = np.fft.rfft(lp[:, 0], n=nfft, axis=-1)
+    right = np.fft.rfft(lp[:, 1], n=nfft, axis=-1)
+
+    # Circular cross-correlation. Negative lags live at the end of the buffer,
+    # so the two halves are stitched into one window running -MAX .. +MAX.
+    # Sign convention: a positive lag means the *left* ear is the later one.
+    # That is pinned by the synthetic check in checks.py rather than argued
+    # from a convention here, because it is the error that would survive every
+    # summary statistic in this file and only show up in phase 5, as a mix
+    # that is quietly mirrored.
+    cc = np.fft.irfft(left * np.conj(right), n=nfft, axis=-1)
+    w = ITD_MAX_LAG
+    window = np.concatenate([cc[:, -w:], cc[:, : w + 1]], axis=-1)
+
+    peak = window.argmax(axis=-1)
+    rows = np.arange(window.shape[0])
+    last = window.shape[-1] - 1
+
+    # Parabolic interpolation through the three samples around the peak. Guard
+    # the edges and a flat top, both of which mean there is nothing to refine.
+    y0 = window[rows, np.clip(peak - 1, 0, last)]
+    y1 = window[rows, peak]
+    y2 = window[rows, np.clip(peak + 1, 0, last)]
+    curvature = y0 - 2.0 * y1 + y2
+    refine = (peak > 0) & (peak < last) & (curvature != 0.0)
+    delta = np.where(refine, 0.5 * (y0 - y2) / np.where(refine, curvature, 1.0), 0.0)
+
+    lag = (peak - w) + np.clip(delta, -0.5, 0.5)
+    far = np.where(lag > 0.0, 0, 1).astype(np.uint8)
+    return np.abs(lag).astype(np.float32), far
+
+
+def nearest_direction(hrir: HrirSet, az: float, el: float = 0.0) -> int:
+    """Index of the measurement closest to (az, el), in degrees."""
+    d_az = (hrir.az_el[:, 0] - az + 180.0) % 360.0 - 180.0
+    d_el = hrir.az_el[:, 1] - el
+    return int(np.argmin(d_az * d_az + d_el * d_el))
+
+
+def horizontal_itd(hrir: HrirSet) -> list[tuple[float, float, float, int]]:
+    """(azimuth, ITD samples, ITD ms, far ear) across the horizontal plane."""
+    rows = []
+    for az in HORIZONTAL_AZIMUTHS:
+        i = nearest_direction(hrir, az)
+        samples = float(hrir.itd[i])
+        az_measured = float(hrir.az_el[i, 0])
+        far = int(hrir.itd_far_ear[i])
+        rows.append((az_measured, samples, samples / RATE * 1e3, far))
+    return rows
+
+
+# --------------------------------------------------------------------------- #
+# loading
+# --------------------------------------------------------------------------- #
+
+
 def load(path: Path | None = None) -> HrirSet:
     sofa = sofar.read_sofa(str(path or fetch()), verify="auto", verbose=False)
 
@@ -167,6 +274,7 @@ def load(path: Path | None = None) -> HrirSet:
     ir = np.asarray(sofa.Data_IR, dtype=np.float32)
 
     ir, gain = normalise(resample(ir, source_rate))
+    itd, itd_far_ear = estimate_itd(ir)
 
     return HrirSet(
         name=f"{sofa.GLOBAL_DatabaseName} / {sofa.GLOBAL_Title}",
@@ -177,6 +285,8 @@ def load(path: Path | None = None) -> HrirSet:
         source_rate=source_rate,
         delay=np.asarray(sofa.Data_Delay, dtype=np.float64),
         gain=gain,
+        itd=itd,
+        itd_far_ear=itd_far_ear,
     )
 
 
@@ -202,6 +312,15 @@ mean energy  {energy:.4f} per ear (target {TARGET_EAR_ENERGY})
 peak         {np.abs(hrir.ir).max():.4f}
 """
     )
+
+    # SOFA azimuth increases anticlockwise, so 90 is the listener's left. The
+    # far ear must be the opposite one on every row; that it is, is the whole
+    # point of printing this rather than a single summary number.
+    print("ITD, horizontal plane      (azimuth 90 = left, 270 = right)\n")
+    print("    azimuth    ITD samples      ms    far ear")
+    for az, samples, ms, far in horizontal_itd(hrir):
+        print(f"    {az:7.1f}    {samples:11.2f}   {ms:5.3f}    {EAR_NAMES[far]}")
+    print()
 
 
 def main() -> int:

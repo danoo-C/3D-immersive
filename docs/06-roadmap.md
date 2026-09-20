@@ -90,9 +90,19 @@ device, so it runs here on WSL and writes WAV files to listen to on headphones.
 It also prints per-block processing time, mean and p99 — an early data point
 for the M4 benchmark.
 
-**Constraints:** under ~300 lines. numpy/scipy plus `sofar` and `soxr`, nothing
+**Constraints:** under ~450 lines. numpy/scipy plus `sofar` and `soxr`, nothing
 else. Not generalised, not tidied, not moved into `src/` afterwards. If it
 turns out to be useful twice, it gets rewritten properly inside the package.
+
+The number was ~300 until phase 2, and is raised rather than met because it was
+an estimate made before any of the DSP existed: phase 1 alone came to 227, and
+the three remaining phases are projected at ~200 more. The constraint that
+matters is the sentence after it — not generalised, not promoted, four
+dependencies — and none of that changes at 450. Splitting the DSP into an
+importable module to stay under 300 would have been a closer thing to building
+a library than writing 430 honest lines in one file. Phase 1's move of the
+checks into `spikes/checks.py` is not a precedent against this: that was test
+code, which is not what a script's line budget is measuring.
 
 **Done when:** the four files exist, they have been listened to on headphones,
 and the set the spike ran on is recorded — by name, version and licence — as

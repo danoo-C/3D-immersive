@@ -1,7 +1,7 @@
 # S0 · Phase 2 — ITD and minimum phase
 
-**Status:** not started · **Plan:** not written yet —
-`plans/phase_2_itd_minimum_phase.md`
+**Status:** in progress · **Plan:**
+[plans/phase_2_itd_minimum_phase.md](plans/phase_2_itd_minimum_phase.md)
 
 ## Goal
 
@@ -56,4 +56,55 @@ representation is decided here even though it is applied later. Mitigates the
 
 ## Notes
 
-Appended while building.
+**Step 1 — ITD by cross-correlation. Done; all of this phase's ITD acceptance
+lines pass.** Measured on SADIE II D1:
+
+```
+    azimuth    ITD samples      ms    far ear
+        0.0           0.37   0.008    left
+       30.0          15.08   0.314    right
+       60.0          33.68   0.702    right
+       90.0          38.29   0.798    right
+      270.0          38.09   0.794    left
+      300.0          34.31   0.715    left
+      330.0          15.73   0.328    left
+```
+
+**The 1.5 kHz low-pass earns its place on evidence, not on principle.** It was
+chosen in the plan on the argument that head-shadow ripple above ~1.5 kHz
+broadens the correlation peak. Measured across the whole set:
+
+| Cutoff | ITD at ±90° | max over all 8802 |
+|---|---|---|
+| none (fullband) | 39 / 38 sa | **44 sa** |
+| 1.5 kHz | 38 / 38 sa | **38 sa** |
+| 3 kHz | 38 / 37 sa | 40 sa |
+| 8 kHz | 39 / 39 sa | 44 sa |
+
+The tell is not the pole values, which barely move — it is that with the
+low-pass the **maximum over the entire sphere occurs at the poles**, where
+physics says it must. Without it the maximum is 44 samples *somewhere else*,
+which can only be a spurious peak. Fullband would have produced an ITD field
+with a handful of directions ~6 samples wrong and no summary statistic
+complaining.
+
+⚠️ **The acceptance's sample figures are a rounded version of its millisecond
+band, and this set falls in the gap.** 0.8 ms is 38.4 samples; the acceptance
+says "roughly 29–38". The measured 38.29 samples is 0.798 ms — inside the
+stated band, outside the rounded parenthetical. The check gates on
+milliseconds, which is the criterion the line actually states. Flagged rather
+than quietly widened, because "the number was just outside so I moved it" and
+"the units in the acceptance disagree with each other" look identical in a
+diff.
+
+**Early sighting for step 3, not yet confirmed:** the maximum ITD over the set
+is ~38 samples, which puts phase 4's
+`next_pow2(512 + 256 + ceil(38) - 1) = next_pow2(805)` at **1024** — the value
+[05-audio-engine.md](../05-audio-engine.md)'s cost estimate assumes. Step 3
+measures and asserts this properly.
+
+**Sign convention.** Pinned by a synthetic pair (impulse at sample 100 in the
+left ear, 117 in the right) *and* its mirror image, so a convention that is
+backwards cannot pass by being backwards consistently. A positive
+cross-correlation lag means the left ear is the later one. Contralateral
+behaviour on real data is asserted separately at azimuth 90 and 270.
