@@ -30,7 +30,7 @@ picked.
 
 **Rationale for the recommendation:** UI-heavy app; numpy gives C-speed DSP;
 export is offline so quality is never GIL-limited; the audio callback is a
-single clean seam to port later. C++ only wins for plugin export (see QA-43).
+single clean seam to port later. C++ only wins for plugin export (see QA-27).
 
 → D-1, [02-architecture.md](02-architecture.md)
 

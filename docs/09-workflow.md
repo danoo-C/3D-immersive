@@ -4,6 +4,10 @@ How a milestone gets built. The numbered documents `00`–`08` describe the
 *product*; this one describes the *process*, and it is the only document that
 grows while work is happening.
 
+Its companion is [doc-system.md](doc-system.md), which governs how the
+documents themselves are written, numbered and changed. The split: that file
+owns the containers, this one owns the sequencing.
+
 ## The shape
 
 Each milestone gets a directory, created when that milestone starts and not
@@ -105,6 +109,7 @@ other. The rule:
 | Kind of thing | Belongs in | Never in |
 |---|---|---|
 | A decision with a rationale | the decision log in [01-requirements.md](01-requirements.md) | a phase or plan doc |
+| How to write any of these documents | [doc-system.md](doc-system.md) | here |
 | A change to how the product behaves | the relevant numbered doc (`02`–`05`) | a phase doc |
 | A new requirement | `01-requirements.md` as a new F-number | anywhere else |
 | What we are building this week | a phase doc | `06-roadmap.md` |

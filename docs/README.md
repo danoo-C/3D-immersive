@@ -1,5 +1,8 @@
 # Documentation
 
+How these documents are organised, numbered and changed is specified in
+[doc-system.md](doc-system.md) — read that before adding or restructuring one.
+
 | | |
 |---|---|
 | [00 — Overview](00-overview.md) | What the app is, the stack, what is in and out of scope |
@@ -12,6 +15,11 @@
 | [07 — QA Archive](07-qa-archive.md) | Closed: every question asked, the answer given, and where it landed |
 | [08 — Environment](08-environment.md) | venv, `launch.py`, the `installer.py` spec, and why not PyPy |
 | [09 — Workflow](09-workflow.md) | How a milestone gets built: per-milestone directories, phases and plans |
+
+Two documents sit outside the numbered set because they are meta rather than
+product: [doc-system.md](doc-system.md), which governs the documentation
+itself, and [09-workflow.md](09-workflow.md), which governs how work is
+sequenced.
 
 Alongside these, each milestone under way has its own directory —
 `m1_core_model/` and so on — holding one document per build phase and a
@@ -30,6 +38,7 @@ About to build something: 09, then the current milestone's directory.
 Implementing: 02 → 03 → the document for the area you're in.
 Deciding something: check the decision log in 01 before re-opening it, and
 [07](07-qa-archive.md) for why it went that way.
+Writing or restructuring a document: [doc-system.md](doc-system.md).
 
 There are no open questions. Section C of [07](07-qa-archive.md) lists the
 assumptions that were accepted rather than answered directly — those are the
