@@ -78,6 +78,7 @@ class HrirSet:
     gain: float  # normalisation gain that was applied
     itd: np.ndarray  # [M] float32, unsigned magnitude in samples
     itd_far_ear: np.ndarray  # [M] uint8, 0 = left, 1 = right
+    minphase: np.ndarray  # [M, 2, N] float32, no delay of any kind
 
     @property
     def m(self) -> int:
@@ -292,6 +293,77 @@ def estimate_itd_onset(ir: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.abs(lag).astype(np.float32), far
 
 
+# 32x the 256 taps, measured rather than assumed - and *not* the same number as
+# phase 4's convolution nfft, which is 1024 and comes from a different formula
+# entirely (block + taps + ITD). Two nffts, two reasons; conflating them is an
+# easy and expensive mistake.
+#
+# The usual rule of thumb is 4x the impulse length, and for HRIRs it is wrong.
+# The cepstrum has to decay before it wraps round its own buffer, and the log
+# magnitude of a deep pinna notch decays very slowly, so the aliasing lands
+# exactly at the nulls. Measured over 20 directions, worst in-band error:
+#
+#     nfft  1024 (4x)   5.489 dB     39 bins over 0.5 dB
+#     nfft  2048 (8x)   4.490 dB      5 bins
+#     nfft  4096 (16x)  0.886 dB      1 bin
+#     nfft  8192 (32x)  0.017 dB      0 bins
+#
+# A tenfold improvement per doubling, all of it at the nulls. At 1024 the
+# error is small enough everywhere else - 0.155 dB within 30 dB of the peak -
+# that nothing but a check aimed straight at the notches would have caught it.
+MINPHASE_NFFT = 8192
+
+# One batched transform of the whole set at that size would peak at several GB.
+# Chunked, it is 70 MB at a time and no slower in any way that matters here.
+MINPHASE_CHUNK = 512
+
+# HRTFs have deep pinna notches, and log(0) at one of them puts an infinity
+# into the cepstrum that comes back as NaN in every tap. Floored relative to
+# each response's own peak, so it does not depend on the set's overall level.
+MINPHASE_FLOOR_DB = -100.0
+
+
+def minimum_phase(ir: np.ndarray, nfft: int = MINPHASE_NFFT) -> np.ndarray:
+    """The minimum-phase part of each HRIR, via the real cepstrum.
+
+    Per §2 of docs/05-audio-engine.md. Minimum-phase magnitudes interpolate
+    cleanly and delays interpolate cleanly; their sum does not, which is why
+    the two are kept apart. This returns the spectral half — it carries no
+    delay at all, including no ITD.
+
+    Note this is *not* "the HRIR with the ITD taken out": the construction
+    discards every scrap of excess phase, the interaural delay and any all-pass
+    component together. The ITD is estimated separately from the original pair,
+    never subtracted first, or whatever the estimate got wrong would be counted
+    twice.
+    """
+    taps = ir.shape[-1]
+    half = nfft // 2
+    out = np.empty(ir.shape, dtype=np.float32)
+
+    for start in range(0, ir.shape[0], MINPHASE_CHUNK):
+        chunk = ir[start : start + MINPHASE_CHUNK].astype(np.float64)
+        magnitude = np.abs(np.fft.rfft(chunk, n=nfft, axis=-1))
+        floor = magnitude.max(axis=-1, keepdims=True) * 10 ** (MINPHASE_FLOOR_DB / 20)
+        cepstrum = np.fft.irfft(np.log(np.maximum(magnitude, floor)), n=nfft, axis=-1)
+
+        # The fold, which is the whole construction: keep quefrency 0 and the
+        # midpoint, double everything causal, discard everything anticausal.
+        # Doing it the other way round produces a *maximum*-phase response
+        # whose magnitude check passes perfectly and whose energy sits at the
+        # far end - which is why the energy check is not a nicety.
+        folded = np.zeros_like(cepstrum)
+        folded[..., 0] = cepstrum[..., 0]
+        folded[..., 1:half] = 2.0 * cepstrum[..., 1:half]
+        folded[..., half] = cepstrum[..., half]
+
+        spectrum = np.exp(np.fft.rfft(folded, n=nfft, axis=-1))
+        built = np.fft.irfft(spectrum, n=nfft, axis=-1)[..., :taps]
+        out[start : start + MINPHASE_CHUNK] = built
+
+    return out
+
+
 def next_pow2(n: int) -> int:
     return 1 << int(np.ceil(np.log2(n)))
 
@@ -364,6 +436,7 @@ def load(path: Path | None = None) -> HrirSet:
         gain=gain,
         itd=itd,
         itd_far_ear=itd_far_ear,
+        minphase=minimum_phase(ir),
     )
 
 

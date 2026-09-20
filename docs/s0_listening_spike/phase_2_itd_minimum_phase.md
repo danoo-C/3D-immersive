@@ -1,6 +1,6 @@
 # S0 · Phase 2 — ITD and minimum phase
 
-**Status:** in progress · **Plan:**
+**Status:** ✅ complete · **Plan:**
 [plans/phase_2_itd_minimum_phase.md](plans/phase_2_itd_minimum_phase.md)
 
 ## Goal
@@ -26,40 +26,41 @@ resampled data and printed.
 
 ## Acceptance
 
-- [ ] Printed ITD table for the horizontal plane at 0°, ±30°, ±60°, ±90°: the
+- [x] Printed ITD table for the horizontal plane at 0°, ±30°, ±60°, ±90°: the
       value is within ±2 samples of 0 at azimuth 0, and reaches 0.6–0.8 ms
       (roughly 29–38 samples at 48 kHz) near ±90°.
-- [ ] The ITD is stored as an unsigned magnitude plus which ear is far, not as
+- [x] The ITD is stored as an unsigned magnitude plus which ear is far, not as
       a signed per-ear delay — the representation that lets
       [phase 4](phase_4_block_engine.md) keep both ramps non-negative.
-- [ ] The far ear is the contralateral one: a source at +90° azimuth delays the
+- [x] The far ear is the contralateral one: a source at +90° azimuth delays the
       ear on the opposite side. Asserted, because a sign error here is
       perfectly audible and perfectly easy to miss.
-- [ ] The two estimators agree on **which ear is far** for at least 99% of the
+- [x] The two estimators agree on **which ear is far** for at least 99% of the
       directions where `|ITD| > 3` samples — the question a sign error breaks,
       asked only where there is a sign to get wrong.
-- [ ] Their signed difference has **no systematic offset**: `|median| < 1`
+- [x] Their signed difference has **no systematic offset**: `|median| < 1`
       sample. A bias would mean one of them is calibrated wrong.
-- [ ] The p95 of `|difference|` is under 8 samples, and the disagreements are
+- [x] The p95 of `|difference|` is under 8 samples, and the disagreements are
       **structured by shadow depth** rather than scattered — asserted by
       comparing the shadow in the worst decile against the best. Scatter with
       no structure would mean noise in one of the estimators; structure means
       they are measuring different things, which they are.
-- [ ] The disagreements are printed with their directions rather than averaged
+- [x] The disagreements are printed with their directions rather than averaged
       away.
-
-> **Amended after measurement.** These four lines replace one: *"the two
-> estimators agree within 2 samples for at least 95% of directions"*. That line
-> cannot be met by an estimator that is independent, and it can only be met by
-> one that is not — see the Notes. Amended explicitly rather than quietly, per
-> [09-workflow.md](../09-workflow.md), and the reasoning is D-69.
-- [ ] `max_itd_samples` is computed from the data, printed, and lands in a
+- [x] `max_itd_samples` is computed from the data, printed, and lands in a
       sanity range of 30–70 samples at 48 kHz. It is never hardcoded.
-- [ ] Minimum-phase magnitude check: `|FFT(minphase)|` matches `|FFT(original)|`
+- [x] Minimum-phase magnitude check: `|FFT(minphase)|` matches `|FFT(original)|`
       within 0.5 dB between 100 Hz and 16 kHz for a random sample of 20
       directions.
-- [ ] Minimum-phase energy is front-loaded: over 90% of cumulative energy falls
+- [x] Minimum-phase energy is front-loaded: over 90% of cumulative energy falls
       in the first quarter of the taps, for the same sample.
+
+> **Amended after measurement.** The four lines about the two estimators
+> replace one: *"the two estimators agree within 2 samples for at least 95% of
+> directions"*. That line cannot be met by an estimator that is independent,
+> and it can only be met by one that is not — see the Notes. Amended
+> explicitly rather than quietly, per
+> [09-workflow.md](../09-workflow.md), and the reasoning is D-69.
 
 ## Implements
 
@@ -202,3 +203,80 @@ spurious peak anywhere else.
 "Never hardcoded" is also asserted rather than asked for on trust: a synthetic
 pair delayed by 12 samples must produce 12, which a constant tuned to this
 dataset's 39 would fail.
+
+---
+
+**Step 4 — minimum phase via the real cepstrum. Done.** Magnitude preserved to
+**0.017 dB** over 100 Hz – 16 kHz, and **99.1%** of each response's energy
+inside the first quarter of its taps, which is what makes truncating back to
+256 taps free.
+
+⚠️ **The "4× the impulse length" rule of thumb for the cepstral `nfft` is
+wrong for HRIRs, and this plan had specified it.** The cepstrum must decay
+before it wraps its own buffer, and the log magnitude of a deep pinna notch
+decays very slowly, so the aliasing lands precisely at the nulls:
+
+| cepstral `nfft` | worst in-band error | bins over 0.5 dB |
+|---|---|---|
+| 1024 (4×) | 5.489 dB | 39 |
+| 2048 (8×) | 4.490 dB | 5 |
+| 4096 (16×) | 0.886 dB | 1 |
+| **8192 (32×)** | **0.017 dB** | **0** |
+
+At 1024 the error is 0.155 dB everywhere within 30 dB of the peak, so nothing
+but a check aimed straight at the notches would have caught it. The plan's
+risk table had "re-run once at 2048 and compare" as a half-hour mitigation;
+it is the only reason this was found.
+
+⚠️ **Two different `nfft`s now exist and they are not the same number.** The
+cepstral one is 8192 and comes from how fast a log spectrum decays. Phase 4's
+convolution one is 1024 and comes from `block + taps + ITD`. Conflating them
+is easy and would be expensive in both directions.
+
+One consequence: the whole-set minimum-phase pass at 8192 would peak at
+several GB as a single batched transform, so it is chunked 512 directions at
+a time. Load went from ~2 s to 7.6 s. Fine for a spike; M4 caches the prepared
+bank ([05](../05-audio-engine.md) §4) and pays it once.
+
+### ⚠️ The reconstruction residual is large, and that is the finding
+
+The plan added a diagnostic no acceptance line asks for: rebuild the original
+from its two halves — minimum phase, far ear delayed by the estimated ITD —
+and measure what is left. It said, in advance, that *"if it comes out large,
+the decomposition is not describing the data and phase 4 would be building on
+sand."*
+
+It came out large. Against the best common time alignment, searched rather
+than guessed:
+
+```
+median +0.1 dB, worst +1.1 dB   (residual RMS relative to the signal)
+  100 Hz - 1 kHz   -4.8 dB
+    1 kHz - 4 kHz  +1.2 dB
+    4 kHz - 8 kHz  -0.3 dB
+    8 kHz - 16 kHz +0.8 dB
+```
+
+A residual at 0 dB means the error waveform is about the size of the signal.
+The magnitude spectra agree to 0.017 dB, so this is **entirely phase**: the
+all-pass component that minimum-phase extraction discards is, in waveform
+terms, substantial.
+
+**This is not a bug, and it is not a reason to stop.** Minimum phase plus a
+broadband delay was never a waveform model — [05](../05-audio-engine.md) §2
+says the minimum-phase part is "the remaining spectral cue", and the entire
+reason for the split is that magnitudes and delays each interpolate cleanly
+while raw HRIRs do not. A model that discards inaudible excess phase is doing
+what it was designed to do. The measurement does not say the design is wrong.
+
+**What it does say is that the design's central assumption is load-bearing and
+still untested.** "The discarded all-pass is inaudible" is an assumption, this
+number is how much is being discarded, and nothing in phases 1–4 can settle
+it. [Phase 5](phase_5_listening.md) can. It now has a concrete thing to listen
+for beyond the zipper test: whether a source rendered this way sounds *placed*
+as convincingly as the dataset should allow, particularly in the 1–4 kHz band
+where the residual is worst and where front/back cues live.
+
+If phase 5 says it does not, the escalation is not a fix to this script — it
+is an M4 design question about keeping some excess phase, and a decision-log
+entry. That boundary is [phase 5's scope](phase_5_listening.md), unchanged.

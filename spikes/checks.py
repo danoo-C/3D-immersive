@@ -12,6 +12,7 @@ import numpy as np
 from binaural_spike import (
     BLOCK,
     EAR_NAMES,
+    MINPHASE_NFFT,
     RATE,
     TARGET_EAR_ENERGY,
     HrirSet,
@@ -19,6 +20,7 @@ from binaural_spike import (
     estimate_itd,
     estimate_itd_onset,
     horizontal_itd,
+    minimum_phase,
     nearest_direction,
     next_pow2,
     nfft_for,
@@ -254,6 +256,84 @@ def run(hrir: HrirSet) -> int:
         "nfft matches the cost estimate in 05",
         nfft == 1024,
         f"{nfft} at block {BLOCK}, N {hrir.n}",
+    )
+
+    # --- minimum phase -----------------------------------------------------
+    sample = np.random.default_rng(7).choice(hrir.m, 20, replace=False)
+    probe_nfft = 8192
+    freqs = np.fft.rfftfreq(probe_nfft, 1.0 / RATE)
+    band = np.broadcast_to(
+        (freqs >= 100.0) & (freqs <= 16_000.0),
+        (len(sample), 2, len(freqs)),
+    )
+
+    def magnitude_error(candidate: np.ndarray) -> np.ndarray:
+        original = np.abs(np.fft.rfft(hrir.ir[sample], n=probe_nfft, axis=-1))
+        got = np.abs(np.fft.rfft(candidate, n=probe_nfft, axis=-1))
+        ratio = np.maximum(got, 1e-12) / np.maximum(original, 1e-12)
+        return np.abs(20 * np.log10(ratio))
+
+    ok("minimum phase is finite", bool(np.isfinite(hrir.minphase).all()))
+
+    error = magnitude_error(hrir.minphase[sample])
+    ok(
+        "minimum phase preserves the magnitude within 0.5 dB",
+        float(error[band].max()) < 0.5,
+        f"max {error[band].max():.3f} dB over 20 directions, 100 Hz - 16 kHz",
+    )
+
+    # Energy front-loaded, which is what makes truncating back to N taps free -
+    # and what a fold done the wrong way round would fail while the magnitude
+    # check above passed perfectly.
+    cumulative = np.cumsum(hrir.minphase[sample].astype(np.float64) ** 2, axis=-1)
+    quarter = cumulative[..., hrir.n // 4 - 1] / cumulative[..., -1]
+    ok(
+        "minimum-phase energy is in the first quarter of the taps",
+        float(quarter.min()) > 0.90,
+        f"min {quarter.min() * 100:.1f}%, median {np.median(quarter) * 100:.1f}%",
+    )
+
+    # The cepstrum must decay before it wraps. Halving nfft has to make things
+    # measurably worse; if it does not, the chosen size is doing nothing and
+    # one of these numbers is not measuring what it claims to.
+    coarse = magnitude_error(minimum_phase(hrir.ir[sample], nfft=MINPHASE_NFFT // 8))
+    ok(
+        "nfft is large enough that the cepstrum does not alias",
+        float(coarse[band].max()) > float(error[band].max()) * 4,
+        f"{MINPHASE_NFFT} -> {error[band].max():.3f} dB, "
+        f"{MINPHASE_NFFT // 8} -> {coarse[band].max():.3f} dB",
+    )
+
+    # Reconstruction residual: printed, never gated. The decomposition is
+    # lossy by construction — minimum phase plus a broadband delay does not
+    # capture an all-pass component, and 05 never claimed it would. Nobody
+    # knows what a normal value is for this dataset yet, so a threshold now
+    # would either pass vacuously or fail for something that is not a bug.
+    # What it is for: if this came out *large*, the two halves would not be
+    # describing the data and phase 4 would be building on sand.
+    rows = np.arange(len(sample))
+    tau = np.zeros((len(sample), 2))
+    tau[rows, hrir.itd_far_ear[sample]] = hrir.itd[sample]
+    omega = 2 * np.pi * np.fft.rfftfreq(probe_nfft)
+    spec = np.fft.rfft(hrir.minphase[sample], n=probe_nfft, axis=-1)
+    rebuilt = np.fft.irfft(spec * np.exp(-1j * omega * tau[:, :, None]), axis=-1)
+
+    # The model carries no common propagation delay — 05 drops it deliberately
+    # as an inaudible constant — so the best common shift is searched rather
+    # than guessed from a peak, which would charge the model for a bad
+    # alignment on top of what it actually discards.
+    original = hrir.ir[sample].astype(np.float64)
+    scale = np.sqrt(np.mean(original**2, axis=(1, 2)))
+    best = np.full(len(sample), np.inf)
+    for shift in range(200):
+        candidate = np.roll(rebuilt, shift, axis=-1)[..., : hrir.n]
+        rms = np.sqrt(np.mean((candidate - original) ** 2, axis=(1, 2)))
+        best = np.minimum(best, rms / scale)
+    residual = 20 * np.log10(best)
+    print(
+        f"       reconstruction residual (not a gate): median "
+        f"{np.median(residual):+.1f} dB, worst {residual.max():+.1f} dB "
+        f"- waveform, not magnitude; see the phase notes"
     )
 
     # Printed with their directions rather than averaged away, because where

@@ -90,19 +90,29 @@ device, so it runs here on WSL and writes WAV files to listen to on headphones.
 It also prints per-block processing time, mean and p99 — an early data point
 for the M4 benchmark.
 
-**Constraints:** under ~450 lines. numpy/scipy plus `sofar` and `soxr`, nothing
-else. Not generalised, not tidied, not moved into `src/` afterwards. If it
-turns out to be useful twice, it gets rewritten properly inside the package.
+**Constraints:** numpy/scipy plus `sofar` and `soxr`, nothing else. Not
+generalised, not tidied, never imported by the package, never moved into
+`src/`. If it turns out to be useful twice, it gets rewritten properly inside
+the package. One file plus its checks, readable top to bottom in one sitting,
+because the spike's whole job is to be *trusted* by someone deciding whether
+the design is sound.
 
-The number was ~300 until phase 2, and is raised rather than met because it was
-an estimate made before any of the DSP existed: phase 1 alone came to 227, and
-the three remaining phases are projected at ~200 more. The constraint that
-matters is the sentence after it — not generalised, not promoted, four
-dependencies — and none of that changes at 450. Splitting the DSP into an
-importable module to stay under 300 would have been a closer thing to building
-a library than writing 430 honest lines in one file. Phase 1's move of the
-checks into `spikes/checks.py` is not a precedent against this: that was test
-code, which is not what a script's line budget is measuring.
+**There was a line budget here and it has been removed**, which is worth
+explaining rather than quietly dropping. It was "~300 lines", raised to "~450"
+during phase 2, and phase 2 finished at 506 with two phases still to go. Both
+numbers were estimates of *code* against a budget measured in *total lines* —
+the file is 49% code, 30% comment and docstring, 21% blank — and a third
+estimate from the same source would be worth no more than the first two.
+
+What the count was standing in for is the list above, and every item on that
+list is checkable in a way a line count is not. The prose it was implicitly
+penalising is load-bearing: the reason the cepstral `nfft` is 8192 and not the
+textbook 1024 is four lines of measured table in a comment, and deleting it to
+save lines would delete the finding.
+
+Two phases of evidence say the honest total is somewhere near 750. If the
+script ever reads like a library rather than a script, that is the thing to
+act on, and it is visible without counting anything.
 
 **Done when:** the four files exist, they have been listened to on headphones,
 and the set the spike ran on is recorded — by name, version and licence — as

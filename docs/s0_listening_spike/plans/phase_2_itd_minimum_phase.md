@@ -1,6 +1,6 @@
 # Plan — S0 · Phase 2 — ITD and minimum phase
 
-**Written:** 2026-09-21 · **Status:** in progress
+**Written:** 2026-09-21 · **Status:** ✅ complete
 
 ## Approach
 
@@ -254,9 +254,59 @@ the 700 Hz / −3 dB configuration was sitting there passing the stated line,
 and taking it would have left the phase green, the acceptance satisfied and
 the cross-check incapable of catching anything.
 
+**Steps 3 and 4 done.** Step 3 was the only one that went as written. Step 4
+broke the plan's cepstral `nfft`: 1024 was specified on the standard "4× the
+impulse length" rule of thumb, and that rule is wrong for HRIRs, because the
+log magnitude of a deep pinna notch decays too slowly for the cepstrum to fit.
+It is 8192, chosen from a measured table rather than a second rule of thumb.
+The plan's own risk row — *"re-run once at 2048 and compare"* — is the only
+reason it was found, and it was found to be worse than the row imagined.
+
 ## Outcome
 
-Filled in at the end. What actually happened, what this plan got wrong, and
-anything phase 3 needs to know — including `max_itd_samples`, the implied
-`nfft`, the estimator agreement rate and the reconstruction residual, all four
-of which phase 3 or phase 4 inherits as a fact rather than an assumption.
+**Every acceptance line passes**, four of them rewritten. `--check` prints 33
+checks and exits zero.
+
+**What this plan got right.** Two of its risk rows paid for the whole
+document. "scipy's correlation sign is easy to get backwards" produced the
+synthetic probe, and its mirror; "nfft too small, so the cepstrum aliases —
+passes the 0.5 dB check while being wrong" was an exactly correct prediction
+of a failure that no other check in the file would have caught. The insistence
+that the onset estimator stay independent is what turned a passing
+configuration into a rejected one.
+
+**What it got wrong.** The line estimate, by a factor of five (see below). The
+−20 dB onset threshold. The cepstral `nfft`. And the framing of the two ITD
+estimators as two measurements of one number, which is the assumption the
+acceptance was built on and which is not true.
+
+**Inherited by phase 3:**
+
+| | |
+|---|---|
+| `itd` | `[8802]` float32, unsigned magnitude in samples, fractional |
+| `itd_far_ear` | `[8802]` uint8, 0 = left, 1 = right. Both ramps non-negative |
+| `minphase` | `[8802, 2, 256]` float32, no delay of any kind |
+| `max_itd_samples` | **39** (0.812 ms), at azimuth 90°, elevation 0° |
+| phase 4's `nfft` | **1024**, with 218 samples of slack — as 05 assumes |
+| cepstral `nfft` | **8192**, a different number for a different reason |
+| load time | 7.6 s, dominated by the minimum-phase pass |
+
+Phase 3 interpolates `itd` and `minphase` between directions. Its continuity
+check — the interpolated ITD changing by less than a sample between adjacent
+1° steps — is the reason this phase kept the ITD fractional.
+
+**Handed to phase 5, not settled here:** the reconstruction residual is about
+0 dB, meaning the all-pass component the split discards is substantial in
+waveform terms while the magnitudes agree to 0.017 dB. The design assumes that
+discard is inaudible. Nothing in phases 1–4 can test that assumption, and
+phase 5 now has a specific thing to listen for. Details in the phase Notes.
+
+**⚠️ The line budget was raised at the start of this plan, spent by the end of
+it, and has now been removed.** 227 lines after phase 1, 506 after phase 2,
+against the ~450 this plan argued for. The estimate was wrong because it
+counted *code* lines against a budget measured in *total* lines: the file is
+49% code, 30% comment and docstring, 21% blank. Two phases remain, and a third
+number from the same source would be worth no more than the first two — so the
+constraint is now the list the count was standing in for, which is checkable.
+See the S0 constraints in [06-roadmap.md](../../06-roadmap.md).

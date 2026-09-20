@@ -16,7 +16,7 @@ M4.
 | Phase | Status |
 |---|---|
 | [1 — SOFA load](phase_1_sofa_load.md) | ✅ |
-| [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | in progress — [plan written](plans/phase_2_itd_minimum_phase.md), no code yet |
+| [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | ✅ |
 | [3 — Spherical interpolation](phase_3_interpolation.md) | not started |
 | [4 — Block engine and renders](phase_4_block_engine.md) | not started |
 | [5 — Listening](phase_5_listening.md) | not started |

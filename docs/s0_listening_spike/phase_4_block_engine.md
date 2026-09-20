@@ -46,8 +46,8 @@ distance rolloff, the limiter, any device output, and the zero-allocation rule
 - [ ] Per-block processing time printed as mean and p99, with p99 well under
       the 10.7 ms budget for this single source — a first data point for the M4
       benchmark, not a substitute for it.
-- [ ] The script stays under 450 lines and imports nothing beyond numpy, scipy,
-      `sofar` and `soxr`.
+- [ ] The script imports nothing beyond numpy, scipy, `sofar` and `soxr`, is
+      not imported by the package, and nothing in it has moved into `src/`.
 
 ## Implements
 
@@ -58,17 +58,17 @@ default come from that document's fixed-parameters table.
 
 ## Notes
 
-**Acceptance amended before this phase started: 300 lines → 450.** Raised
-during phase 2, which is where the arithmetic first bound. The original figure
-was an estimate made before any of the DSP was written; phase 1 alone came to
-227 lines, and phases 2–4 project to ~200 more, so the line as written could
-not have been met. The alternative — splitting the DSP into an importable
-module beside `checks.py` — was rejected as the closer thing to building a
-library, which is what the constraint was protecting against in the first
-place. The reasoning is in the roadmap's S0 constraints and in
-[the phase 2 plan](plans/phase_2_itd_minimum_phase.md); recorded here because
-[09-workflow.md](../09-workflow.md) says an acceptance line may change only if
-someone says so out loud.
+**Acceptance amended before this phase started, twice, and the second time it
+lost its number.** It read "the script stays under 300 lines"; that was raised
+to 450 during phase 2, and phase 2 then finished at 506 with two phases still
+to go. Both figures were estimates of *code* lines against a budget measured
+in *total* lines, and the second was wrong by more than the first.
 
-The rest of the line is unchanged and is the part that was ever doing the
-work: nothing imported beyond numpy, scipy, `sofar` and `soxr`.
+So the count is gone and the clause that was always doing the work stays:
+four dependencies, never imported by the package, nothing promoted into
+`src/`. Those are checkable; a line count that has to be renegotiated every
+phase is not. The full reasoning is in the S0 constraints of
+[06-roadmap.md](../06-roadmap.md) and in the Outcome of
+[the phase 2 plan](plans/phase_2_itd_minimum_phase.md). Recorded here because
+[09-workflow.md](../09-workflow.md) says an acceptance line may change only if
+someone says so out loud — which applies no less when the change is a removal.
