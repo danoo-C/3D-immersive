@@ -21,10 +21,11 @@ product: [doc-system.md](doc-system.md), which governs the documentation
 itself, and [09-workflow.md](09-workflow.md), which governs how work is
 sequenced.
 
-Alongside these, each milestone under way has its own directory —
-`m1_core_model/` and so on — holding one document per build phase and a
-`plans/` subdirectory beside them. [09](09-workflow.md) defines that system;
-the directories are created one milestone at a time, as work reaches them.
+Alongside these, each milestone under way has its own directory — holding one
+document per build phase and a `plans/` subdirectory beside them.
+[09](09-workflow.md) defines that system; the directories are created one
+milestone at a time, as work reaches them. Currently live:
+[`s0_listening_spike/`](s0_listening_spike/README.md).
 
 The original hand-written spec is in [`../README.md`](../README.md) and is kept
 as the source of intent; where it and these documents disagree, these win —

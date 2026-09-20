@@ -16,7 +16,9 @@ dynamic = ["version"]
 
 dependencies = [
     "PySide6>=6.8",
-    "numpy>=1.26",
+    # D-38: a hard floor, not a preference. Below 2.0 the FFTs allocate a
+    # float64 array inside the audio callback every block.
+    "numpy>=2.0",
     "scipy>=1.11",
     "sounddevice>=0.4.6",
     "soundfile>=0.12",

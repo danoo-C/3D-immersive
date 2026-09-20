@@ -63,7 +63,7 @@ these exist yet except where a milestone is underway:
 | | |
 |---|---|
 | `m0_scaffolding/` | complete — built before this system existed, no phase docs |
-| `s0_listening_spike/` | the throwaway spike; gets a directory like anything else |
+| `s0_listening_spike/` | **underway** — the throwaway spike; gets a directory like anything else |
 | `m1_core_model/` | |
 | `m2_media/` | |
 | `m3_timeline/` | |

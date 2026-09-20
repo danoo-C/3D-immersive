@@ -34,8 +34,10 @@ which carries its own test proving the detector is not passing vacuously while
 
 ---
 
-## S0 — Listening spike (throwaway)
+## S0 — Listening spike (throwaway) *in progress*
 *Not a milestone. A script whose only job is to be listened to.*
+
+Phases: [`docs/s0_listening_spike/`](s0_listening_spike/README.md)
 
 Nothing in the plan puts a moving source in anyone's ears until M4, three
 milestones away. That is a long time to be building on an unheard assumption,
@@ -81,8 +83,9 @@ and a default SOFA set has been chosen. Feeds QA-30 and M4.
 ## M1 — Core model, headless
 *No UI work at all.*
 
-- Pin `numpy>=2.0` in `pyproject.toml` — a hard floor, not a preference
-  (D-38); the realtime zero-allocation rule depends on it
+- ✅ Pin `numpy>=2.0` in `pyproject.toml` — a hard floor, not a preference
+  (D-38); the realtime zero-allocation rule depends on it. Done early, during
+  S0, because the spike exercises the same `rfft`/`irfft` path
 - `model.py`, `curves.py`, `time.py` dataclasses
 - Curve evaluation: linear, hold, ease with bezier solve
 - Snapping and bars:beats ↔ samples conversion

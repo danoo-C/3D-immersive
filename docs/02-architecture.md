@@ -88,6 +88,7 @@ src/immersive/
     icons/
 tests/
 docs/
+spikes/                  throwaway scripts. Never imported, never shipped.
 ```
 
 ## Imports and packaging
