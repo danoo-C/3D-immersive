@@ -30,9 +30,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from immersive.core.curves import Curve
-
-#: D-11. One rate everywhere removes an entire class of bugs.
-SAMPLE_RATE = 48_000
+from immersive.core.time import SAMPLE_RATE, Division
 
 #: Id prefixes, by entity. Short rather than uuid because a `.3dim` is meant to
 #: be diffable and hand-editable (D-13, F-2), and 36 characters in every clip
@@ -59,17 +57,6 @@ class Interpolatable(StrEnum):
     POS_Z = "pos.z"
     GAIN = "gain"
     PAN = "pan"
-
-
-class Division(StrEnum):
-    """Snap grid divisions, 1/1 through 1/32 (F-16)."""
-
-    WHOLE = "1/1"
-    HALF = "1/2"
-    QUARTER = "1/4"
-    EIGHTH = "1/8"
-    SIXTEENTH = "1/16"
-    THIRTY_SECOND = "1/32"
 
 
 class FadeShape(StrEnum):
@@ -257,6 +244,16 @@ def new_clip_id(project: Project, rng: random.Random | None = None) -> str:
 # --------------------------------------------------------------------------- #
 # derived facts
 # --------------------------------------------------------------------------- #
+
+
+def effective_snap(project: Project, channel: Channel) -> SnapSetting:
+    """The snap setting that applies to `channel` (F-18).
+
+    A channel's override wins outright, including when it disables snapping;
+    `None` inherits the project's. One function so M3 and the commands cannot
+    disagree about which one is in force.
+    """
+    return channel.snap_override if channel.snap_override is not None else project.snap
 
 
 def audible(channels: Sequence[Channel]) -> list[bool]:

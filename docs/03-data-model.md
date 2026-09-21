@@ -42,6 +42,19 @@ Everything else is a view:
 
 - Seconds — `samples / sample_rate`, for the min:sec ruler and display.
 - Bars:beats — derived from `bpm` and `time_signature`, for the grid and snap.
+  Written `bar.beat.tick`, both counting from 1 and ticks from 0, at **960
+  ticks per beat**. That resolution is chosen so every division from 1/1 to
+  1/32, straight *and* triplet, is a whole number of ticks — a rounder 1000 is
+  not divisible by 3 and would turn every triplet into an error that
+  accumulates down the timeline.
+
+**BPM counts quarter notes**, whatever the time signature says, which is what
+every DAW means by the number. A "beat" for display is the signature's
+denominator note, so at 6/8 a beat is an eighth: 120 BPM gives a beat of
+12 000 samples rather than 24 000, and a bar of six eighths is three quarters —
+the same length as a 3/4 bar. Recorded because it is a convention rather than a
+derivation, and the other reading is defensible enough to be assumed by
+accident.
 
 BPM never affects playback. It exists only to draw a grid and quantise edits.
 
