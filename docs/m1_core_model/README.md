@@ -14,7 +14,7 @@ the whole thing verifiable on WSL.
 | [1 — Dataclasses](phase_1_dataclasses.md) | ✅ |
 | [2 — Curve evaluation](phase_2_curve_evaluation.md) | ✅ |
 | [3 — Time and snapping](phase_3_time_and_snapping.md) | ✅ |
-| [4 — Undo stack](phase_4_undo_stack.md) | not started |
+| [4 — Undo stack](phase_4_undo_stack.md) | ✅ |
 | [5 — Project I/O](phase_5_project_io.md) | not started |
 
 The order is dependency order, and each phase is usable on its own. Phase 1
