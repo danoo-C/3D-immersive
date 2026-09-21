@@ -310,8 +310,36 @@ switch, 94 times per second.
 It is not a corner case. A source orbiting once per second moves about 4° per
 block, which is roughly a one-sample ITD step per block on the far ear. On
 transient material you may not notice; on sustained material — pads, strings, a
-held tone — it is a clearly audible buzz at the block rate. A threshold on
+held tone — it is an audible buzz at the block rate. A threshold on
 "large angular jumps" does not catch it, because no individual step is large.
+
+⚠️ **How audible depends on how fast the source moves, and S0 measured it.**
+"Clearly audible" was this paragraph's original wording and it is too strong at
+the bottom of the range. Block-rate sidebands on an orbiting 440 Hz sawtooth,
+crossfaded versus not:
+
+| orbit | ° per block | crossfaded | none | what the crossfade buys |
+|---|---|---|---|---|
+| 1 rev/s | 3.8 | −69.6 dB | −35.9 dB | 33.7 dB |
+| 2 rev/s | 7.7 | −62.1 dB | −31.3 dB | 30.8 dB |
+| 4 rev/s | 15.4 | −46.6 dB | −29.0 dB | 17.5 dB |
+| 8 rev/s | 30.7 | −39.0 dB | −30.4 dB | 8.6 dB |
+
+At 1 rev/s the uncrossfaded artefact sits at −35.9 dB and a listener described
+that render as realistic, with no buzz — it took an A/B to hear a difference at
+all. At 4 rev/s the same listener called the uncrossfaded file *"horrible, like
+a dial-up tone under the sound"*, unprompted. So the buzz is real and the
+crossfade is necessary; it simply does not announce itself until the source
+moves at a fair pace.
+
+Two consequences, both recorded as D-70. The crossfade's *benefit* shrinks as
+the source speeds up — the uncrossfaded artefact barely moves while the
+crossfaded render degrades, because a linear blend approximates a smooth
+trajectory badly once the step is large — so very fast motion keeps some
+artefact whatever the crossfade does, and the fix if it ever matters is
+sub-block filter updates rather than a longer fade. And the *unconditional*
+rule below is vindicated rather than softened: the quiet end of the range is
+precisely where a "large jump" threshold would decline to fire.
 
 So the crossfade is **unconditional: every block, every source** (D-37).
 

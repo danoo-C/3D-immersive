@@ -652,7 +652,7 @@ def run(hrir: HrirSet) -> int:
         "orbit_noise",
         "orbit_tone",
         "orbit_tone_nocrossfade",
-        "front_back_clicks",
+        "front_back_bursts",
     )
     on_disk = [OUT_DIR / f"{name}.wav" for name in expected_names]
     ok(

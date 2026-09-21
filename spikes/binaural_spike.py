@@ -711,9 +711,48 @@ def burst_envelope(n: int, on_ms: float = 100.0, rate: int = RATE) -> np.ndarray
 
 
 def click_train(n: int, interval_ms: float = 100.0, rate: int = RATE) -> np.ndarray:
+    """Single-sample impulses. Kept, but no longer what the renders use.
+
+    Phase 5 listened to this and could barely tell what was happening. One
+    sample is about 20 us, and front/back is carried almost entirely by the
+    spectral notches the pinna imposes - a timbre judgement, with nearly no
+    signal to make it from. `burst_train` replaced it. See the phase 5 notes.
+    """
     out = np.zeros(n)
     out[:: max(1, int(interval_ms / 1000.0 * rate))] = 1.0
     return out
+
+
+def burst_train(
+    n: int,
+    interval_ms: float = 160.0,
+    burst_ms: float = 40.0,
+    seed: int = 1,
+    rate: int = RATE,
+) -> np.ndarray:
+    """Pink-noise bursts, as an alternative to single-sample clicks.
+
+    Front/back is the hard direction: interaural time and level are nearly the
+    same in front and behind — the cone of confusion — so almost the only cue
+    distinguishing them is the spectral shape the pinna imposes, mostly
+    notches in the 5-12 kHz region. That is a *timbre* judgement, and a
+    one-sample click is about 20 us of signal to make it from.
+
+    These bursts keep the discrete onsets, which are what makes a source easy
+    to follow as it moves, and give the spectral cue something to sit in.
+    """
+    noise = pink_noise(n, seed=seed)
+    period = max(1, int(interval_ms / 1000.0 * rate))
+    length = max(1, int(burst_ms / 1000.0 * rate))
+    edge = max(1, int(0.003 * rate))
+    shape = np.ones(length)
+    shape[:edge] = np.hanning(2 * edge)[:edge]
+    shape[-edge:] = np.hanning(2 * edge)[edge:]
+
+    envelope = np.zeros(n)
+    for start in range(0, n - length, period):
+        envelope[start : start + length] = shape
+    return noise * envelope
 
 
 def orbit_path(
@@ -855,7 +894,7 @@ def render_all(
     n = int(seconds * RATE)
     noise = pink_noise(n) * burst_envelope(n)
     tone = band_limited_sawtooth(440.0, n)
-    clicks = click_train(n)
+    bursts = burst_train(n)
 
     renders = {
         "orbit_noise": render(hrir, noise, orbit_path, crossfade=crossfade),
@@ -863,7 +902,7 @@ def render_all(
         # The A/B. Always uncrossfaded, whatever the flag says - it is the
         # control, and a control that follows the switch proves nothing.
         "orbit_tone_nocrossfade": render(hrir, tone, orbit_path, crossfade=False),
-        "front_back_clicks": render(hrir, clicks, front_back_path, crossfade=crossfade),
+        "front_back_bursts": render(hrir, bursts, front_back_path, crossfade=crossfade),
     }
     return {
         name: (write_wav(OUT_DIR / f"{name}.wav", audio), times)

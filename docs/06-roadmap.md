@@ -53,7 +53,7 @@ CI now builds the wheel and installs it into a clean environment.
 
 ---
 
-## S0 — Listening spike (throwaway) *in progress*
+## S0 — Listening spike (throwaway) ✅ *complete*
 *Not a milestone. A script whose only job is to be listened to.*
 
 Phases: [`docs/s0_listening_spike/`](s0_listening_spike/README.md)
@@ -85,7 +85,7 @@ device, so it runs here on WSL and writes WAV files to listen to on headphones.
 | `orbit_noise.wav` | pink noise, 100 ms on/off bursts, orbiting 1 rev/s at ear level, 1.5 m | localisation is convincing at all |
 | `orbit_tone.wav` | sustained 440 Hz sawtooth, same orbit | **the zipper test** — must be smooth |
 | `orbit_tone_nocrossfade.wav` | same, crossfade disabled | the A/B that shows what D-37 buys |
-| `front_back_clicks.wav` | click train sweeping front → overhead → behind | elevation and front/back work |
+| `front_back_bursts.wav` | pink-noise bursts sweeping front → overhead → behind | elevation and front/back work |
 
 It also prints per-block processing time, mean and p99 — an early data point
 for the M4 benchmark.
@@ -118,6 +118,32 @@ act on, and it is visible without counting anything.
 and the set the spike ran on is recorded — by name, version and licence — as
 the leading candidate for the bundled default. Choosing that default stays
 QA-30's, at M4. Feeds QA-30 and M4.
+
+**Delivered, and it answered the question it was built to ask.** D-37 was
+decided by ear: an uncrossfaded fast orbit was described, unprompted, as
+*"horrible, like a dial up tone under the sound"* against *"a clean tone"*
+crossfaded. The per-block filter crossfade is necessary and it works, and
+three milestones of design now rest on something heard rather than argued.
+`orbit_noise.wav` was *"so realistic"*, the zipper test found no buzz, and the
+front/back sweep was followable with eyes closed. Full verdicts in
+[phase 5's Notes](s0_listening_spike/phase_5_listening.md).
+
+The spike also produced the numbers M4 inherits: `max_itd_samples` 39 and so a
+convolution `nfft` of 1024, matching this document's cost estimate; 0.20 ms
+mean and 0.44 ms p99 per block for one source against a 10.7 ms budget, with
+the direction lookup in the loop. N-1's thirty-two sources remain M4's.
+
+Two findings changed the specification. **D-70** — the crossfade's benefit
+shrinks as a source speeds up, 33.7 dB at 1 rev/s down to 8.6 dB at 8 — and
+with it a correction in place to [05](05-audio-engine.md), whose claim that an
+uncrossfaded held tone is a *clearly* audible buzz is too strong at the slow
+end. And the front/back stimulus was replaced mid-phase: single-sample clicks
+could not carry their own test, and 40 ms pink-noise bursts on the identical
+trajectory could. The table above names the file that shipped.
+
+Per its own terms the spike is **not** promoted: nothing in it moves into
+`src/`. M4 rewrites the pipeline properly in `audio/hrtf/`, with the phase
+Notes as the record of what was already learned the hard way.
 
 ---
 
