@@ -1,6 +1,6 @@
 # Plan — S0 · Phase 3 — Spherical interpolation
 
-**Written:** 2026-09-21 · **Status:** in progress
+**Written:** 2026-09-21 · **Status:** ✅ complete
 
 ## Approach
 
@@ -127,6 +127,43 @@ why phase 5 exists.
 
 ## Outcome
 
-Filled in at the end. What actually happened, what this plan got wrong, and
-what phase 4 inherits — in particular the face/weight lookup it calls once per
-block, and whether the continuity margin held.
+**All five acceptance lines pass, none amended.** `--check` prints 46 checks
+and exits zero. This is the first phase whose plan survived contact intact:
+every number it predicted from the probing it did while being written held up,
+including the ones it flagged as uncomfortable.
+
+**What it got right, and why that matters here.** The probing was the point.
+Rejecting the vertex-indexed scheme, choosing the exhaustive fallback over a
+larger `k`, and predicting the 0.914 continuity margin were all done before any
+code existed, from measurements taken while writing the plan rather than from
+reasoning about what ought to be true. The 400-face pole fan in particular is
+not something anyone would have guessed.
+
+**What it got wrong.** One thing, and only in a detail: it specified the first
+tier at `k = 32`, and at that size the scalar lookup came to 55 µs against a
+50 µs bar. `k = 8` first is better because `cKDTree.query` costs the same at
+any `k` — it is all call overhead — while the barycentric test is linear in it.
+With that and an early return for the all-resolved case, the median is 42.9 µs.
+Not a design error, but the plan asserted a constant it had not timed.
+
+**Inherited by phase 4:**
+
+| | |
+|---|---|
+| `triangulate(directions)` | 17 600 faces, built once in `load()`, 0.07 s |
+| `locate(tri, q)` | `(face, weights, per-tier counts)`; guaranteed to resolve |
+| `interpolate_itd(...)` | barycentric ITD, back in phase 2's magnitude + far-ear form |
+| lookup cost | 42.9 µs for one direction, **7.5 µs per source at 32** |
+| continuity | horizontal 0.914 sa / 1° · elevation 0.055 sa / 1° |
+
+Phase 4 applies the same weights to three complex spectra instead of three
+scalars. That is the genuine unknown this plan named and could not close: a
+scalar delay interpolates provably continuously, and the identical weights over
+minimum-phase magnitudes *should* too — that is exactly what the ITD/spectrum
+split in [05](../../05-audio-engine.md) §2 exists to make true. Phase 4 builds
+it; phase 5 is what says whether it worked.
+
+One number to carry forward rather than rediscover: the ITD is interpolated
+**signed**, then converted back to magnitude-plus-far-ear. Interpolating the
+magnitude across the median plane would turn +30 and −30 into 30 — a delay at
+full strength pointing the wrong way, where the answer is 0.

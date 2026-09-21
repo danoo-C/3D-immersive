@@ -6,20 +6,25 @@ must never download it. Run them with `python spikes/binaural_spike.py --check`.
 
 from __future__ import annotations
 
+import time
 from itertools import pairwise
 
 import numpy as np
 from binaural_spike import (
     BLOCK,
     EAR_NAMES,
+    INTERP_TIERS,
     MINPHASE_NFFT,
     RATE,
     TARGET_EAR_ENERGY,
     HrirSet,
     cartesian_to_sofa,
+    elevation_sweep,
     estimate_itd,
     estimate_itd_onset,
     horizontal_itd,
+    horizontal_sweep,
+    locate,
     minimum_phase,
     nearest_direction,
     next_pow2,
@@ -346,6 +351,119 @@ def run(hrir: HrirSet) -> int:
             f"         {hrir.az_el[i, 0]:6.1f} {hrir.az_el[i, 1]:+6.1f}"
             f"   {signed_cc[i]:+7.2f}  {signed_on[i]:+7.2f}"
         )
+
+    print("\nphase 3 checks")
+
+    tri = hrir.tri
+    # A closed triangulated sphere has exactly 2V - 4 faces. Anything else
+    # means a measurement was swallowed as interior or the hull is not closed,
+    # and every containment guarantee below rests on it being closed.
+    ok(
+        "the hull is a closed sphere",
+        tri.f == 2 * hrir.m - 4,
+        f"{tri.f} faces for {hrir.m} directions (2M-4 = {2 * hrir.m - 4})",
+    )
+    # A collinear triangle inverts to nonsense rather than failing, which would
+    # show up as wrong weights near wherever it is.
+    worst_cond = float(np.linalg.cond(tri.inverse).max())
+    ok("no face is degenerate", worst_cond < 1e6, f"worst condition {worst_cond:.1f}")
+
+    rng3 = np.random.default_rng(11)
+    probe = rng3.normal(size=(10_000, 3))
+    probe /= np.linalg.norm(probe, axis=1, keepdims=True)
+    face, weights, tiers = locate(tri, probe)
+
+    ok("every direction finds a containing triangle", bool((face >= 0).all()))
+    ok(
+        "weights sum to one",
+        float(np.abs(weights.sum(-1) - 1.0).max()) < 1e-6,
+        f"max error {np.abs(weights.sum(-1) - 1.0).max():.2e}",
+    )
+    ok(
+        "no weight is negative",
+        float(weights.min()) >= -1e-9,
+        f"min {weights.min():.2e}",
+    )
+    # Printed so a dataset that stops suiting the tiers is visible as more than
+    # "the lookup got slower".
+    labels = [*(str(k) for k in INTERP_TIERS), "every face"]
+    ok(
+        "the tiers still earn their place",
+        tiers[-1] < len(probe) // 100,
+        ", ".join(f"k={a}: {b}" for a, b in zip(labels, tiers, strict=True)),
+    )
+
+    # Querying exactly at a measurement: the direction sits on a vertex shared
+    # by several faces, any of which is a correct answer as long as that
+    # vertex carries all the weight.
+    exact = np.array(
+        [
+            nearest_direction(hrir, az, el)
+            for az, el in [(0, 0), (90, 0), (270, 0), (0, 90), (0, -90), (45, 30)]
+        ]
+    )
+    _, exact_w, _ = locate(tri, hrir.directions[exact])
+    ok(
+        "a measured direction returns its own vertex",
+        float(exact_w.max(-1).min()) > 0.999,
+        f"min top weight {exact_w.max(-1).min():.6f}",
+    )
+
+    h_face, h_itd = horizontal_sweep(hrir)
+    h_step = np.abs(np.diff(np.r_[h_itd, h_itd[0]]))
+    ok(
+        "horizontal orbit is continuous to under a sample",
+        float(h_step.max()) < 1.0,
+        f"max step {h_step.max():.3f} sa at az "
+        f"{np.arange(360.0)[h_step.argmax()]:.0f}, median {np.median(h_step):.3f}",
+    )
+
+    _, v_itd = elevation_sweep(hrir)
+    v_step = np.abs(np.diff(v_itd))
+    ok(
+        "elevation sweep is continuous to under a sample",
+        float(v_step.max()) < 1.0,
+        f"max step {v_step.max():.3f} sa, median {np.median(v_step):.3f}",
+    )
+
+    # "No jump at a triangle boundary" means crossing one is no worse than
+    # staying inside one — not that the ITD stops changing, which it must.
+    crossed = np.diff(h_face) != 0
+    inside_max = float(h_step[:-1][~crossed].max())
+    crossing_max = float(h_step[:-1][crossed].max())
+    ok(
+        "crossing a triangle is no worse than staying in one",
+        crossing_max < inside_max * 1.5,
+        f"{crossing_max:.3f} sa across {int(crossed.sum())} crossings "
+        f"vs {inside_max:.3f} within",
+    )
+
+    # Median, because the exhaustive tier is rare and slow by design. Both
+    # figures are reported: the scalar one is what this acceptance asks for,
+    # and the batched one is what actually predicts the engine, where the
+    # per-call overhead is paid once a block rather than once a source.
+    single = rng3.normal(size=(1, 3))
+    single /= np.linalg.norm(single)
+    for _ in range(20):
+        locate(tri, single)  # warm up, so the first calls' cache misses are not timed
+    scalar = []
+    for _ in range(200):
+        start = time.perf_counter()
+        locate(tri, single)
+        scalar.append((time.perf_counter() - start) * 1e6)
+    many = rng3.normal(size=(32, 3))
+    many /= np.linalg.norm(many, axis=1, keepdims=True)
+    batched = []
+    for _ in range(100):
+        start = time.perf_counter()
+        locate(tri, many)
+        batched.append((time.perf_counter() - start) * 1e6)
+    ok(
+        "median lookup is under 50 us",
+        float(np.median(scalar)) < 50.0,
+        f"{np.median(scalar):.1f} us for one, "
+        f"{np.median(batched) / 32:.1f} us per source at 32",
+    )
 
     print(f"\n{len(failures)} failed" if failures else "\nall checks passed")
     return 1 if failures else 0

@@ -26,6 +26,7 @@ import numpy as np
 import sofar
 import soxr
 from scipy import signal
+from scipy.spatial import ConvexHull, cKDTree
 
 # SADIE II D1 — the KEMAR dummy head, already 48 kHz, 256 taps. The York URL
 # in the roadmap's prose is dead; this is the sofacoustics.org mirror. The
@@ -63,6 +64,42 @@ HORIZONTAL_AZIMUTHS = (0.0, 30.0, 60.0, 90.0, 270.0, 300.0, 330.0)
 
 EAR_NAMES = ("left", "right")
 
+# Candidate face counts tried in order before the exhaustive test. Measured
+# over 10 000 seeded directions: k=8 resolves 83.8%, k=32 resolves 98.95%,
+# k=128 resolves 100%. The tiers are the optimisation; the exhaustive pass
+# behind them is the correctness argument, because "100% of ten thousand
+# directions from one seed" is not the same claim as "every query finds a
+# containing triangle", which is what this has to be true of.
+#
+# 8 first, not 32: the kd-tree costs the same either way (13-14 us, all of it
+# call overhead), but the barycentric test is linear in k, so the 84% that
+# resolve at 8 pay a quarter of the arithmetic. The 16% that fall through pay
+# for both, and still come out ahead on the average.
+INTERP_TIERS = (8, 32, 128)
+
+# A barycentric weight below this is outside the triangle. Not zero, because a
+# query landing exactly on a shared edge or a vertex - which happens whenever
+# anyone asks for a measured direction - computes as a hair either side of it.
+INTERP_TOL = 1e-9
+
+
+@dataclass
+class Triangulation:
+    """The spherical Delaunay triangulation of a set of directions.
+
+    On a sphere the convex hull *is* the Delaunay triangulation, so this is one
+    `ConvexHull` call and a little bookkeeping.
+    """
+
+    simplices: np.ndarray  # [F, 3] vertex indices
+    inverse: np.ndarray  # [F, 3, 3], inv of the three vertices as columns
+    centroids: np.ndarray  # [F, 3] unit vectors
+    tree: cKDTree  # over the centroids
+
+    @property
+    def f(self) -> int:
+        return int(self.simplices.shape[0])
+
 
 @dataclass
 class HrirSet:
@@ -79,6 +116,7 @@ class HrirSet:
     itd: np.ndarray  # [M] float32, unsigned magnitude in samples
     itd_far_ear: np.ndarray  # [M] uint8, 0 = left, 1 = right
     minphase: np.ndarray  # [M, 2, N] float32, no delay of any kind
+    tri: Triangulation  # the sphere these directions triangulate to
 
     @property
     def m(self) -> int:
@@ -364,6 +402,154 @@ def minimum_phase(ir: np.ndarray, nfft: int = MINPHASE_NFFT) -> np.ndarray:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# phase 3 — spherical interpolation
+# --------------------------------------------------------------------------- #
+
+
+def triangulate(directions: np.ndarray) -> Triangulation:
+    """Triangulate the sphere the measurement directions lie on.
+
+    Per §3 of docs/05-audio-engine.md. `ConvexHull` because for points on a
+    sphere the hull *is* the Delaunay triangulation - every face is one, and a
+    closed hull has no gaps, which is what makes "every direction is inside
+    some triangle" true rather than hopeful.
+
+    Each face gets the inverse of its three vertices-as-columns. Solving
+    `M @ [a, b, c] = q` then gives coefficients whose normalised form is
+    exactly the barycentric coordinate of where the ray from the origin
+    pierces that triangle's plane, and `q` is inside the spherical triangle if
+    and only if all three are non-negative. One 3x3 inverse per face turns both
+    the containment test and the weights into a single einsum - no ray-plane
+    intersection and no spherical trigonometry to get wrong at a pole.
+    """
+    hull = ConvexHull(directions)
+    simplices = np.asarray(hull.simplices, dtype=np.int64)
+    corners = directions[simplices]  # [F, 3, 3], row j is vertex j
+    inverse = np.linalg.inv(np.transpose(corners, (0, 2, 1)))
+    centroids = corners.mean(axis=1)
+    centroids /= np.linalg.norm(centroids, axis=1, keepdims=True)
+    return Triangulation(simplices, inverse, centroids, cKDTree(centroids))
+
+
+def barycentric(inverse: np.ndarray, q: np.ndarray) -> np.ndarray:
+    """Normalised weights of each direction in each candidate face.
+
+    `inverse` is [Q, K, 3, 3] and `q` is [Q, 3]; the result is [Q, K, 3]. A
+    face whose plane the ray meets *behind* the listener is scored -1 rather
+    than left to produce a plausible-looking set of weights with the wrong
+    sign, which is the one way a normalised barycentric coordinate can lie.
+    """
+    w = np.einsum("qkij,qj->qki", inverse, q)
+    total = w.sum(-1)
+    behind = total <= 0
+    total[behind] = 1.0
+    w /= total[..., None]
+    w[behind] = -1.0
+    return w
+
+
+def locate(
+    tri: Triangulation, q: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, list[int]]:
+    """Containing face and barycentric weights for each direction.
+
+    Returns `(face, weights, resolved_per_tier)`. The tiers narrow the search;
+    the last one is every face in the triangulation, so on a closed hull this
+    cannot fail to find a triangle - the guarantee comes from the geometry
+    rather than from a `k` that happened to be big enough on the dataset it
+    was tuned against.
+    """
+    tiers = (*INTERP_TIERS, tri.f)
+    resolved = [0] * len(tiers)
+    face = weights = None
+    pending = np.arange(len(q))
+
+    for tier, k in enumerate(tiers):
+        here = q[pending]
+        if k >= tri.f:
+            candidates = np.broadcast_to(np.arange(tri.f), (len(pending), tri.f))
+            inverse = np.broadcast_to(tri.inverse, (len(pending), tri.f, 3, 3))
+        else:
+            candidates = np.atleast_2d(tri.tree.query(here, k=k)[1])
+            inverse = tri.inverse[candidates]
+
+        w = barycentric(inverse, here)
+        inside = (w >= -INTERP_TOL).all(-1)
+        hit = inside.any(-1)
+        pick = inside.argmax(-1)
+        rows = np.arange(len(pending))
+        resolved[tier] = int(hit.sum())
+
+        if face is None and hit.all():
+            # Everything landed in the first tier it was offered, which is the
+            # overwhelmingly common case. Returning here skips the scatter
+            # bookkeeping below, which on a single direction costs more than
+            # the arithmetic it exists to manage.
+            resolved[tier] = len(q)
+            return candidates[rows, pick], w[rows, pick], resolved
+
+        if face is None:
+            face = np.full(len(q), -1, dtype=np.int64)
+            weights = np.zeros((len(q), 3))
+        face[pending[hit]] = candidates[rows, pick][hit]
+        weights[pending[hit]] = w[rows, pick][hit]
+        pending = pending[~hit]
+        if not len(pending):
+            break
+
+    if len(pending):  # a closed hull leaves nowhere for a direction to hide
+        raise AssertionError(f"{len(pending)} directions outside every face")
+    assert face is not None and weights is not None
+    return face, weights, resolved
+
+
+def signed_itd(hrir: HrirSet) -> np.ndarray:
+    """The ITD field as a signed quantity, positive when the left ear is far.
+
+    Interpolation happens here and not on the magnitude: averaging two
+    magnitudes across the median plane turns +30 and -30 into 30, a delay
+    pointing the wrong way at full strength, instead of the 0 it should be.
+    """
+    return np.where(hrir.itd_far_ear == 0, hrir.itd, -hrir.itd).astype(np.float64)
+
+
+def interpolate_itd(
+    hrir: HrirSet, face: np.ndarray, weights: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Barycentric ITD for located directions, back in phase 2's form."""
+    blended = (signed_itd(hrir)[hrir.tri.simplices[face]] * weights).sum(-1)
+    far = np.where(blended > 0.0, 0, 1).astype(np.uint8)
+    return np.abs(blended).astype(np.float32), far
+
+
+def sweep(
+    hrir: HrirSet, az: np.ndarray, el: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Signed interpolated ITD along a path, plus the face used at each step."""
+    face, weights, _ = locate(hrir.tri, sofa_directions(np.stack([az, el], axis=1)))
+    blended = (signed_itd(hrir)[hrir.tri.simplices[face]] * weights).sum(-1)
+    return face, blended
+
+
+def horizontal_sweep(hrir: HrirSet, step: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    az = np.arange(0.0, 360.0, step)
+    return sweep(hrir, az, np.zeros_like(az))
+
+
+def elevation_sweep(hrir: HrirSet, step: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """From -40 deg, up over the pole, and down the far side to -40.
+
+    Where the triangles are largest and sparsest, and where a scheme that
+    indexes faces by their vertices falls apart - the pole is one measurement
+    fanning out to 400 faces.
+    """
+    t = np.arange(-40.0, 221.0, step)
+    el = np.where(t <= 90.0, t, 180.0 - t)
+    az = np.where(t <= 90.0, 0.0, 180.0)
+    return sweep(hrir, az, el)
+
+
 def next_pow2(n: int) -> int:
     return 1 << int(np.ceil(np.log2(n)))
 
@@ -424,12 +610,13 @@ def load(path: Path | None = None) -> HrirSet:
 
     ir, gain = normalise(resample(ir, source_rate))
     itd, itd_far_ear = estimate_itd(ir)
+    directions = sofa_directions(az_el)
 
     return HrirSet(
         name=f"{sofa.GLOBAL_DatabaseName} / {sofa.GLOBAL_Title}",
         licence=str(sofa.GLOBAL_License),
         ir=ir,
-        directions=sofa_directions(az_el),
+        directions=directions,
         az_el=az_el,
         source_rate=source_rate,
         delay=np.asarray(sofa.Data_Delay, dtype=np.float64),
@@ -437,6 +624,7 @@ def load(path: Path | None = None) -> HrirSet:
         itd=itd,
         itd_far_ear=itd_far_ear,
         minphase=minimum_phase(ir),
+        tri=triangulate(directions),
     )
 
 
@@ -479,6 +667,18 @@ peak         {np.abs(hrir.ir).max():.4f}
 max ITD      {max_itd} samples ({max_itd / RATE * 1e3:.3f} ms), from the data
 nfft         {nfft} = next_pow2({BLOCK} + {hrir.n} + {max_itd} - 1)
              {nfft - used} samples of slack over the {used} needed
+"""
+    )
+
+    _, h_itd = horizontal_sweep(hrir)
+    _, v_itd = elevation_sweep(hrir)
+    h_step = np.abs(np.diff(np.r_[h_itd, h_itd[0]]))  # closed orbit
+    v_step = np.abs(np.diff(v_itd))
+    euler = 2 * hrir.m - 4
+    print(
+        f"""triangles    {hrir.tri.f} faces over {hrir.m} directions (2M-4 = {euler})
+continuity   horizontal 1 deg: max step {h_step.max():.3f} samples
+             elevation sweep:  max step {v_step.max():.3f} samples
 """
     )
 
