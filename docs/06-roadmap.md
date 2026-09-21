@@ -147,7 +147,7 @@ Notes as the record of what was already learned the hard way.
 
 ---
 
-## M1 — Core model, headless
+## M1 — Core model, headless *in progress*
 *No UI work at all.*
 
 - ✅ Pin `numpy>=2.0` in `pyproject.toml` — a hard floor, not a preference
@@ -160,6 +160,9 @@ Notes as the record of what was already learned the hard way.
 - `project_io.py` save/load with `schema_version` and a migration hook
 - The import-graph test that forbids Qt, `sounddevice`, `immersive.ui` and
   `immersive.audio` inside `core/` (sketch in [02-architecture.md](02-architecture.md))
+  — ✅ exists from M0; phase 1 is the first time it has anything to bite on
+
+Phases: [`docs/m1_core_model/`](m1_core_model/README.md)
 
 **Done when:** a project can be built in code, edited, undone, saved, reloaded
 and compared equal — all in pytest, with no window open.
