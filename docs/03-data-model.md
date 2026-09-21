@@ -88,7 +88,7 @@ Project
 └── channels         [Channel]              ordered, top to bottom
 
 MediaFile
-├── id               uuid
+├── id               "m-" + 8 hex digits
 ├── path             relative to the project file
 ├── name
 ├── source_rate      as found on disk
@@ -97,9 +97,12 @@ MediaFile
 └── hash             for relink and cache invalidation
 
 Channel
-├── id, name
+├── id               "c-" + 8 hex digits
+├── name
 ├── color            hex, from the channel palette
-├── gain_db, mute, solo
+├── gain_db
+├── mute
+├── solo
 ├── hrtf_bypass      bool   true → straight to the stereo bus, unprocessed
 ├── pan              float  -1 left … 0 centre … +1 right; bypass only
 ├── snap_override    null → inherit Project.snap
@@ -109,7 +112,7 @@ Channel
 └── clips            [Clip]                 sorted by start, never overlapping
 
 Clip
-├── id
+├── id               "k-" + 8 hex digits
 ├── media_id         → MediaFile
 ├── start            samples on the timeline
 ├── offset           samples into the source: the crop point
@@ -127,6 +130,34 @@ Keyframe
 ├── interp           linear | ease | hold      governs the segment *after* it
 └── handles          { out: [dt, dv], in: [dt, dv] }   only when interp == ease
 ```
+
+### Ids
+
+`<kind>-<8 hex digits>`, where the kind is `m` for media, `c` for a channel and
+`k` for a clip. Unique across the whole project, not merely within their own
+kind, so one lookup table answers "what is this id" without needing to know
+what it refers to first.
+
+Short rather than a uuid because a `.3dim` is meant to be diffable and
+hand-editable (D-13, F-2), and 36 characters in every clip works against both.
+Eight hex digits are safe because ids are minted by checking against what the
+project already holds and regenerating on a clash — a bare 32-bit space has
+roughly a 1% birthday collision at ten thousand clips, which is too close to
+rely on, while generate-check-regenerate has no such bound.
+
+Uniqueness is *checked* as well as minted carefully. A hand-editable format
+means a person can introduce a duplicate that no minting strategy would have
+prevented.
+
+**Keyframes have no id.** They are identified by `t` within their curve, which
+is why `t` must be unique — two keyframes at the same time are the same
+keyframe twice. The consequence belongs to M6: dragging a keyframe onto
+another's time is a collision to resolve, not a reordering.
+
+> Earlier versions of this document said `MediaFile.id` was a uuid while the
+> example below used `m-3f2a`, `c-01` and `k-01` — which were not a scheme at
+> all but mnemonics written by hand (the clip on *Kick* was `k-01`, the one on
+> *Backing mix* `b-01`). The example now uses real ids.
 
 ### Rules
 
@@ -220,14 +251,14 @@ git-friendliness D-13 was for. The filesystem already knows.
   "master": { "gain_db": 0.0, "limiter_on": true },
   "media_pool": [
     {
-      "id": "m-3f2a", "path": "samples/kick.wav", "name": "kick.wav",
+      "id": "m-3f2a91c7", "path": "samples/kick.wav", "name": "kick.wav",
       "source_rate": 44100, "channels": 1, "frames": 12480,
       "hash": "sha256:9c1d…"
     }
   ],
   "channels": [
     {
-      "id": "c-01", "name": "Kick", "color": "#A855F7",
+      "id": "c-7a1f08e3", "name": "Kick", "color": "#A855F7",
       "gain_db": -3.0, "mute": false, "solo": false,
       "hrtf_bypass": false, "pan": 0.0,
       "snap_override": null,
@@ -242,7 +273,7 @@ git-friendliness D-13 was for. The filesystem already knows.
       },
       "clips": [
         {
-          "id": "k-01", "media_id": "m-3f2a",
+          "id": "k-2b08ff41", "media_id": "m-3f2a91c7",
           "start": 0, "offset": 120, "length": 11000, "gain_db": 0.0,
           "fade_in":  { "length": 64,  "shape": "linear" },
           "fade_out": { "length": 512, "shape": "equal_power" }
@@ -250,7 +281,7 @@ git-friendliness D-13 was for. The filesystem already knows.
       ]
     },
     {
-      "id": "c-02", "name": "Backing mix", "color": "#22D3EE",
+      "id": "c-4d9c65ba", "name": "Backing mix", "color": "#22D3EE",
       "gain_db": 0.0, "mute": false, "solo": false,
       "hrtf_bypass": true, "pan": 0.0,
       "snap_override": null,
@@ -258,7 +289,7 @@ git-friendliness D-13 was for. The filesystem already knows.
       "automation": {},
       "clips": [
         {
-          "id": "b-01", "media_id": "m-9e40",
+          "id": "k-8e1d3c07", "media_id": "m-9e40b2d1",
           "start": 0, "offset": 0, "length": 5760000, "gain_db": 0.0,
           "fade_in":  { "length": 0, "shape": "linear" },
           "fade_out": { "length": 0, "shape": "linear" }

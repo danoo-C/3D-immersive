@@ -11,7 +11,7 @@ the whole thing verifiable on WSL.
 
 | Phase | Status |
 |---|---|
-| [1 — Dataclasses](phase_1_dataclasses.md) | not started |
+| [1 — Dataclasses](phase_1_dataclasses.md) | ✅ |
 | [2 — Curve evaluation](phase_2_curve_evaluation.md) | not started |
 | [3 — Time and snapping](phase_3_time_and_snapping.md) | not started |
 | [4 — Undo stack](phase_4_undo_stack.md) | not started |
