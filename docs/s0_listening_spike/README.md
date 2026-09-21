@@ -18,7 +18,7 @@ M4.
 | [1 — SOFA load](phase_1_sofa_load.md) | ✅ |
 | [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | ✅ |
 | [3 — Spherical interpolation](phase_3_interpolation.md) | ✅ |
-| [4 — Block engine and renders](phase_4_block_engine.md) | not started |
+| [4 — Block engine and renders](phase_4_block_engine.md) | ✅ |
 | [5 — Listening](phase_5_listening.md) | not started |
 
 Phases 1–4 are code and each ends at something a test or a printed number can

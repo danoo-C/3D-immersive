@@ -7,9 +7,12 @@ Throwaway. Not part of the package, not imported by anything, never moved into
 Phase 1: fetch a SOFA set, validate it, convert its directions, resample to
 48 kHz and normalise the level.
 Phase 2: split each measurement into a broadband ITD and a minimum-phase HRIR.
+Phase 3: triangulate the sphere and interpolate between measured directions.
+Phase 4: the per-block engine, and the four files phase 5 listens to.
 
     python spikes/binaural_spike.py --info
     python spikes/binaural_spike.py --check
+    python spikes/binaural_spike.py --render
 """
 
 from __future__ import annotations
@@ -18,7 +21,9 @@ import argparse
 import hashlib
 import shutil
 import sys
+import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +31,7 @@ import numpy as np
 import sofar
 import soxr
 from scipy import signal
+from scipy.io import wavfile
 from scipy.spatial import ConvexHull, cKDTree
 
 # SADIE II D1 — the KEMAR dummy head, already 48 kHz, 256 taps. The York URL
@@ -550,6 +556,187 @@ def elevation_sweep(hrir: HrirSet, step: float = 1.0) -> tuple[np.ndarray, np.nd
     return sweep(hrir, az, el)
 
 
+# --------------------------------------------------------------------------- #
+# phase 4 — the block engine
+# --------------------------------------------------------------------------- #
+
+#: Fixed for the spike. Distance rolloff (D-21) is M4's; here the source stays
+#: at one radius so nothing but direction changes between blocks.
+ORBIT_RADIUS_M = 1.5
+RENDER_SECONDS = 8.0
+OUT_DIR = Path(__file__).parent / "out"
+
+#: Peak the renders are normalised to. Below full scale, because the
+#: acceptance asks for no sample at or above it and a file that just touches
+#: 1.0 will clip the first resampler it meets.
+RENDER_PEAK = 0.89
+
+
+def prepare_bank(minphase: np.ndarray, nfft: int) -> np.ndarray:
+    """The frequency-domain minimum-phase bank, `[M, 2, nfft//2+1]` complex64.
+
+    05-audio-engine.md §4. complex64 rather than complex128 because this is
+    72 MB either way doubled, and the engine's error floor is set by the
+    fractional ITD ramp at about -74 dBFS, nowhere near single precision.
+    """
+    return np.fft.rfft(minphase.astype(np.float64), n=nfft, axis=-1).astype(
+        np.complex64
+    )
+
+
+class Engine:
+    """The per-block binaural engine, for exactly one source.
+
+    Everything M4 adds — more sources, frequency-domain summation, the
+    scheduler, distance, the limiter, the zero-allocation rule — is absent on
+    purpose. What is here is the part the design could be wrong about.
+    """
+
+    def __init__(
+        self,
+        hrir: HrirSet,
+        *,
+        crossfade: bool = True,
+        block: int = BLOCK,
+        quantise_itd: bool = False,
+    ):
+        self.hrir = hrir
+        self.block = block
+        # For the phase 4 control only. A whole-sample delay makes the filter
+        # compactly supported, so overlap-add becomes exact and the block loop
+        # matches a direct convolution to around -300 dB. That is what
+        # separates "the engine's arithmetic is wrong" from "the fractional
+        # ramp costs what D-37 says it costs" - and without it, the -74 dB the
+        # real path reaches has nothing to be compared against.
+        self.quantise_itd = quantise_itd
+        self.nfft = nfft_for(hrir.n, hrir.max_itd_samples, block)
+        self.bank = prepare_bank(hrir.minphase, self.nfft)
+        self.freqs = np.fft.rfftfreq(self.nfft)
+        self.crossfade = crossfade
+        self.w_in = np.linspace(0.0, 1.0, block)
+        self.w_out = 1.0 - self.w_in
+        self.tail = np.zeros((2, self.nfft - block))
+        self.h_prev: np.ndarray | None = None
+
+    def filter_for(self, az: float, el: float) -> np.ndarray:
+        """`[2, bins]` filter for one direction: weighted bank, then the ITD.
+
+        The delay goes on entirely as the far ear's ramp and zero on the near
+        one, so both are non-negative and neither wraps — the rule from §4 of
+        05-audio-engine.md, whose whole point is that a negative ramp is an
+        *advance* and puts the tail of the response before its own onset.
+        """
+        face, weights, _ = locate(self.hrir.tri, sofa_directions(np.array([[az, el]])))
+        vertices = self.hrir.tri.simplices[face[0]]
+        h = (self.bank[vertices].astype(np.complex128) * weights[0][:, None, None]).sum(
+            0
+        )
+        magnitude, far = interpolate_itd(self.hrir, face, weights)
+        delay = float(magnitude[0])
+        tau = np.zeros(2)
+        tau[far[0]] = round(delay) if self.quantise_itd else delay
+        return h * np.exp(-2j * np.pi * self.freqs[None, :] * tau[:, None])
+
+    def process(self, x: np.ndarray, az: float, el: float) -> np.ndarray:
+        """One block of mono input from one direction -> `[2, block]` stereo."""
+        h_cur = self.filter_for(az, el)
+        if self.h_prev is None:
+            # Nothing to fade from on the first block. 05 requires the same
+            # after a seek or a snapshot swap, for the same reason: crossfading
+            # from a stale filter is worse than not crossfading at all.
+            self.h_prev = h_cur
+
+        if self.crossfade:
+            # D-37, windowing the *input*: two full-length convolutions whose
+            # tails each taper correctly into the next block, rather than one
+            # output crossfade that would chop them.
+            copies = np.stack([x * self.w_out, x * self.w_in])
+            spectra = np.fft.rfft(copies, n=self.nfft, axis=-1)
+            y_f = spectra[0][None, :] * self.h_prev + spectra[1][None, :] * h_cur
+        else:
+            y_f = np.fft.rfft(x, n=self.nfft)[None, :] * h_cur
+
+        y = np.fft.irfft(y_f, n=self.nfft, axis=-1)
+        y[:, : self.nfft - self.block] += self.tail
+        self.tail = y[:, self.block :]
+        self.h_prev = h_cur
+        return y[:, : self.block]
+
+
+# --------------------------------------------------------------------------- #
+# test signals
+# --------------------------------------------------------------------------- #
+
+
+def band_limited_sawtooth(freq: float, n: int, rate: int = RATE) -> np.ndarray:
+    """A sawtooth summed from the harmonics that fit below Nyquist.
+
+    Not `scipy.signal.sawtooth`, which is a naive time-domain generator with
+    no band limiting: at 440 Hz into 48 kHz it puts -20.1 dB of energy off the
+    harmonic grid, against -108.6 dB for this. That aliased hash raises the
+    crossfaded render's noise floor by 22 dB and drags the measured sideband
+    reduction from 33 dB to 13 - below this phase's acceptance, and looking
+    exactly like the crossfade failing rather than the test signal being
+    wrong. It would have misled the listening test too, because broadband
+    roughness is precisely what the zipper test listens for.
+    """
+    t = np.arange(n) / rate
+    out = np.zeros(n)
+    for k in range(1, int(rate / 2 / freq) + 1):
+        out -= np.sin(2 * np.pi * freq * k * t) / k
+    return out * 2.0 / np.pi
+
+
+def pink_noise(n: int, seed: int = 0) -> np.ndarray:
+    """Pink noise, by shaping white in the frequency domain. Seeded."""
+    spectrum = np.fft.rfft(np.random.default_rng(seed).normal(size=n))
+    f = np.fft.rfftfreq(n)
+    shape = np.ones_like(f)
+    shape[1:] = 1.0 / np.sqrt(f[1:])
+    out = np.fft.irfft(spectrum * shape, n=n)
+    return out / np.abs(out).max()
+
+
+def burst_envelope(n: int, on_ms: float = 100.0, rate: int = RATE) -> np.ndarray:
+    """100 ms on, 100 ms off, with 2 ms raised-cosine edges.
+
+    The edges are not decoration: a hard gate is a click, and a click is a
+    localisation cue of its own, which would flatter the result.
+    """
+    period = int(on_ms / 1000.0 * rate)
+    gate = ((np.arange(n) // period) % 2 == 0).astype(np.float64)
+    ramp = max(1, int(0.002 * rate))
+    window = np.hanning(2 * ramp)
+    return np.convolve(gate, window / window.sum(), mode="same")
+
+
+def click_train(n: int, interval_ms: float = 100.0, rate: int = RATE) -> np.ndarray:
+    out = np.zeros(n)
+    out[:: max(1, int(interval_ms / 1000.0 * rate))] = 1.0
+    return out
+
+
+def orbit_path(
+    blocks: int, block: int = BLOCK, rev_per_s: float = 1.0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Azimuth and elevation per block for a horizontal orbit at ear level.
+
+    One revolution a second is about 4 degrees a block, which is deliberately
+    the hard case rather than a typical one: it is fast enough that the filter
+    changes measurably every block, which is what the crossfade exists for.
+    """
+    t = np.arange(blocks) * block / RATE
+    return (360.0 * rev_per_s * t) % 360.0, np.zeros(blocks)
+
+
+def front_back_path(blocks: int, block: int = BLOCK) -> tuple[np.ndarray, np.ndarray]:
+    """Front, up over the top, and down to directly behind."""
+    travel = 180.0 * np.arange(blocks) / max(1, blocks - 1)
+    azimuth = np.where(travel <= 90.0, 0.0, 180.0)
+    elevation = np.where(travel <= 90.0, travel, 180.0 - travel)
+    return azimuth, elevation
+
+
 def next_pow2(n: int) -> int:
     return 1 << int(np.ceil(np.log2(n)))
 
@@ -628,6 +815,62 @@ def load(path: Path | None = None) -> HrirSet:
     )
 
 
+def render(
+    hrir: HrirSet,
+    x: np.ndarray,
+    path: Callable[[int], tuple[np.ndarray, np.ndarray]],
+    *,
+    crossfade: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Render mono `x` along a direction path. Returns `(stereo, block times)`."""
+    engine = Engine(hrir, crossfade=crossfade)
+    blocks = len(x) // engine.block
+    azimuth, elevation = path(blocks)
+    out = np.zeros((2, blocks * engine.block))
+    elapsed = np.empty(blocks)
+
+    for b in range(blocks):
+        chunk = x[b * engine.block : (b + 1) * engine.block]
+        start = time.perf_counter()
+        y = engine.process(chunk, float(azimuth[b]), float(elevation[b]))
+        elapsed[b] = time.perf_counter() - start
+        out[:, b * engine.block : (b + 1) * engine.block] = y
+
+    return out, elapsed
+
+
+def write_wav(path: Path, stereo: np.ndarray) -> np.ndarray:
+    """Normalise below full scale and write a float32 stereo WAV."""
+    peak = float(np.abs(stereo).max())
+    scaled = (stereo * (RENDER_PEAK / peak)).astype(np.float32) if peak > 0 else stereo
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wavfile.write(str(path), RATE, scaled.T.copy())
+    return scaled
+
+
+def render_all(
+    hrir: HrirSet, *, seconds: float = RENDER_SECONDS, crossfade: bool = True
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """The four files the spike exists to produce."""
+    n = int(seconds * RATE)
+    noise = pink_noise(n) * burst_envelope(n)
+    tone = band_limited_sawtooth(440.0, n)
+    clicks = click_train(n)
+
+    renders = {
+        "orbit_noise": render(hrir, noise, orbit_path, crossfade=crossfade),
+        "orbit_tone": render(hrir, tone, orbit_path, crossfade=crossfade),
+        # The A/B. Always uncrossfaded, whatever the flag says - it is the
+        # control, and a control that follows the switch proves nothing.
+        "orbit_tone_nocrossfade": render(hrir, tone, orbit_path, crossfade=False),
+        "front_back_clicks": render(hrir, clicks, front_back_path, crossfade=crossfade),
+    }
+    return {
+        name: (write_wav(OUT_DIR / f"{name}.wav", audio), times)
+        for name, (audio, times) in renders.items()
+    }
+
+
 # --------------------------------------------------------------------------- #
 # modes
 # --------------------------------------------------------------------------- #
@@ -687,14 +930,30 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--info", action="store_true", help="print the dataset summary")
     parser.add_argument("--check", action="store_true", help="run the phase checks")
+    parser.add_argument(
+        "--render", action="store_true", help="write the four WAVs to spikes/out/"
+    )
+    parser.add_argument(
+        "--no-crossfade",
+        action="store_true",
+        help="disable the per-block filter crossfade (D-37), for experimenting",
+    )
     args = parser.parse_args()
-    if not (args.info or args.check):
+    if not (args.info or args.check or args.render):
         parser.print_help()
         return 0
 
     hrir = load()
     if args.info:
         info(hrir)
+    if args.render:
+        for name, (_, times) in render_all(
+            hrir, crossfade=not args.no_crossfade
+        ).items():
+            print(
+                f"  {name:24} block mean {times.mean() * 1e3:.2f} ms, "
+                f"p99 {np.percentile(times, 99) * 1e3:.2f} ms"
+            )
     if args.check:
         import checks
 
