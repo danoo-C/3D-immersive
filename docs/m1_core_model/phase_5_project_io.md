@@ -1,6 +1,7 @@
 # M1 · Phase 5 — Project I/O
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_5_project_io.md](plans/phase_5_project_io.md)
 
 ## Goal
 

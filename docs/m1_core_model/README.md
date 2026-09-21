@@ -15,7 +15,7 @@ the whole thing verifiable on WSL.
 | [2 — Curve evaluation](phase_2_curve_evaluation.md) | ✅ |
 | [3 — Time and snapping](phase_3_time_and_snapping.md) | ✅ |
 | [4 — Undo stack](phase_4_undo_stack.md) | ✅ |
-| [5 — Project I/O](phase_5_project_io.md) | not started |
+| [5 — Project I/O](phase_5_project_io.md) | in progress — [plan written](plans/phase_5_project_io.md) |
 
 The order is dependency order, and each phase is usable on its own. Phase 1
 defines the shapes; 2 and 3 make two of them mean something; 4 is the only way
