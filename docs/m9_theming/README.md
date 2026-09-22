@@ -9,7 +9,7 @@ roadmap's preamble says why.
 
 | Phase | Status |
 |---|---|
-| [1 — Tokens and groups](phase_1_tokens_and_groups.md) | not started |
+| [1 — Tokens and groups](phase_1_tokens_and_groups.md) | in progress — [plan written](plans/phase_1_tokens_and_groups.md) |
 | [2 — The `.3dimtheme` file](phase_2_file_format.md) | not started |
 | [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | not started |
 | [4 — Discovery and switching](phase_4_discovery_and_switching.md) | not started |

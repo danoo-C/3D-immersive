@@ -1,7 +1,7 @@
 # M9 · Phase 1 — Tokens and groups
 
-**Status:** not started · **Plan:** not written yet —
-`plans/phase_1_tokens_and_groups.md`
+**Status:** in progress · **Plan:**
+[plans/phase_1_tokens_and_groups.md](plans/phase_1_tokens_and_groups.md)
 
 ## Goal
 
