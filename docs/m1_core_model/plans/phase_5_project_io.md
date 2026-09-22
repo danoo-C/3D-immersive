@@ -209,7 +209,7 @@ than retrofit locations into twenty functions.
    knows loads with the default; a file carrying a field it does not know loads
    without it.
 
-5. **Failure, and missing media.** `ProjectFileError` carrying `Problem`s for
+5. ✅ **Failure, and missing media.** `ProjectFileError` carrying `Problem`s for
    anything that means there is no project here — bad JSON, a missing required
    key, a value of the wrong type, and anything `validate()` rejects. Missing
    media is not that: the `MediaFile` is marked, the clip survives, the project

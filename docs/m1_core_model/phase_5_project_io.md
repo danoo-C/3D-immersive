@@ -213,6 +213,46 @@ And `true` is an `int` in Python for the second time this phase — once in the
 numeric field readers, once in the version check. Both reject it explicitly.
 It is worth expecting anywhere this code asks "is this a number".
 
+### Step 5 — failing usefully, and audio that is not there
+
+Three kinds of outcome, deliberately kept apart, because collapsing any two
+of them makes the report describe the wrong thing:
+
+| What happened | What `load` does |
+|---|---|
+| The file is not a project — bad JSON, not UTF-8, not an object, a missing required key, a value of the wrong type, anything `validate()` rejects | `ProjectFileError` with **every** reason, each with its location |
+| The file cannot be read at all — absent, a directory, no permission | the `OSError` the filesystem raised, unwrapped |
+| The project is fine and its *audio* is not (F-3) | loads, marks the `MediaFile`, reports it in `LoadResult.problems` |
+
+The middle row is the one worth arguing. "There is no file here" is not a fact
+about the format, and wrapping it costs M3's open dialog the errno and the
+standard exception type in exchange for a paraphrase.
+
+**The phase's outstanding mutation is closed.** Removing `validate()` from
+`load` survived steps 2, 3 and 4 because nothing fed `load` a file that
+`validate()` would reject. A hand-written `.3dim` with two clips on top of
+each other does, and it is refused naming `channels[0].clips[1]`.
+
+### One mistake, two true reports
+
+Writing the "every problem, not just the first" test turned up something the
+plan did not anticipate: a field that is both the wrong *type* and, after
+falling back to its default, an invalid *value* is reported twice — once by
+the reader and once by `validate()`. A channel with `"color": 17` produces
+both *color is 17, not str* and *color '' is not #RRGGBB*.
+
+That is not duplication and it is not a bug: they are two true statements,
+and suppressing the second would mean the reader deciding which of
+`validate()`'s rules it has already covered, which is exactly the duplication
+`validate()` exists to prevent.
+
+It did expose a real weakness, though. **The second message describes the
+fallback value, not what was typed** — `''`, not `17` — so if neither message
+carried the value, someone would be sent looking for an empty string they
+never wrote. The reader's messages now carry the offending value, truncated,
+rather than only its type. Cheap, and it is the difference between a report
+that locates a hand-edit and one that describes it.
+
 ### What `03` cost that the plan did not expect
 
 The plan budgeted one clarifying line in [03](../03-data-model.md). Adding

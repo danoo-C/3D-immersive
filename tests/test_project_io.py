@@ -46,6 +46,7 @@ from immersive.core.model import (
     Master,
     MediaFile,
     Position,
+    Problem,
     Project,
     SnapSetting,
     validate,
@@ -676,6 +677,19 @@ def every_field_project(media_root: Path) -> Project:
     return project
 
 
+def materialise(project: Project) -> Project:
+    """Put a byte on disk at every path the project's media names.
+
+    Nothing in M1 opens an audio file, so most tests do not need this - but a
+    test asserting that a good project loads with *no* problems does, because
+    media that is not there is now a reported problem (F-3).
+    """
+    for media in project.media_pool:
+        Path(media.path).parent.mkdir(parents=True, exist_ok=True)
+        Path(media.path).write_bytes(b"not really audio")
+    return project
+
+
 def enums_used(project: Project) -> dict[str, set[Any]]:
     """Which members of each enum the project actually holds."""
     used: dict[str, set[Any]] = {
@@ -733,7 +747,7 @@ def test_a_project_saved_and_reloaded_compares_equal(tmp_path: Path) -> None:
 
     Everything in phase 1 that made equality load-bearing was for this line.
     """
-    project = every_field_project(tmp_path)
+    project = materialise(every_field_project(tmp_path))
     path = tmp_path / "everything.3dim"
     save(project, path)
 
@@ -1345,3 +1359,282 @@ def test_a_field_the_schema_does_not_know_is_dropped(tmp_path: Path) -> None:
     save(project, resaved)
     assert "sidechain_from" not in resaved.read_text(encoding="utf-8")
     assert "reverb_send" not in resaved.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# failing usefully, and media that is not there
+# --------------------------------------------------------------------------- #
+
+
+def test_bad_json_is_refused_with_the_line_and_column(tmp_path: Path) -> None:
+    """A hand-editable format gets hand-edited, and hand-edits get commas wrong.
+
+    The location is most of the value: "Expecting ',' delimiter" on its own
+    sends someone back to read the whole file.
+    """
+    path = tmp_path / "typo.3dim"
+    path.write_text('{\n  "schema_version": 1\n  "bpm": 120.0\n}\n', encoding="utf-8")
+
+    with pytest.raises(ProjectFileError) as raised:
+        load(path)
+
+    assert "not valid JSON" in str(raised.value)
+    assert raised.value.problems[0].where == "line 3, column 3"
+
+
+def test_a_file_that_is_not_text_is_refused(tmp_path: Path) -> None:
+    """Someone will eventually open a `.wav` with this."""
+    path = tmp_path / "actually_audio.3dim"
+    path.write_bytes(b"RIFF\x00\x00\x00\xffWAVEfmt ")
+
+    with pytest.raises(ProjectFileError, match="not UTF-8"):
+        load(path)
+
+
+def test_json_that_is_not_an_object_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "list.3dim"
+    path.write_text("[1, 2, 3]\n", encoding="utf-8")
+
+    with pytest.raises(ProjectFileError, match="does not hold a project"):
+        load(path)
+
+
+def test_a_project_file_that_cannot_be_read_raises_an_os_error(
+    tmp_path: Path,
+) -> None:
+    """Not wrapped, deliberately.
+
+    "There is no file here" is not a fact about the format, and M3's open
+    dialog wants the errno and the standard exception type rather than a
+    paraphrase of them inside a different class.
+    """
+    with pytest.raises(FileNotFoundError):
+        load(tmp_path / "never_existed.3dim")
+
+    with pytest.raises(OSError):
+        load(tmp_path)
+
+
+def test_a_missing_required_key_names_what_and_where(tmp_path: Path) -> None:
+    path = a_written_document(
+        tmp_path / "gap.3dim",
+        channels=[{"name": "Kick", "color": "#A855F7", "clips": []}],
+    )
+
+    with pytest.raises(ProjectFileError) as raised:
+        load(path)
+
+    assert raised.value.problems[0] == Problem("channels[0]", "id is missing")
+
+
+def test_a_value_of_the_wrong_type_names_what_and_where(tmp_path: Path) -> None:
+    path = a_written_document(
+        tmp_path / "wrong.3dim",
+        channels=[
+            {
+                "id": "c-00000001",
+                "name": "Kick",
+                "color": "#A855F7",
+                "gain_db": "quite loud",
+                "clips": [],
+            }
+        ],
+    )
+
+    with pytest.raises(ProjectFileError) as raised:
+        load(path)
+
+    assert raised.value.problems[0] == Problem(
+        "channels[0]", "gain_db is 'quite loud', not int or float"
+    )
+
+
+def test_every_problem_is_reported_not_just_the_first(tmp_path: Path) -> None:
+    """The reason reading is lenient while it runs and fatal at the end.
+
+    Someone fixing a hand-edited file wants the list. Handing them one
+    problem per attempt turns a five-minute repair into five loads.
+    """
+    path = a_written_document(
+        tmp_path / "several.3dim",
+        bpm="fast",
+        channels=[
+            {"name": "Kick", "color": 17, "clips": []},
+            {"id": "c-00000002", "name": "Snare", "color": "#22D3EE", "pan": []},
+        ],
+    )
+
+    with pytest.raises(ProjectFileError) as raised:
+        load(path)
+
+    where = [problem.where for problem in raised.value.problems]
+    messages = [problem.message for problem in raised.value.problems]
+
+    # Three independent faults in three places, all in one report.
+    assert set(where) == {"project", "channels[0]", "channels[1]"}
+    assert any("bpm is 'fast'" in message for message in messages)
+    assert any("pan is []" in message for message in messages)
+
+    # Both gates contribute: the reader says the colour is the wrong type,
+    # and `validate()` says the value it fell back to is not a colour. That
+    # is two true statements about one mistake, not a duplicate.
+    assert any("color is 17" in message for message in messages)
+    assert any("is not #RRGGBB" in message for message in messages)
+
+
+def test_a_file_validate_rejects_is_not_opened(tmp_path: Path) -> None:
+    """The gate at the reading end, and the reason `save` has one too.
+
+    A hand-edited file with two clips on top of each other describes a
+    project the undo stack guarantees cannot exist. Opening it would hand
+    every later milestone a state none of them were written to survive, so it
+    is refused with a report naming what and where.
+    """
+    path = a_written_document(
+        tmp_path / "overlapping.3dim",
+        media_pool=[
+            {
+                "id": KICK,
+                "path": "samples/kick.wav",
+                "name": "kick.wav",
+                "source_rate": 48000,
+                "channels": 1,
+                "frames": 48_000,
+            }
+        ],
+        channels=[
+            {
+                "id": "c-00000001",
+                "name": "Kick",
+                "color": "#A855F7",
+                "clips": [
+                    {
+                        "id": "k-00000001",
+                        "media_id": KICK,
+                        "start": 0,
+                        "offset": 0,
+                        "length": 24_000,
+                    },
+                    {
+                        "id": "k-00000002",
+                        "media_id": KICK,
+                        "start": 12_000,
+                        "offset": 0,
+                        "length": 24_000,
+                    },
+                ],
+            }
+        ],
+    )
+
+    with pytest.raises(ProjectFileError) as raised:
+        load(path)
+
+    assert any("overlap" in problem.message for problem in raised.value.problems)
+    assert any(p.where == "channels[0].clips[1]" for p in raised.value.problems)
+
+
+def test_a_clip_reaching_past_its_media_is_refused(tmp_path: Path) -> None:
+    """The acceptance names this one specifically."""
+    path = a_written_document(
+        tmp_path / "too_long.3dim",
+        media_pool=[
+            {
+                "id": KICK,
+                "path": "samples/kick.wav",
+                "name": "kick.wav",
+                "source_rate": 48000,
+                "channels": 1,
+                "frames": 480,
+            }
+        ],
+        channels=[
+            {
+                "id": "c-00000001",
+                "name": "Kick",
+                "color": "#A855F7",
+                "clips": [
+                    {
+                        "id": "k-00000001",
+                        "media_id": KICK,
+                        "start": 0,
+                        "offset": 0,
+                        "length": 48_000,
+                    }
+                ],
+            }
+        ],
+    )
+
+    with pytest.raises(ProjectFileError, match="past the media's 480 frames"):
+        load(path)
+
+
+def test_a_project_whose_audio_is_gone_still_loads(tmp_path: Path) -> None:
+    """F-3. The arrangement is every decision someone made.
+
+    Losing it because a sample moved would be the format destroying the work
+    it exists to preserve. Relinking is M8's; being openable without the
+    audio is this phase's.
+    """
+    project = a_project_with_its_audio(tmp_path)
+    path = tmp_path / "mix.3dim"
+    save(project, path)
+    (tmp_path / "samples" / "kick.wav").unlink()
+
+    result = load(path)
+
+    assert result.project.channels[0].clips[0].length == 480, "the clip survived"
+    assert result.project.media_pool[0].missing is True
+    assert [problem.where for problem in result.problems] == ["media_pool[0]"]
+    assert "kick.wav" in result.problems[0].message
+
+
+def test_only_the_media_that_is_gone_is_marked(tmp_path: Path) -> None:
+    """Two files, one deleted. The mark has to land on the right one."""
+    (tmp_path / "samples").mkdir()
+    for name in ("kick.wav", "snare.wav"):
+        (tmp_path / "samples" / name).write_bytes(b"not really audio")
+
+    project = Project(
+        media_pool=[
+            MediaFile(
+                KICK, str(tmp_path / "samples" / "kick.wav"), "kick.wav", 48_000, 1, 480
+            ),
+            MediaFile(
+                STEM,
+                str(tmp_path / "samples" / "snare.wav"),
+                "snare.wav",
+                48_000,
+                1,
+                480,
+            ),
+        ]
+    )
+    path = tmp_path / "mix.3dim"
+    save(project, path)
+    (tmp_path / "samples" / "snare.wav").unlink()
+
+    reloaded = load(path).project
+    assert reloaded.media_pool[0].missing is False
+    assert reloaded.media_pool[1].missing is True
+
+
+def test_a_project_loaded_with_missing_media_saves_unchanged(tmp_path: Path) -> None:
+    """D-72's whole point, end to end.
+
+    Open a project on a machine without the audio, save it, and the file is
+    the file you opened. If `missing` were written, passing a project between
+    two people would slowly fill it with each other's filesystems.
+    """
+    project = a_project_with_its_audio(tmp_path)
+    path = tmp_path / "mix.3dim"
+    save(project, path)
+    before = path.read_text(encoding="utf-8")
+
+    (tmp_path / "samples" / "kick.wav").unlink()
+    result = load(path)
+    save(result.project, path)
+
+    assert path.read_text(encoding="utf-8") == before
+    assert result.project == project, "and it is still the same project (D-72)"

@@ -425,6 +425,21 @@ class LoadResult:
     problems: list[Problem]
 
 
+def _shown(value: Any) -> str:
+    """A value as an error message should carry it.
+
+    The type on its own - "color is int, not str" - does not say which field
+    somebody typed a number into when a channel has several. The value does,
+    and it matters more here than it usually would: a field the reader
+    rejects falls back to its default and is then reported a *second* time by
+    `validate()`, which describes the default rather than what was typed. Two
+    true statements about one mistake is fine; two statements where neither
+    names the value is not.
+    """
+    shown = repr(value)
+    return shown if len(shown) <= 40 else f"{shown[:37]}..."
+
+
 def _type_name(kind: type | tuple[type, ...]) -> str:
     if isinstance(kind, tuple):
         return " or ".join(one.__name__ for one in kind)
@@ -478,10 +493,7 @@ class _Reading:
         # quietly accept `true` as 1.
         wrong_bool = isinstance(found, bool) and kind is not bool
         if wrong_bool or not isinstance(found, kind):
-            self.note(
-                where,
-                f"{key} is {type(found).__name__}, not {_type_name(kind)}",
-            )
+            self.note(where, f"{key} is {_shown(found)}, not {_type_name(kind)}")
             return None
         return found
 
@@ -574,7 +586,7 @@ class _Reading:
         """
         found = []
         for index, item in enumerate(self.sequence(node, key, where)):
-            at = f"{where}.{key}[{index}]"
+            at = f"{where}.{key}[{index}]" if where else f"{key}[{index}]"
             if isinstance(item, dict):
                 found.append((item, at))
             else:
@@ -880,6 +892,26 @@ def _migrated(document: dict[str, Any], where: Path) -> dict[str, Any]:
     return document
 
 
+def _missing_media(project: Project) -> list[Problem]:
+    """Media the project points at that is not on this machine (F-3, D-72).
+
+    Marked rather than refused. A clip whose audio has gone must survive -
+    the arrangement is still every decision someone made, and losing it
+    because a sample moved would be the format destroying work it was meant
+    to preserve. Relinking is M8's; being openable without the audio is this
+    phase's.
+
+    The mark is set here and never written (D-72), which is what keeps a
+    project from depending on which machine last saved it.
+    """
+    found = []
+    for index, media in enumerate(project.media_pool):
+        media.missing = not Path(media.path).is_file()
+        if media.missing:
+            found.append(Problem(f"media_pool[{index}]", f"{media.path} is not there"))
+    return found
+
+
 def load(path: str | os.PathLike[str]) -> LoadResult:
     """Read a `.3dim` back into a project.
 
@@ -891,9 +923,34 @@ def load(path: str | os.PathLike[str]) -> LoadResult:
     Refuses anything `validate()` rejects, for the same reason `save` does -
     a project the undo stack guarantees cannot exist should not arrive
     through the filesystem instead.
+
+    Two kinds of failure, deliberately kept apart. A file that is not a
+    project raises `ProjectFileError` with every reason it is not. A file that
+    cannot be read at all - absent, a directory, no permission - raises the
+    `OSError` the filesystem raised, unwrapped: that is not a fact about the
+    format, and M3's open dialog wants the errno rather than a paraphrase.
+
+    Missing *media* is neither (F-3). The project loads, the `MediaFile` is
+    marked, and the problem comes back in `LoadResult.problems` for something
+    later to show.
     """
     source = Path(path)
-    document = json.loads(source.read_text(encoding="utf-8"))
+    try:
+        text = source.read_text(encoding="utf-8")
+    except UnicodeDecodeError as undecodable:
+        raise ProjectFileError(
+            f"{source} is not UTF-8 text",
+            [Problem(f"byte {undecodable.start}", undecodable.reason)],
+        ) from undecodable
+
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError as broken:
+        raise ProjectFileError(
+            f"{source} is not valid JSON",
+            [Problem(f"line {broken.lineno}, column {broken.colno}", broken.msg)],
+        ) from broken
+
     if not isinstance(document, dict):
         raise ProjectFileError(
             f"{source} does not hold a project",
@@ -908,4 +965,7 @@ def load(path: str | os.PathLike[str]) -> LoadResult:
         raise ProjectFileError(
             f"{source} is not a project that can be opened", problems
         )
-    return LoadResult(project, [])
+    # Only once the project itself is known good: media that is not on this
+    # machine is a fact about the machine, and reporting it alongside a
+    # malformed clip would suggest they are the same kind of trouble.
+    return LoadResult(project, _missing_media(project))
