@@ -129,9 +129,36 @@ against 19.7 compact without automation, 152.5 against 53.5 with it. At these
 sizes that buys a file that `git diff` can show a one-line change in, which is
 what D-13 was for, and it is not close.
 
+## ⚠️ Step 1 took the writer's half of step 3
+
+Step 3 owns paths — *relative on write, absolute on read*. The write half
+turned out to belong here: `save()` cannot put a path in a file without
+deciding which of the two forms it takes, and D-71, written in this same step,
+says relative. A `save()` that wrote absolute paths for two more steps would
+have been knowingly wrong against a decision made in the same commit, and
+step 3 would then have been a rewrite rather than an addition.
+
+So `_path_for_file`, the off-tree `../..` case and the different-drive
+fallback are in step 1. Step 3 keeps the reader, the moved-project round trip,
+and the fallback tests it names — it is smaller than planned, not larger.
+
+## ⚠️ `03` gained a field, not only a line
+
+The plan expected one clarifying line in [03](../../03-data-model.md) about
+path relativity. It needed two changes, because `tests/test_model.py` asserts
+that `03`'s Entities block lists exactly the fields the dataclasses have —
+and that test went red the moment `MediaFile.missing` was added, which is
+precisely what it is for. So the Entities tree gained `missing` beside the
+prose note, and the *Files* table below is amended to say so.
+
+Worth recording rather than fixing quietly: the plan treated `missing` as a
+model change and `03` as a documentation change, and they are the same change.
+A field that is never serialised is still part of the entity the document
+describes.
+
 ## Steps
 
-1. **The decisions, then the writer.** Three rows in the decision log, the
+1. ✅ **The decisions, then the writer.** Three rows in the decision log, the
    high-water mark bumped, the one clarifying line in `03`. Then `to_dict` per
    entity and `save()`: `sort_keys=True`, `indent=2`, `allow_nan=False`, UTF-8,
    a trailing newline, and an atomic write — a temporary file in the same
@@ -197,7 +224,8 @@ tests/test_project_io.py              new
 tests/fixtures/handwritten.3dim       new — typed by hand, deliberately
 docs/01-requirements.md               amended — three decision rows
 docs/doc-system.md                    amended — the D high-water mark
-docs/03-data-model.md                 amended — one line on path relativity
+docs/03-data-model.md                 amended — path relativity, and `missing`
+                                        in the Entities tree
 ```
 
 ## Risks and unknowns

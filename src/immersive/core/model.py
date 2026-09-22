@@ -119,7 +119,13 @@ class Master:
 
 @dataclass
 class MediaFile:
-    """Metadata only. Nothing in M1 opens an audio file; M2 decodes."""
+    """Metadata only. Nothing in M1 opens an audio file; M2 decodes.
+
+    `path` is **absolute here and relative in the file** (D-71). The Entities
+    block in 03-data-model.md describes the file, so it says relative; a
+    project that has never been saved has nothing for a path to be relative
+    to, which is why memory gets the other half of that pair.
+    """
 
     id: str
     path: str
@@ -128,6 +134,14 @@ class MediaFile:
     channels: int
     frames: int
     hash: str = ""
+
+    #: Did `path` point at nothing when this project was loaded (F-3)? Derived
+    #: from the filesystem, never serialised, and out of equality (D-72): two
+    #: projects that differ only in whether their audio is currently plugged
+    #: in are the same project, and M1's acceptance is that a saved and
+    #: reloaded project compares equal - which must not depend on what happens
+    #: to be on disk when the test runs.
+    missing: bool = field(default=False, compare=False)
 
 
 @dataclass

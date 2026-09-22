@@ -107,7 +107,8 @@ MediaFile
 ├── source_rate      as found on disk
 ├── channels         1 or 2 (stereo is downmixed at play time)
 ├── frames           length at project rate, after resampling
-└── hash             for relink and cache invalidation
+├── hash             for relink and cache invalidation
+└── missing          was the file there at load? derived, never stored
 
 Channel
 ├── id               "c-" + 8 hex digits
@@ -143,6 +144,21 @@ Keyframe
 ├── interp           linear | ease | hold      governs the segment *after* it
 └── handles          { out: [dt, dv], in: [dt, dv] }   only when interp == ease
 ```
+
+This block names the fields; the file's own shape is under *Project file*
+below, and the two differ in exactly two places, both on `MediaFile`.
+
+`path` is relative **on disk and absolute in memory** (D-71) — a project that
+has never been saved has no file for anything to be relative to, so the
+relativity belongs to serialisation: `save` makes the path relative to the
+project file's directory and `load` makes it absolute again.
+
+`missing` is not in the file at all (D-72). It answers "was the audio there
+when this was opened", which F-3 needs so a clip whose file has gone is greyed
+rather than fatal — and it is derived from the filesystem at load, so writing
+it would make a project depend on which machine last saved it. It is also
+outside equality, because two projects differing only in whether their audio
+is currently plugged in are the same project.
 
 ### Ids
 
