@@ -6,6 +6,8 @@ theme.py has no Qt dependency at import time, so this runs headless.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Mapping
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -193,3 +195,212 @@ def test_the_old_token_names_are_gone() -> None:
     text = SPEC.read_text(encoding="utf-8")
     stale = re.findall(r"`(bg-[0-3]|text-(?:hi|lo|dim)|accent-(?:dim|glow))`", text)
     assert not stale, f"04-ui-spec.md still uses the old token names: {set(stale)}"
+
+
+# --------------------------------------------------------------------------- #
+# the Theme object
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=True)
+def _restore_active_theme() -> Iterator[None]:
+    """No test may leave a different theme behind for the next one."""
+    before = theme.active()
+    yield
+    theme.use(before)
+
+
+def a_theme(
+    name: str = "Test",
+    tokens: Mapping[str, str] | None = None,
+    channels: tuple[str, ...] = ("#22D3EE", "#F472B6"),
+    groups: Mapping[str, Mapping[str, str]] | None = None,
+) -> theme.Theme:
+    """A small well-formed theme, with any part of it replaced."""
+    return theme.Theme(
+        name=name,
+        tokens={"accent": "#A855F7", "text.primary": "#CCCCCC"}
+        if tokens is None
+        else tokens,
+        channels=channels,
+        groups={"button": {"background": "accent", "text": "text.primary"}}
+        if groups is None
+        else groups,
+    )
+
+
+def test_a_group_value_naming_a_token_resolves_to_it() -> None:
+    assert a_theme().value("button", "background") == "#A855F7"
+    assert a_theme().value("button", "text") == "#CCCCCC"
+
+
+def test_a_group_value_that_is_a_literal_is_used_as_it_stands() -> None:
+    """The escape hatch for the one thing a theme wants outside the family."""
+    built = a_theme(groups={"button": {"background": "#123456"}})
+    assert built.value("button", "background") == "#123456"
+
+
+def test_a_group_naming_a_token_that_does_not_exist_fails_at_construction() -> None:
+    """Loudly, and where the mistake is - not at paint time.
+
+    A theme error that surfaces three hours later as a wrong-coloured button
+    is the failure mode this whole milestone exists to prevent, and a
+    resolver that falls back to a default when it cannot find a token is
+    exactly how that happens.
+    """
+    with pytest.raises(theme.ThemeError) as raised:
+        a_theme(groups={"button": {"background": "accent.dim"}})
+
+    assert raised.value.problems == [
+        "groups.button.background: names no token 'accent.dim'"
+    ]
+
+
+def test_every_problem_is_reported_not_just_the_first() -> None:
+    with pytest.raises(theme.ThemeError) as raised:
+        theme.Theme(
+            name="",
+            tokens={"accent": "tomato", "Bad Name": "#A855F7"},
+            channels=("#ZZZZZZ",),
+            groups={"button": {"background": "nope"}},
+        )
+
+    problems = raised.value.problems
+    assert len(problems) == 5, problems
+    assert any("a theme has to be called something" in p for p in problems)
+    assert any("'tomato' is not a #RRGGBB colour" in p for p in problems)
+    assert any("'Bad Name' is not a token name" in p for p in problems)
+    assert any("channels[0]" in p for p in problems)
+    assert any("names no token 'nope'" in p for p in problems)
+
+
+def test_a_theme_with_no_channel_colours_is_refused() -> None:
+    with pytest.raises(theme.ThemeError, match="at least one channel colour"):
+        a_theme(channels=())
+
+
+def test_the_reserved_channel_value_is_allowed_but_not_resolved_here() -> None:
+    """`channel` means *this channel's own colour*, and this has no channel.
+
+    Accepted at construction because it is a legal group value, and refused
+    at resolution because there is no honest answer - which is better than a
+    quietly wrong one. M3 draws the first widget that can ask properly.
+    """
+    built = a_theme(groups={"clip": {"body": theme.CHANNEL}})
+    assert built.problems() == []
+
+    with pytest.raises(theme.ThemeError, match="this channel's own colour"):
+        built.value("clip", "body")
+
+
+def test_asking_for_something_the_theme_does_not_have_says_so() -> None:
+    with pytest.raises(theme.ThemeError, match="has no token"):
+        a_theme().token("surface.panel")
+    with pytest.raises(theme.ThemeError, match=r"has no button\.border"):
+        a_theme().value("button", "border")
+
+
+def test_a_theme_is_frozen_all_the_way_down() -> None:
+    """A frozen dataclass holding a plain dict is frozen where nobody writes."""
+    built = a_theme()
+    with pytest.raises(FrozenInstanceError):
+        built.name = "Other"  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        built.tokens["accent"] = "#000000"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        built.groups["button"]["background"] = "#000000"  # type: ignore[index]
+
+
+def test_channel_colour_wraps_round_the_palette() -> None:
+    built = a_theme()
+    assert built.channel(0) == "#22D3EE"
+    assert built.channel(2) == "#22D3EE"
+    assert built.channel(3) == "#F472B6"
+
+
+# --------------------------------------------------------------------------- #
+# the active theme
+# --------------------------------------------------------------------------- #
+
+
+def test_the_accessor_reads_the_active_theme_rather_than_capturing_it() -> None:
+    """D-76, and the assertion the module constants could never have passed.
+
+    This is the property the milestone's last phase is built on: a theme
+    switched at runtime has to reach everything, and anything that resolved a
+    colour when this module was first imported will go on showing the old one
+    no matter what is switched.
+    """
+    assert theme.color("accent") == "#A855F7"
+
+    theme.use(a_theme(tokens={"accent": "#00FF00", "text.primary": "#CCCCCC"}))
+
+    assert theme.color("accent") == "#00FF00"
+    assert theme.group_color("button", "background") == "#00FF00"
+    assert theme.channel_color(0) == "#22D3EE"
+
+
+def test_an_accessor_can_be_asked_about_a_theme_that_is_not_active() -> None:
+    """So a test never has to touch the global to find out an answer."""
+    other = a_theme(tokens={"accent": "#FF0000", "text.primary": "#CCCCCC"})
+
+    assert theme.color("accent", other) == "#FF0000"
+    assert theme.color("accent") == "#A855F7", "the active theme is untouched"
+
+
+# --------------------------------------------------------------------------- #
+# the built-in is what 04 says it is
+# --------------------------------------------------------------------------- #
+
+
+def test_the_builtin_tokens_are_exactly_the_palette_table() -> None:
+    """Names and values both, which is what step 1's test could not check.
+
+    Two homes for one palette is two values the first time somebody edits one
+    of them, and the document is the home that gets read.
+    """
+    assert dict(theme.BUILTIN.tokens) == palette_table()
+
+
+def test_the_builtin_surfaces_are_monotonic() -> None:
+    """04: deepest to lightest, and widgets rely on the ordering."""
+    surfaces = [
+        theme.BUILTIN.token(name)
+        for name in (
+            "surface.window",
+            "surface.panel",
+            "surface.raised",
+            "surface.hover",
+        )
+    ]
+    levels = [_luminance(colour) for colour in surfaces]
+    assert levels == sorted(levels), surfaces
+
+
+def test_the_builtin_is_well_formed() -> None:
+    assert theme.BUILTIN.problems() == []
+
+
+def test_every_group_value_on_a_built_theme_is_resolvable() -> None:
+    """Why one named mutation is unobservable, asserted rather than assumed.
+
+    Replacing `value()`'s token lookup with a fallback to the raw string -
+    `tokens.get(raw, raw)` - survives the whole suite, and it should: on a
+    theme that exists, every group value is a literal, the reserved channel
+    value, or a token that is there, because construction refuses anything
+    else. The fallback can never fire.
+
+    That is worth an assertion rather than a shrug, because it is exactly the
+    guarantee the phase that merges a user's theme over the default has to
+    keep. If a merge ever produces a `Theme` without going through validation,
+    this invariant is the one it broke, and the fallback stops being
+    unobservable - it starts painting token *names* as colours, which Qt
+    silently drops.
+    """
+    for built in (theme.BUILTIN, a_theme(groups={"clip": {"body": theme.CHANNEL}})):
+        for group, values in built.groups.items():
+            for key, raw in values.items():
+                resolvable = (
+                    HEX.match(raw) or raw == theme.CHANNEL or raw in built.tokens
+                )
+                assert resolvable, f"{built.name}: groups.{group}.{key} is {raw!r}"
