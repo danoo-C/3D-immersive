@@ -193,7 +193,7 @@ than retrofit locations into twenty functions.
    save-load-save is byte-identical, which is the assertion that catches a
    reader and writer that are both wrong in the same direction.
 
-3. **Paths.** Relative on write, absolute on read, `/` on both regardless of
+3. ✅ **Paths.** Relative on write, absolute on read, `/` on both regardless of
    `os.sep`; the off-tree and different-drive fallbacks.
    *Test:* a project and its audio moved wholesale to another directory still
    resolve. A file containing `samples/kick.wav` loads to the right absolute

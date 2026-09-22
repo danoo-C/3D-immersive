@@ -142,6 +142,43 @@ rediscovered:
   count has been unambiguous. `0.5` has not been, and is reported rather than
   truncated into a number nobody chose.
 
+### Step 3 — paths, and a round trip's blind spot for the third time
+
+Almost no new code: step 1 took the writer and step 2 needed the reader to
+make equality work, so what was left was the fallbacks and the tests the plan
+named. A project and its audio survive being moved wholesale to another
+directory, a hand-typed `samples/kick.wav` resolves against the project file,
+media outside the project directory round-trips through `../..`, an absolute
+path in the file is read as itself, and a symlinked project directory is not
+resolved through.
+
+**Two of five path mutations survived the first sweep, and both for the same
+reason:** a round trip cannot see a transformation the reader faithfully
+undoes.
+
+| Mutation | Why it round-tripped | What caught it |
+|---|---|---|
+| `save` resolves the project directory through a symlink | the reader joins the media path back onto the *link*, so the value comes home | the file itself, which said `../link/samples/kick.wav` where `samples/kick.wav` was meant |
+| the project's directory is used without being made absolute | every test so far saved to an absolute path, where there is nothing to make absolute | saving by a relative name — `save(project, "sub/mix.3dim")` — from a different working directory |
+
+The second is the more interesting failure, because the tests were not wrong
+about the behaviour, they were wrong about the *input*: an absolute
+destination is what a test naturally writes and is not what a person naturally
+types. The path only came back relative — against D-71 — when the project file
+was named relatively, which is an ordinary call.
+
+That is three times in this phase that the same lesson has landed: **a round
+trip proves the reader and the writer agree, not that either is right.** Step
+1 found it with the handle swap, step 2 found it with the swap applied to both
+sides, and step 3 found it twice in the paths. Every assertion that pins the
+*format* rather than the agreement has had to read the file. Step 6's
+hand-written fixture is the strongest form of that, and this phase has now
+made its case three times over.
+
+Twenty-five mutations have been named and run across the three steps.
+Twenty-four are caught; the outstanding one remains `validate()` removed from
+`load`, which is step 5's.
+
 ### What `03` cost that the plan did not expect
 
 The plan budgeted one clarifying line in [03](../03-data-model.md). Adding

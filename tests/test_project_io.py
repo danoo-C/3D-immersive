@@ -18,6 +18,7 @@ import copy
 import json
 import math
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -863,3 +864,271 @@ def test_media_paths_come_back_absolute(tmp_path: Path) -> None:
         for media in json.loads(path.read_text(encoding="utf-8"))["media_pool"]
     ]
     assert written_paths[2].startswith("../"), "the off-tree case is not covered"
+
+
+# --------------------------------------------------------------------------- #
+# paths: moved projects, off-tree media, and the two fallbacks
+# --------------------------------------------------------------------------- #
+
+
+def a_project_with_its_audio(root: Path) -> Project:
+    """A one-clip project whose media really exists under `root`."""
+    (root / "samples").mkdir(parents=True, exist_ok=True)
+    (root / "samples" / "kick.wav").write_bytes(b"not really audio")
+    return Project(
+        media_pool=[
+            MediaFile(
+                KICK, str(root / "samples" / "kick.wav"), "kick.wav", 48_000, 1, 480
+            )
+        ],
+        channels=[
+            Channel(
+                "c-00000001",
+                "Kick",
+                "#A855F7",
+                clips=[Clip("k-00000001", KICK, start=0, offset=0, length=480)],
+            )
+        ],
+    )
+
+
+def test_a_project_and_its_audio_survive_being_moved(tmp_path: Path) -> None:
+    """D-13's whole point, and the reason paths are relative on disk.
+
+    Not "the path string round-trips" - the project is picked up and put down
+    somewhere else, which is what someone does when they move a folder onto a
+    different machine or a different drive.
+    """
+    here = tmp_path / "here"
+    here.mkdir()
+    save(a_project_with_its_audio(here), here / "mix.3dim")
+
+    there = tmp_path / "there"
+    shutil.move(str(here), str(there))
+
+    reloaded = load(there / "mix.3dim").project
+    media = reloaded.media_pool[0]
+
+    assert Path(media.path) == there / "samples" / "kick.wav"
+    assert Path(media.path).is_file(), "the project cannot find its own audio"
+
+
+def test_a_moved_project_saves_the_same_relative_paths(tmp_path: Path) -> None:
+    """The file after the move says what it said before it.
+
+    A reader that resolved paths against the *old* directory would still find
+    the audio on the first load and then write an absolute path back out,
+    which is how a project stops being portable one save at a time.
+    """
+    here = tmp_path / "here"
+    here.mkdir()
+    save(a_project_with_its_audio(here), here / "mix.3dim")
+    before = (here / "mix.3dim").read_text(encoding="utf-8")
+
+    there = tmp_path / "there"
+    shutil.move(str(here), str(there))
+    save(load(there / "mix.3dim").project, there / "mix.3dim")
+
+    assert (there / "mix.3dim").read_text(encoding="utf-8") == before
+
+
+def test_a_hand_typed_relative_path_resolves_against_the_project(
+    tmp_path: Path,
+) -> None:
+    """`samples/kick.wav` in the file means "beside this project".
+
+    Written by hand rather than by `save`, because this is the one assertion
+    that must not go through the writer: it is what someone reading `03` would
+    type, and the whole value of the format being JSON rests on it working.
+    """
+    (tmp_path / "samples").mkdir()
+    path = tmp_path / "mix.3dim"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "app_version": "0.1.0",
+                "media_pool": [
+                    {
+                        "id": KICK,
+                        "path": "samples/kick.wav",
+                        "name": "kick.wav",
+                        "source_rate": 48000,
+                        "channels": 1,
+                        "frames": 480,
+                    }
+                ],
+                "channels": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    media = load(path).project.media_pool[0]
+    assert Path(media.path) == tmp_path / "samples" / "kick.wav"
+    assert Path(media.path).is_absolute()
+
+
+def test_media_outside_the_project_directory_round_trips(tmp_path: Path) -> None:
+    """`../..` is ordinary, not exotic - a shared sample folder beside the mix.
+
+    `Path.relative_to` cannot express it, which is why the writer uses
+    `os.path.relpath`, and the reader has to normalise it back or the same
+    file comes home as a different string.
+    """
+    here = tmp_path / "projects" / "mix"
+    here.mkdir(parents=True)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+
+    project = Project(
+        media_pool=[
+            MediaFile(KICK, str(shared / "kick.wav"), "kick.wav", 48_000, 1, 480)
+        ]
+    )
+    path = here / "mix.3dim"
+    save(project, path)
+
+    written_path = json.loads(path.read_text(encoding="utf-8"))["media_pool"][0]["path"]
+    assert written_path == "../../shared/kick.wav"
+
+    reloaded = load(path).project
+    assert reloaded == project
+    assert ".." not in Path(reloaded.media_pool[0].path).parts
+
+
+def test_a_path_with_no_relative_form_is_written_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows, two drives. Simulated, because CI is Linux.
+
+    `os.path.relpath` raises there rather than returning anything, and the
+    choice is between a save that fails and a project that is merely not
+    portable. The project is the one that is true, so the absolute path is
+    written and the save succeeds.
+    """
+    project = a_project_with_its_audio(tmp_path)
+    absolute = project.media_pool[0].path
+    path = tmp_path / "mix.3dim"
+
+    def no_relative_form(*_: object) -> str:
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+
+    monkeypatch.setattr(os.path, "relpath", no_relative_form)
+    save(project, path)
+
+    written_path = json.loads(path.read_text(encoding="utf-8"))["media_pool"][0]["path"]
+    assert written_path == Path(absolute).as_posix()
+    assert Path(written_path).is_absolute()
+
+
+def test_an_absolute_path_in_the_file_is_read_as_itself(tmp_path: Path) -> None:
+    """The other end of the fallback above.
+
+    An absolute path is not joined onto the project directory, because
+    rewriting it relative to somewhere it does not live would turn a project
+    that merely is not portable into one that is wrong.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    absolute = elsewhere / "kick.wav"
+    path = tmp_path / "deep" / "mix.3dim"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "app_version": "0.1.0",
+                "media_pool": [
+                    {
+                        "id": KICK,
+                        "path": absolute.as_posix(),
+                        "name": "kick.wav",
+                        "source_rate": 48000,
+                        "channels": 1,
+                        "frames": 480,
+                    }
+                ],
+                "channels": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    media = load(path).project.media_pool[0]
+    assert Path(media.path) == absolute
+    assert "deep" not in Path(media.path).parts, "it was joined onto the project"
+
+
+def test_a_symlinked_project_directory_is_not_resolved_through(
+    tmp_path: Path,
+) -> None:
+    """A project inside a symlink keeps the path the person typed.
+
+    `resolve()` would rewrite every media path to point at wherever the link
+    happens to lead, which is somewhere they never typed and may not recognise
+    - and on a shared drive mounted at two paths it silently changes which one
+    the project refers to.
+    """
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):  # Windows without the privilege
+        pytest.skip("this platform will not create a directory symlink")
+
+    save(a_project_with_its_audio(link), link / "mix.3dim")
+    media = load(link / "mix.3dim").project.media_pool[0]
+
+    assert Path(media.path) == link / "samples" / "kick.wav"
+    assert "real" not in Path(media.path).parts
+    assert Path(media.path).is_file(), "the link still has to lead to the audio"
+
+
+def test_a_symlinked_project_writes_the_plain_relative_path(tmp_path: Path) -> None:
+    """Not resolving has to hold on the *writing* side too.
+
+    A writer that resolves the project's directory but not the media's
+    computes the path between a link and its target, and still round-trips -
+    the reader undoes it on the way back. What it leaves behind is a file
+    saying `../link/samples/kick.wav` where `samples/kick.wav` was meant,
+    which stops being portable the moment the folder moves. The file is the
+    only place that shows it, so the file is where this looks.
+    """
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("this platform will not create a directory symlink")
+
+    path = link / "mix.3dim"
+    save(a_project_with_its_audio(link), path)
+
+    written_path = json.loads(path.read_text(encoding="utf-8"))["media_pool"][0]["path"]
+    assert written_path == "samples/kick.wav"
+
+
+def test_a_project_saved_by_a_relative_name_still_loads_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`save(project, "sub/mix.3dim")` is a perfectly ordinary call.
+
+    Its directory is `sub`, which is relative, and D-71 says media paths are
+    absolute in memory - so the project file's own location has to be made
+    absolute before anything is measured against it. Without that the media
+    path comes back relative to the working directory, and the first time
+    something opens the project from anywhere else the audio is gone.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "sub").mkdir()
+    project = a_project_with_its_audio(tmp_path / "sub")
+
+    save(project, "sub/mix.3dim")
+    media = load("sub/mix.3dim").project.media_pool[0]
+
+    assert Path(media.path).is_absolute()
+    assert Path(media.path) == tmp_path / "sub" / "samples" / "kick.wav"
+    assert load("sub/mix.3dim").project == project
