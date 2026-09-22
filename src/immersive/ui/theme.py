@@ -30,6 +30,9 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import cache
+from importlib import resources
+from string import Template
 from types import MappingProxyType
 from typing import Final
 
@@ -240,6 +243,79 @@ BUILTIN: Final = Theme(
         "#FB923C",  # orange
         "#A3E635",  # lime
     ),
+    #: Per-widget roles (D-46). One group per widget the application draws
+    #: today, named from the ownership table in the *Theming* section of
+    #: docs/04-ui-spec.md rather than from the stylesheet's selectors — a key
+    #: called `toolbutton_pressed_background` would be a QSS selector with an
+    #: underscore in it, not a role anybody would think to theme.
+    #:
+    #: Every milestone from here adds its own groups as it builds the widgets
+    #: that need them, and adds them to `04` at the same time. That obligation
+    #: is the whole reason this system is built third rather than last.
+    groups={
+        "window": {"background": "surface.window"},
+        "panel": {"background": "surface.panel", "text": "text.primary"},
+        "menu": {
+            "bar.background": "surface.raised",
+            "bar.border": "border",
+            "bar.selected.background": "surface.hover",
+            "background": "surface.raised",
+            "border": "border",
+            "selected.background": "accent.pressed",
+            "selected.text": "text.primary",
+            "disabled.text": "text.disabled",
+            "separator": "border",
+        },
+        "toolbar": {
+            "background": "surface.raised",
+            "border": "border",
+            "separator": "border",
+        },
+        "button": {
+            "background": "surface.hover",
+            "border": "border",
+            "text": "text.primary",
+            "hover.border": "accent.text",
+            "pressed.background": "accent.pressed",
+            "checked.background": "accent.pressed",
+            "checked.border": "accent",
+            "disabled.text": "text.disabled",
+            "disabled.border": "surface.hover",
+        },
+        "tab": {
+            "pane.background": "surface.panel",
+            "bar.background": "surface.window",
+            "background": "surface.window",
+            "text": "text.secondary",
+            "hover.background": "surface.raised",
+            "hover.text": "text.primary",
+            "selected.background": "surface.panel",
+            "selected.text": "text.primary",
+            "selected.marker": "accent",
+        },
+        # The focus ring is its own group rather than a key on each widget:
+        # 04-ui-spec.md asks for one indicator, consistent across the
+        # application and visible — "no information by colour alone" cuts both
+        # ways, and a focus indicator nobody can see fails keyboard users
+        # first. One group is how it stays one colour.
+        "focus": {"ring": "accent", "menu.background": "surface.hover"},
+        "splitter": {"handle": "border", "hover.handle": "accent"},
+        "statusbar": {
+            "background": "surface.raised",
+            "border": "border",
+            "text": "text.secondary",
+        },
+        "scrollbar": {
+            "background": "surface.panel",
+            "handle": "surface.hover",
+            "hover.handle": "accent.pressed",
+        },
+        "tooltip": {
+            "background": "surface.raised",
+            "text": "text.primary",
+            "border": "accent.pressed",
+        },
+    },
 )
 
 
@@ -325,141 +401,43 @@ CHANNEL_COLORS: Final[tuple[str, ...]] = BUILTIN.channels
 # stylesheet
 # --------------------------------------------------------------------------- #
 
-_QSS = """
-/* One stack, resolved per platform by Qt: Segoe UI on Windows, SF on macOS,
-   Ubuntu or Noto on Linux. Naming a single family gets a fallback nobody
-   chose on the two platforms that do not have it. */
-QWidget {{
-    background-color: {bg_1};
-    color: {text_hi};
-    font-family: "Segoe UI", "SF Pro Text", "Inter", "Ubuntu", "Noto Sans",
-                 "DejaVu Sans", sans-serif;
-    font-size: 13px;
-}}
-
-QMainWindow, QMainWindow > QWidget {{ background-color: {bg_0}; }}
-
-QMenuBar {{
-    background-color: {bg_2};
-    border-bottom: 1px solid {border};
-    padding: 2px 4px;
-}}
-QMenuBar::item {{ padding: 5px 10px; border-radius: 4px; }}
-QMenuBar::item:selected {{ background-color: {bg_3}; }}
-
-QMenu {{
-    background-color: {bg_2};
-    border: 1px solid {border};
-    padding: 4px;
-}}
-QMenu::item {{ padding: 6px 24px 6px 20px; border-radius: 4px; }}
-QMenu::item:selected {{ background-color: {accent_dim}; color: {text_hi}; }}
-QMenu::item:disabled {{ color: {text_dim}; }}
-QMenu::separator {{ height: 1px; background: {border}; margin: 4px 8px; }}
-
-QToolBar {{
-    background-color: {bg_2};
-    border-bottom: 1px solid {border};
-    padding: 4px 6px;
-    spacing: 4px;
-}}
-QToolBar::separator {{ width: 1px; background: {border}; margin: 4px 6px; }}
-
-QToolButton, QPushButton {{
-    background-color: {bg_3};
-    border: 1px solid {border};
-    border-radius: 5px;
-    padding: 5px 10px;
-    color: {text_hi};
-}}
-QToolButton:hover, QPushButton:hover {{ border-color: {accent_glow}; }}
-QToolButton:pressed, QPushButton:pressed {{ background-color: {accent_dim}; }}
-QToolButton:checked {{
-    background-color: {accent_dim};
-    border-color: {accent};
-}}
-QToolButton:disabled, QPushButton:disabled {{
-    color: {text_dim};
-    border-color: {bg_3};
-}}
-
-/* Tabs are flat and marked by an accent rule on the selected one, rather than
-   drawn as raised folders - the workspace has two tabs (D-49), and chrome
-   heavy enough to notice would be chrome competing with the scene. */
-QTabWidget::pane {{ border: none; background: {bg_1}; }}
-QTabBar {{ background: {bg_0}; }}
-QTabBar::tab {{
-    background: {bg_0};
-    color: {text_lo};
-    border: none;
-    border-top: 2px solid transparent;
-    padding: 7px 18px 8px 18px;
-}}
-QTabBar::tab:hover:!selected {{ background: {bg_2}; color: {text_hi}; }}
-QTabBar::tab:selected {{
-    background: {bg_1};
-    color: {text_hi};
-    border-top: 2px solid {accent};
-}}
-
-/* 04-ui-spec.md lists the focus ring among the accent's jobs. Without a rule
-   here it falls back to whatever Fusion draws, which is neither purple nor
-   consistent between platforms - and "no information by colour alone" cuts
-   both ways: a focus indicator nobody can see fails keyboard users first.
-
-   The tab bar is deliberately left out: its selected tab already carries an
-   accent rule, and a box around it on focus puts two indicators on one widget
-   and undoes the flatness the block above is for. */
-*:focus {{ outline: none; }}
-QToolButton:focus, QPushButton:focus {{ border: 1px solid {accent}; }}
-QMenuBar::item:focus {{ background-color: {bg_3}; }}
-
-QSplitter::handle {{ background-color: {border}; }}
-QSplitter::handle:horizontal {{ width: 1px; }}
-QSplitter::handle:vertical {{ height: 1px; }}
-QSplitter::handle:hover {{ background-color: {accent}; }}
-
-QStatusBar {{
-    background-color: {bg_2};
-    border-top: 1px solid {border};
-    color: {text_lo};
-}}
-QStatusBar::item {{ border: none; }}
-
-QLabel {{ background: transparent; }}
-
-QScrollBar:vertical, QScrollBar:horizontal {{
-    background: {bg_1};
-    border: none;
-}}
-QScrollBar:vertical {{ width: 10px; }}
-QScrollBar:horizontal {{ height: 10px; }}
-QScrollBar::handle {{ background: {bg_3}; border-radius: 5px; min-height: 24px; }}
-QScrollBar::handle:hover {{ background: {accent_dim}; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
-QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
-
-QToolTip {{
-    background-color: {bg_2};
-    color: {text_hi};
-    border: 1px solid {accent_dim};
-    padding: 4px 6px;
-}}
-"""
+#: The sheet lives beside the icons and is read through importlib.resources,
+#: never by walking up from __file__ (D-30).
+_QSS_PACKAGE: Final = "immersive.assets"
+_QSS_FILE: Final = "app.qss"
 
 
-def stylesheet() -> str:
-    """The application-wide QSS, with the palette substituted in."""
-    return _QSS.format(
-        bg_0=BG_0,
-        bg_1=BG_1,
-        bg_2=BG_2,
-        bg_3=BG_3,
-        border=BORDER,
-        text_hi=TEXT_HI,
-        text_lo=TEXT_LO,
-        text_dim=TEXT_DIM,
-        accent=ACCENT,
-        accent_dim=ACCENT_DIM,
-        accent_glow=ACCENT_GLOW,
+@cache
+def _template() -> Template:
+    """The stylesheet template, read once per process.
+
+    `string.Template` rather than `str.format`, so the file can hold single
+    braces and be a stylesheet an editor highlights and a person can read.
+    `str.format` would need every `{` in it doubled, which would make it
+    neither.
+    """
+    text = resources.files(_QSS_PACKAGE).joinpath(_QSS_FILE).read_text("utf-8")
+    return Template(text)
+
+
+def stylesheet(theme: Theme | None = None) -> str:
+    """The application-wide QSS, with a theme's groups substituted in.
+
+    Every `$name` in the sheet is one group key with its dots turned into
+    underscores - `$button_hover_border` is the `hover.border` key of the
+    `button` group - so the stylesheet names roles and never colours, which
+    is F-44. A `$name` with no group key behind it raises here rather than
+    leaving a widget quietly wearing the colour it had.
+
+    Takes a theme so the phase that adds a picker can build a sheet for one
+    without making it active first. Defaults to the active theme, which is
+    what `app.py` wants.
+    """
+    built = theme or _active
+    return _template().substitute(
+        {
+            f"{group}.{key}".replace(".", "_"): built.value(group, key)
+            for group, values in built.groups.items()
+            for key in values
+        }
     )

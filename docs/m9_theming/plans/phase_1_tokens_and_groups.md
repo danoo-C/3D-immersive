@@ -187,6 +187,42 @@ adding, because that table is the standing obligation every later milestone is
 measured against, and a table with holes in it is a weaker instrument than one
 without.
 
+## ⚠️ Naming roles costs more characters than naming colours
+
+Not anticipated, and it moved a file. Deriving each stylesheet placeholder
+from its group and key — `$button_hover_border` for the `hover.border` key of
+`button` — makes the names two to three times longer than the `{accent_dim}`
+they replace, and four rules in the sheet went past the line limit as a
+result. They could not be wrapped, because the acceptance is that the
+*rendered* sheet is byte-identical and a newline in the template is a newline
+in the output.
+
+Three ways out, and the third is the only one that does not give something up:
+
+| | |
+|---|---|
+| shorten the group keys | they are `04`'s, and `button` matches its worked example key for key. Shortening them to fit a Python line length is the tail wagging the dog |
+| map placeholders to group keys explicitly, forty-six lines of it | reintroduces exactly the duplication the derivation removes — a table that can drift from both the sheet and the vocabulary |
+| **the sheet stops being a Python string** | it never should have been one |
+
+So `_QSS` became `src/immersive/assets/app.qss`, read through
+`importlib.resources` like every other bundled resource (D-30), with
+`string.Template` rather than `str.format` so the file holds single braces
+and is a stylesheet an editor highlights rather than one with every `{`
+doubled. The rendered output is unchanged, which the golden fixture proves.
+
+Two things fall out that are worth having anyway. `ruff` no longer measures
+the line length of another language's source — the same instinct as D-43,
+which stopped it formatting Python inside Markdown. And the sheet is now
+something `04`'s "no widget names a hex" rule can be asserted *on*, as a file,
+which is where a hex would have been easiest to slip in and hardest to notice.
+
+The cost is one more non-Python file that has to reach the wheel, so
+`tests/test_package.py` now asserts the stylesheet and the icon set are both
+reachable as resources. That is the failure D-27 exists to catch: works from
+a source tree, missing from the wheel, and the application starts unstyled for
+everybody who installed it rather than checked it out.
+
 ## Steps
 
 1. **The decisions, and `04` made consistent with itself.** Three rows in the
@@ -199,7 +235,7 @@ without.
    thirteen tokens — the same shape of test `test_model.py` uses to tie the
    Entities block to the dataclasses, and for the same reason.
 
-2. **The `Theme` object.** A frozen dataclass of `tokens`, `channels` and
+2. ✅ **The `Theme` object.** A frozen dataclass of `tokens`, `channels` and
    `groups`; `color(name)` resolving a token; `group(name, key)` resolving a
    group value that is either a token name or a literal `#RRGGBB`; validation
    at construction; the module-level active theme and its accessor.
@@ -209,7 +245,7 @@ without.
    accessor reads the *current* active theme rather than one captured when the
    module was imported.
 
-3. **The groups, and a byte-identical stylesheet.** The forty-six
+3. ✅ **The groups, and a byte-identical stylesheet.** The forty-six
    substitutions expressed as groups, and `_QSS` reading from them.
    *Test:* `stylesheet()` equals `tests/fixtures/stylesheet_before_m9.qss`,
    captured before a line of this phase was written. Qt still parses it — the

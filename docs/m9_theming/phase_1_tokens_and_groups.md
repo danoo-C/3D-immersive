@@ -47,3 +47,41 @@ F-44, D-46. The token vocabulary and the two-layer split are specified in the
 ## Notes
 
 Appended while building.
+
+### Steps 1-3 — the vocabulary, the object, and a sheet that did not move
+
+**`04` carried two token vocabularies for the same thirteen colours**, and
+nobody had noticed because nothing had yet had to name one in code. The
+palette table said `bg-1` and `accent-glow`; the `.3dimtheme` example four
+sections later said `surface.panel` and `accent.text`. D-74 settles it on the
+file's names, because they are what a theme author reads and edits, and phase
+3 turns the built-in theme into exactly that file. `04`'s ownership table was
+also missing `tab` and `focus`, both of which the sheet has styled since M0.
+
+**Eleven groups, forty-six keys, and the count was not a coincidence:** the
+sheet makes forty-six colour decisions, measured before any of this was
+written. `button` matches `04`'s worked example key for key, which is the
+cheapest possible evidence that the documented example is implementable.
+
+**Naming roles costs more characters than naming colours.** Four rules went
+past the line limit once `{accent_dim}` became `$button_pressed_background`,
+and the byte-identical acceptance meant they could not be wrapped. The
+stylesheet is now `assets/app.qss`, read through `importlib.resources` (D-30)
+and substituted with `string.Template` so the file holds single braces. It
+should not have been a Python string in the first place, and the plan has the
+full argument.
+
+**One mutation is equivalent rather than missed.** Replacing `value()`'s token
+lookup with a fallback to the raw string survives the whole suite, and should:
+construction refuses any group value that is not a literal, the reserved
+`channel`, or a token that exists, so the fallback can never fire. It is
+pinned by a test asserting that invariant — because it is precisely the
+guarantee phase 2 has to keep when it merges a user's theme over the default,
+and the day a merge produces a `Theme` without going through validation is the
+day the fallback starts painting token *names* as colours, which Qt silently
+drops.
+
+**`warn` and `error` are in the vocabulary and no group uses them.** That is
+correct rather than dead: clipping and missing media belong to widgets M2 and
+M3 build, and load failures to the notice centre phase 4 builds. A token is a
+colour a theme may set, not a colour something currently paints.

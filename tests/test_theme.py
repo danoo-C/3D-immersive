@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import FrozenInstanceError
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -404,3 +405,88 @@ def test_every_group_value_on_a_built_theme_is_resolvable() -> None:
                     HEX.match(raw) or raw == theme.CHANNEL or raw in built.tokens
                 )
                 assert resolvable, f"{built.name}: groups.{group}.{key} is {raw!r}"
+
+
+# --------------------------------------------------------------------------- #
+# the stylesheet is built from groups, and changed no pixels doing it
+# --------------------------------------------------------------------------- #
+
+BEFORE_M9 = Path(__file__).resolve().parent / "fixtures" / "stylesheet_before_m9.qss"
+
+
+def test_the_stylesheet_is_unchanged_by_the_indirection() -> None:
+    """The cheapest possible proof that this phase changed no pixels.
+
+    The fixture was captured and committed before a line of M9 was written,
+    and the whole point is that it is *asserted* rather than regenerated. A
+    regenerated golden file records whatever the code now does, which is not
+    a test of anything.
+
+    It is a migration check with an expiry. It retires the first time a
+    milestone legitimately changes a colour in the sheet — in a commit that
+    says which colour and why, which is exactly the conversation this is
+    meant to force.
+    """
+    assert theme.stylesheet() == BEFORE_M9.read_text(encoding="utf-8")
+
+
+def test_every_group_key_fills_exactly_one_placeholder() -> None:
+    """The sheet and the vocabulary cover each other, with nothing spare.
+
+    A placeholder with no group key behind it already fails loudly, because
+    `substitute` raises. The other direction is the silent one: a group key
+    nothing reads is a role that looks themeable and is not, and a theme
+    author changing it would see no effect and no error.
+    """
+    sheet = resources.files("immersive.assets").joinpath("app.qss").read_text("utf-8")
+    placeholders = set(re.findall(r"\$([a-z_0-9]+)", sheet))
+    keys = {
+        f"{group}.{key}".replace(".", "_")
+        for group, values in theme.BUILTIN.groups.items()
+        for key in values
+    }
+    assert placeholders == keys
+
+
+def test_the_stylesheet_names_no_colour() -> None:
+    """F-44, asserted on the file rather than on the rendered sheet.
+
+    The sheet is where a hex would be easiest to slip in and hardest to
+    notice — it is not Python, so nothing else here looks at it.
+    """
+    sheet = resources.files("immersive.assets").joinpath("app.qss").read_text("utf-8")
+    assert not re.findall(r"#[0-9A-Fa-f]{6}", sheet)
+
+
+def test_the_stylesheet_follows_the_theme_it_is_given() -> None:
+    """A different theme renders a different sheet, without being made active."""
+    recoloured = theme.Theme(
+        name="Green",
+        tokens={**theme.BUILTIN.tokens, "accent": "#00FF00"},
+        channels=theme.BUILTIN.channels,
+        groups=theme.BUILTIN.groups,
+    )
+    sheet = theme.stylesheet(recoloured)
+
+    assert "#00FF00" in sheet
+    assert "#A855F7" not in sheet, "the old accent survived somewhere"
+    assert theme.stylesheet() != sheet, "the active theme was not the one asked for"
+
+
+def test_no_widget_source_names_a_hex() -> None:
+    """F-44, over the whole UI layer.
+
+    The acceptance for this phase spells it as a grep; a test is the same
+    grep that cannot be forgotten. `theme.py` holds the palette and is the
+    one file allowed to say a colour out loud — and after this phase even it
+    says them only inside the built-in theme.
+    """
+    ui = Path(theme.__file__).parent
+    offenders = {
+        str(path.relative_to(ui)): re.findall(
+            r"#[0-9A-Fa-f]{6}", path.read_text("utf-8")
+        )
+        for path in sorted(ui.rglob("*.py"))
+        if path.name != "theme.py"
+    }
+    assert not {name: hexes for name, hexes in offenders.items() if hexes}

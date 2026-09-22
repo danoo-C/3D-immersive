@@ -1,0 +1,120 @@
+
+/* One stack, resolved per platform by Qt: Segoe UI on Windows, SF on macOS,
+   Ubuntu or Noto on Linux. Naming a single family gets a fallback nobody
+   chose on the two platforms that do not have it. */
+QWidget {
+    background-color: $panel_background;
+    color: $panel_text;
+    font-family: "Segoe UI", "SF Pro Text", "Inter", "Ubuntu", "Noto Sans",
+                 "DejaVu Sans", sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow, QMainWindow > QWidget { background-color: $window_background; }
+
+QMenuBar {
+    background-color: $menu_bar_background;
+    border-bottom: 1px solid $menu_bar_border;
+    padding: 2px 4px;
+}
+QMenuBar::item { padding: 5px 10px; border-radius: 4px; }
+QMenuBar::item:selected { background-color: $menu_bar_selected_background; }
+
+QMenu {
+    background-color: $menu_background;
+    border: 1px solid $menu_border;
+    padding: 4px;
+}
+QMenu::item { padding: 6px 24px 6px 20px; border-radius: 4px; }
+QMenu::item:selected { background-color: $menu_selected_background; color: $menu_selected_text; }
+QMenu::item:disabled { color: $menu_disabled_text; }
+QMenu::separator { height: 1px; background: $menu_separator; margin: 4px 8px; }
+
+QToolBar {
+    background-color: $toolbar_background;
+    border-bottom: 1px solid $toolbar_border;
+    padding: 4px 6px;
+    spacing: 4px;
+}
+QToolBar::separator { width: 1px; background: $toolbar_separator; margin: 4px 6px; }
+
+QToolButton, QPushButton {
+    background-color: $button_background;
+    border: 1px solid $button_border;
+    border-radius: 5px;
+    padding: 5px 10px;
+    color: $button_text;
+}
+QToolButton:hover, QPushButton:hover { border-color: $button_hover_border; }
+QToolButton:pressed, QPushButton:pressed { background-color: $button_pressed_background; }
+QToolButton:checked {
+    background-color: $button_checked_background;
+    border-color: $button_checked_border;
+}
+QToolButton:disabled, QPushButton:disabled {
+    color: $button_disabled_text;
+    border-color: $button_disabled_border;
+}
+
+/* Tabs are flat and marked by an accent rule on the selected one, rather than
+   drawn as raised folders - the workspace has two tabs (D-49), and chrome
+   heavy enough to notice would be chrome competing with the scene. */
+QTabWidget::pane { border: none; background: $tab_pane_background; }
+QTabBar { background: $tab_bar_background; }
+QTabBar::tab {
+    background: $tab_background;
+    color: $tab_text;
+    border: none;
+    border-top: 2px solid transparent;
+    padding: 7px 18px 8px 18px;
+}
+QTabBar::tab:hover:!selected { background: $tab_hover_background; color: $tab_hover_text; }
+QTabBar::tab:selected {
+    background: $tab_selected_background;
+    color: $tab_selected_text;
+    border-top: 2px solid $tab_selected_marker;
+}
+
+/* 04-ui-spec.md lists the focus ring among the accent's jobs. Without a rule
+   here it falls back to whatever Fusion draws, which is neither purple nor
+   consistent between platforms - and "no information by colour alone" cuts
+   both ways: a focus indicator nobody can see fails keyboard users first.
+
+   The tab bar is deliberately left out: its selected tab already carries an
+   accent rule, and a box around it on focus puts two indicators on one widget
+   and undoes the flatness the block above is for. */
+*:focus { outline: none; }
+QToolButton:focus, QPushButton:focus { border: 1px solid $focus_ring; }
+QMenuBar::item:focus { background-color: $focus_menu_background; }
+
+QSplitter::handle { background-color: $splitter_handle; }
+QSplitter::handle:horizontal { width: 1px; }
+QSplitter::handle:vertical { height: 1px; }
+QSplitter::handle:hover { background-color: $splitter_hover_handle; }
+
+QStatusBar {
+    background-color: $statusbar_background;
+    border-top: 1px solid $statusbar_border;
+    color: $statusbar_text;
+}
+QStatusBar::item { border: none; }
+
+QLabel { background: transparent; }
+
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: $scrollbar_background;
+    border: none;
+}
+QScrollBar:vertical { width: 10px; }
+QScrollBar:horizontal { height: 10px; }
+QScrollBar::handle { background: $scrollbar_handle; border-radius: 5px; min-height: 24px; }
+QScrollBar::handle:hover { background: $scrollbar_hover_handle; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+
+QToolTip {
+    background-color: $tooltip_background;
+    color: $tooltip_text;
+    border: 1px solid $tooltip_border;
+    padding: 4px 6px;
+}
