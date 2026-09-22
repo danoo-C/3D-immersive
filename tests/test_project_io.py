@@ -30,6 +30,7 @@ from immersive.core.io.project_io import (
     SCHEMA_VERSION,
     ProjectFileError,
     _path_for_file,
+    load,
     save,
 )
 from immersive.core.model import (
@@ -39,6 +40,7 @@ from immersive.core.model import (
     Fade,
     FadeShape,
     HrtfRef,
+    Interpolatable,
     Master,
     MediaFile,
     Position,
@@ -537,3 +539,327 @@ def test_a_successful_save_leaves_no_temporary_behind(tmp_path: Path) -> None:
     save(a_project(tmp_path), tmp_path / "a.3dim")
     save(a_project(tmp_path), tmp_path / "a.3dim")
     assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == ["a.3dim"]
+
+
+# --------------------------------------------------------------------------- #
+# the reader, and the milestone's own acceptance
+# --------------------------------------------------------------------------- #
+
+
+def every_field_project(media_root: Path) -> Project:
+    """A project touching every corner of the schema at once.
+
+    Deliberately not `a_project` above, which is shaped like something someone
+    might make. This one is shaped like the *format*: every `StrEnum` member,
+    every automatable parameter, a curve with no keyframes, an absent snap
+    override and a present one, media inside the project's directory and
+    media outside it, and a handle in each of the four shapes the file can
+    write. `test_the_round_trip_fixture_is_exhaustive` is what stops it
+    quietly covering less than it claims.
+    """
+    samples = media_root / "samples"
+    outside = media_root.parent / "shared"
+    pool = [
+        MediaFile(KICK, str(samples / "kick.wav"), "kick.wav", 44_100, 1, 96_000),
+        MediaFile(
+            STEM,
+            str(samples / "backing.wav"),
+            "backing.wav",
+            48_000,
+            2,
+            5_760_000,
+            hash="sha256:9c1d",
+        ),
+        MediaFile("m-00000003", str(outside / "loop.wav"), "loop.wav", 96_000, 2, 480),
+    ]
+
+    # The project's own snap takes the first division; one channel takes each
+    # of the rest, and the last has none at all.
+    divisions = list(Division)
+    channels = [
+        Channel(
+            "c-00000001",
+            "Everything",
+            "#A855F7",
+            gain_db=-3.5,
+            mute=True,
+            solo=True,
+            hrtf_bypass=False,
+            pan=0.75,
+            snap_override=SnapSetting(True, divisions[1], triplet=True),
+            position=Position(-1.25, 1.5, 0.5),
+            automation={
+                # ease then linear then hold, with an out-only handle, an
+                # in-only handle, and a keyframe carrying none
+                "pos.x": Curve(
+                    [
+                        Keyframe(
+                            0, -2.0, Interp.EASE, Handles(outgoing=(24_000.0, 1.0))
+                        ),
+                        Keyframe(
+                            96_000,
+                            2.0,
+                            Interp.LINEAR,
+                            Handles(incoming=(-1_000.0, -0.5)),
+                        ),
+                        Keyframe(192_000, 0.0, Interp.HOLD),
+                    ]
+                ),
+                # both handles on one keyframe
+                "pos.y": Curve(
+                    [
+                        Keyframe(
+                            0,
+                            1.0,
+                            Interp.EASE,
+                            Handles(outgoing=(500.0, 0.25), incoming=(-500.0, -0.25)),
+                        ),
+                        Keyframe(48_000, 3.0, Interp.LINEAR),
+                    ]
+                ),
+                # a curve with nothing in it: legal, and falls back to position
+                "pos.z": Curve([]),
+                # handles present and both zero, which is not the same as none
+                "gain": Curve([Keyframe(0, -6.0, Interp.EASE, Handles())]),
+                "pan": Curve([Keyframe(0, -1.0), Keyframe(24_000, 1.0)]),
+            },
+            clips=[
+                Clip(
+                    "k-00000001",
+                    KICK,
+                    start=0,
+                    offset=120,
+                    length=11_000,
+                    gain_db=-1.5,
+                    fade_in=Fade(64, FadeShape.LINEAR),
+                    fade_out=Fade(512, FadeShape.EQUAL_POWER),
+                ),
+                Clip("k-00000002", KICK, start=48_000, offset=0, length=96_000),
+            ],
+        )
+    ]
+    for index, division in enumerate(divisions[2:], start=2):
+        channels.append(
+            Channel(
+                f"c-0000000{index}",
+                f"Channel {index}",
+                "#22D3EE",
+                snap_override=SnapSetting(False, division, triplet=index % 2 == 0),
+            )
+        )
+    channels.append(
+        Channel(
+            "c-00000009",
+            "Backing mix",
+            "#3B82F6",
+            hrtf_bypass=True,
+            pan=-0.25,
+            snap_override=None,  # inherits the project's
+            automation={},  # empty, not absent
+            clips=[Clip("k-00000003", STEM, start=0, offset=0, length=5_760_000)],
+        )
+    )
+
+    project = Project(
+        bpm=137.5,
+        time_signature=(7, 8),
+        snap=SnapSetting(True, divisions[0], triplet=False),
+        hrtf=HrtfRef(kind="file", id="ari-nh2"),
+        distance=Distance(rolloff=1.75, min_distance=0.15, ref_distance=2.5),
+        master=Master(gain_db=-2.25, limiter_on=False),
+        media_pool=pool,
+        channels=channels,
+    )
+    assert validate(project) == []
+    return project
+
+
+def enums_used(project: Project) -> dict[str, set[Any]]:
+    """Which members of each enum the project actually holds."""
+    used: dict[str, set[Any]] = {
+        "division": {project.snap.division},
+        "interp": set(),
+        "shape": set(),
+        "parameter": set(),
+    }
+    for channel in project.channels:
+        if channel.snap_override is not None:
+            used["division"].add(channel.snap_override.division)
+        used["parameter"].update(channel.automation)
+        for curve in channel.automation.values():
+            used["interp"].update(keyframe.interp for keyframe in curve.keyframes)
+        for clip in channel.clips:
+            used["shape"].update({clip.fade_in.shape, clip.fade_out.shape})
+    return used
+
+
+def test_the_round_trip_fixture_is_exhaustive(tmp_path: Path) -> None:
+    """The acceptance below is only worth what this asserts.
+
+    "Every `StrEnum` member" is a claim the fixture makes and this checks. A
+    member added later - a new grid division, a new fade shape - arrives with
+    no round-trip coverage and nothing to say so, which is the failure this
+    exists to make loud.
+    """
+    project = every_field_project(tmp_path)
+    used = enums_used(project)
+
+    assert used["division"] == set(Division)
+    assert used["interp"] == set(Interp)
+    assert used["shape"] == set(FadeShape)
+    assert used["parameter"] == {member.value for member in Interpolatable}
+
+    handles = [
+        keyframe.handles
+        for channel in project.channels
+        for curve in channel.automation.values()
+        for keyframe in curve.keyframes
+    ]
+    assert Handles(outgoing=(24_000.0, 1.0)) in handles, "no out-only handle"
+    assert Handles(incoming=(-1_000.0, -0.5)) in handles, "no in-only handle"
+    assert Handles() in handles, "no present-but-zero handles"
+    assert None in handles, "no keyframe without handles"
+    assert any(
+        not curve.keyframes for c in project.channels for curve in c.automation.values()
+    ), "no empty curve"
+    assert any(c.automation == {} for c in project.channels), "no empty automation"
+    assert any(c.snap_override is None for c in project.channels), "no absent override"
+
+
+def test_a_project_saved_and_reloaded_compares_equal(tmp_path: Path) -> None:
+    """M1's acceptance, in the words of the roadmap.
+
+    Everything in phase 1 that made equality load-bearing was for this line.
+    """
+    project = every_field_project(tmp_path)
+    path = tmp_path / "everything.3dim"
+    save(project, path)
+
+    result = load(path)
+
+    assert result.project == project
+    assert result.problems == []
+
+
+def test_the_other_fixture_also_reloads_equal(tmp_path: Path) -> None:
+    """A second shape, because one project is one arrangement of the schema."""
+    project = a_project(tmp_path)
+    path = tmp_path / "a.3dim"
+    save(project, path)
+    assert load(path).project == project
+
+
+def test_save_load_save_is_byte_identical(tmp_path: Path) -> None:
+    """The assertion equality cannot make.
+
+    A reader and a writer wrong in the same direction round-trip perfectly -
+    swap `out` and `in` in both and every value comes home. Going back out to
+    the file is what notices, because the second file has to match the first
+    one rather than the model they both agree about.
+    """
+    project = every_field_project(tmp_path)
+    first = tmp_path / "first.3dim"
+    second = tmp_path / "second.3dim"
+
+    save(project, first)
+    save(load(first).project, second)
+
+    assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
+
+
+def test_time_signature_comes_back_a_tuple(tmp_path: Path) -> None:
+    """JSON has no tuple, and a list here fails equality on the type alone."""
+    path = tmp_path / "a.3dim"
+    save(every_field_project(tmp_path), path)
+    reloaded = load(path).project
+
+    assert reloaded.time_signature == (7, 8)
+    assert isinstance(reloaded.time_signature, tuple)
+
+
+def test_an_absent_snap_override_comes_back_as_none(tmp_path: Path) -> None:
+    """`null` means inherit the project's, which is what `None` means (F-18)."""
+    path = tmp_path / "a.3dim"
+    save(every_field_project(tmp_path), path)
+    reloaded = load(path).project
+
+    assert reloaded.channels[-1].snap_override is None
+    assert reloaded.channels[0].snap_override is not None
+
+
+def test_empty_automation_and_empty_curves_survive(tmp_path: Path) -> None:
+    """An empty curve is not the same as no curve, and neither is an error."""
+    path = tmp_path / "a.3dim"
+    save(every_field_project(tmp_path), path)
+    reloaded = load(path).project
+
+    assert reloaded.channels[-1].automation == {}
+    assert reloaded.channels[0].automation["pos.z"].keyframes == []
+    assert "pos.z" in reloaded.channels[0].automation
+
+
+def test_handles_survive_in_all_four_shapes(tmp_path: Path) -> None:
+    """Out only, in only, present and zero, and absent entirely.
+
+    Asserted by direction rather than by value, because swapping `out` and
+    `in` on both sides survives every other test in this file and changes
+    what a curve does after a reload.
+    """
+    path = tmp_path / "a.3dim"
+    project = every_field_project(tmp_path)
+    save(project, path)
+    automation = load(path).project.channels[0].automation
+
+    x = automation["pos.x"].keyframes
+    assert x[0].handles == Handles(outgoing=(24_000.0, 1.0))
+    assert x[1].handles == Handles(incoming=(-1_000.0, -0.5))
+    assert x[2].handles is None
+    assert automation["pos.y"].keyframes[0].handles == Handles(
+        outgoing=(500.0, 0.25), incoming=(-500.0, -0.25)
+    )
+    assert automation["gain"].keyframes[0].handles == Handles()
+
+    # The property the swap would break, stated as a property.
+    assert x[0].handles is not None and x[0].handles.outgoing[0] > 0
+    assert x[1].handles is not None and x[1].handles.incoming[0] < 0
+
+
+def test_a_reloaded_curve_evaluates_the_same(tmp_path: Path) -> None:
+    """Equality compares numbers; this compares what they are for.
+
+    A handle swap that survived equality would still show up here, and so
+    would a keyframe order quietly reversed by the reader.
+    """
+    path = tmp_path / "a.3dim"
+    project = every_field_project(tmp_path)
+    save(project, path)
+    reloaded = load(path).project
+
+    for name in ("pos.x", "pos.y", "gain", "pan"):
+        before = project.channels[0].automation[name]
+        after = reloaded.channels[0].automation[name]
+        assert before.sample(0, 192_000, 97) == after.sample(0, 192_000, 97)
+
+
+def test_media_paths_come_back_absolute(tmp_path: Path) -> None:
+    """D-71's other half. Relative on disk, absolute in memory.
+
+    Including media that lives outside the project's own directory, which is
+    written with `../` segments and must normalise back to where it started
+    rather than to a path with `..` still in it.
+    """
+    path = tmp_path / "a.3dim"
+    project = every_field_project(tmp_path)
+    save(project, path)
+    reloaded = load(path).project
+
+    for before, after in zip(project.media_pool, reloaded.media_pool, strict=True):
+        assert Path(after.path).is_absolute()
+        assert ".." not in Path(after.path).parts
+        assert after.path == before.path
+
+    written_paths = [
+        media["path"]
+        for media in json.loads(path.read_text(encoding="utf-8"))["media_pool"]
+    ]
+    assert written_paths[2].startswith("../"), "the off-tree case is not covered"

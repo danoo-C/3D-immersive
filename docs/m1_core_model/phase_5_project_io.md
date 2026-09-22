@@ -99,6 +99,49 @@ path handling: **a cross-platform behaviour asserted only end-to-end is
 asserted on one platform.** Anything whose whole job is to differ between
 platforms needs the other platform injectable, or CI is agreeing with itself.
 
+### Step 2 — the reader, and the milestone's acceptance
+
+**A project built in code, saved and reloaded compares equal.** That is M1's
+"done when", and it passes against a fixture built to be shaped like the
+*format* rather than like music: every `Division`, `Interp` and `FadeShape`
+member, all five automatable parameters, a curve with no keyframes, an
+absent snap override and a present one, media inside the project directory
+and media outside it, and a handle in each of the four shapes the file can
+write. A separate test asserts that fixture really is exhaustive, so a grid
+division added at M3 arrives with no round-trip coverage *loudly*.
+
+**The mutation that matters most round-trips perfectly.** Swapping `out` and
+`in` in the reader alone is caught by everything. Swapping them in the reader
+*and* the writer together survives round-trip equality, survives save-load-save
+byte-identity, and produces a file whose curves are wrong — and it is caught
+only by step 1's tests, which read the file and assert the two keys by name
+and by sign. That is the concrete justification for the rule step 1 was
+written under: **assertions about a format belong on the file, not on the
+model that came back.** Nine reader mutations were run; eight are caught.
+
+**The ninth is outstanding by design, and is step 5's:** removing `validate()`
+from `load` survives everything here, because nothing in step 2 feeds `load` a
+file that `validate()` would reject. Named here so it is not mistaken for a
+gap that was missed.
+
+**Normalising a path on read is not a nicety.** Media outside the project
+directory is written with `../` segments, and joining that back onto the
+project directory without `normpath` yields a path with `..` still in it —
+which points at the same file and is a different string, so the reloaded
+project compares *unequal* and M1's acceptance fails for a reason that has
+nothing to do with the format. Still not `resolve()`, for the symlink reason
+the writer already had.
+
+**Two small traps in reading numbers**, both in one place so they are not
+rediscovered:
+
+- `bool` is an `int` in Python, so `isinstance(True, int)` is true and `true`
+  would quietly load into a numeric field as 1. Rejected explicitly.
+- An integer field accepts a **whole-numbered** float and narrows it, because
+  F-2 calls this format hand-editable and somebody typing `0.0` into a sample
+  count has been unambiguous. `0.5` has not been, and is reported rather than
+  truncated into a number nobody chose.
+
 ### What `03` cost that the plan did not expect
 
 The plan budgeted one clarifying line in [03](../03-data-model.md). Adding

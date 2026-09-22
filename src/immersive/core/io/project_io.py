@@ -31,16 +31,18 @@ import math
 import os
 import tempfile
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Any
 
 import immersive
-from immersive.core.curves import Curve, Handles, Keyframe
+from immersive.core.curves import Curve, Handles, Interp, Keyframe
 from immersive.core.model import (
     Channel,
     Clip,
     Distance,
     Fade,
+    FadeShape,
     HrtfRef,
     Master,
     MediaFile,
@@ -50,6 +52,7 @@ from immersive.core.model import (
     SnapSetting,
     validate,
 )
+from immersive.core.time import SAMPLE_RATE, Division
 
 #: The on-disk schema this build writes, and what drives forward migration on
 #: load. It is deliberately **not** `app_version` (D-60): two builds can both
@@ -243,6 +246,19 @@ def _document(project: Project, project_directory: Path) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
+def _directory_of(project_file: Path) -> Path:
+    """The directory a project file sits in: absolute, and not resolved.
+
+    Absolute because a media path made relative to a *relative* directory is
+    relative to the working directory instead of to the project, which is the
+    mutation that produces a project openable only from where it was saved.
+    Not `resolve()`d, because a project inside a symlinked directory should
+    keep the path the person typed rather than gain one pointing somewhere
+    they have never seen.
+    """
+    return project_file.absolute().parent
+
+
 def _path_for_file(
     media_path: str,
     project_directory: Path,
@@ -351,7 +367,7 @@ def save(project: Project, path: str | os.PathLike[str]) -> None:
         )
 
     destination = Path(path)
-    document = _document(project, destination.parent)
+    document = _document(project, _directory_of(destination))
 
     unwritable = list(_non_finite(document, ""))
     if unwritable:
@@ -373,3 +389,465 @@ def save(project: Project, path: str | os.PathLike[str]) -> None:
         ensure_ascii=False,
     )
     _write_atomically(destination, text + "\n")
+
+
+# --------------------------------------------------------------------------- #
+# document -> model
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class LoadResult:
+    """A project, and what was wrong with the file that was not fatal.
+
+    The problems here are the survivable kind - audio that is not where the
+    project says it is (F-3), which leaves the project itself perfectly
+    usable and is M8's to relink. Anything meaning there is no project at all
+    raises `ProjectFileError` instead, so a caller that never looks at
+    `problems` still cannot end up holding a half-built project.
+
+    Nothing puts anything in it yet: every problem a `.3dim` can currently
+    have is fatal, and missing media is the first that will not be.
+    """
+
+    project: Project
+    problems: list[Problem]
+
+
+def _type_name(kind: type | tuple[type, ...]) -> str:
+    if isinstance(kind, tuple):
+        return " or ".join(one.__name__ for one in kind)
+    return kind.__name__
+
+
+class _Reading:
+    """One pass over a parsed document, and the problems it found.
+
+    An object rather than a list threaded through twenty functions: every
+    reader below needs somewhere to record "this key is the wrong type" and
+    the location it was at, and passing both into each of them is the kind of
+    noise that gets dropped at one call site and noticed by nobody.
+
+    Reading is deliberately lenient *while it runs* - a bad field is recorded
+    and replaced by its default so the pass carries on and finds the rest.
+    Whether any of it is fatal is decided once, at the end, by `load`. That is
+    `validate()`'s rule again: somebody reporting a bad file wants the list,
+    not the first line of it.
+
+    A key that is simply **absent** is not a problem. A file written before a
+    field existed loads with that field's default, which is what makes adding
+    one a non-breaking change and what the migration hook rests on. A key that
+    is present and wrong *is* a problem, because guessing what someone meant
+    by a string where a number belongs is how a half-built project is returned
+    to a caller who believed it.
+    """
+
+    def __init__(self) -> None:
+        self.problems: list[Problem] = []
+
+    def note(self, where: str, message: str) -> None:
+        self.problems.append(Problem(where, message))
+
+    def _present(
+        self,
+        node: dict[str, Any],
+        key: str,
+        where: str,
+        kind: type | tuple[type, ...],
+        required: bool,
+    ) -> Any:
+        """`node[key]` when it is there and of the right type, else `None`."""
+        if key not in node:
+            if required:
+                self.note(where, f"{key} is missing")
+            return None
+        found = node[key]
+        # `bool` is an `int` in Python, and it is never what a numeric field
+        # in this schema meant - so it is rejected before `isinstance` can
+        # quietly accept `true` as 1.
+        wrong_bool = isinstance(found, bool) and kind is not bool
+        if wrong_bool or not isinstance(found, kind):
+            self.note(
+                where,
+                f"{key} is {type(found).__name__}, not {_type_name(kind)}",
+            )
+            return None
+        return found
+
+    def text(
+        self, node: dict[str, Any], key: str, where: str, default: str = ""
+    ) -> str:
+        found = self._present(node, key, where, str, required=default is None)
+        return default if found is None else str(found)
+
+    def required_text(self, node: dict[str, Any], key: str, where: str) -> str:
+        found = self._present(node, key, where, str, required=True)
+        return "" if found is None else str(found)
+
+    def flag(self, node: dict[str, Any], key: str, where: str, default: bool) -> bool:
+        found = self._present(node, key, where, bool, required=False)
+        return default if found is None else bool(found)
+
+    def integer(
+        self,
+        node: dict[str, Any],
+        key: str,
+        where: str,
+        default: int,
+        required: bool = False,
+    ) -> int:
+        """A sample count or a length.
+
+        A whole-numbered float is accepted and narrowed. The format is meant
+        to be hand-editable (F-2), and somebody typing `0.0` into a field
+        `03` shows as a count has been unambiguous about what they meant;
+        `0.5` has not, and is reported rather than truncated into a number
+        nobody chose.
+        """
+        found = self._present(node, key, where, (int, float), required=required)
+        if found is None:
+            return default
+        if isinstance(found, float):
+            if not found.is_integer():
+                self.note(where, f"{key} is {found}, which is not a whole number")
+                return default
+            return int(found)
+        return int(found)
+
+    def number(
+        self,
+        node: dict[str, Any],
+        key: str,
+        where: str,
+        default: float,
+        required: bool = False,
+    ) -> float:
+        found = self._present(node, key, where, (int, float), required=required)
+        return default if found is None else float(found)
+
+    def member(
+        self,
+        node: dict[str, Any],
+        key: str,
+        where: str,
+        kind: type[Division] | type[Interp] | type[FadeShape],
+        default: Any,
+    ) -> Any:
+        """A `StrEnum`, back from the value it was written as."""
+        found = self._present(node, key, where, str, required=False)
+        if found is None:
+            return default
+        try:
+            return kind(found)
+        except ValueError:
+            allowed = ", ".join(repr(one.value) for one in kind)
+            self.note(where, f"{key} is {found!r}, not one of {allowed}")
+            return default
+
+    def mapping(self, node: dict[str, Any], key: str, where: str) -> dict[str, Any]:
+        found = self._present(node, key, where, dict, required=False)
+        return {} if found is None else dict(found)
+
+    def sequence(self, node: dict[str, Any], key: str, where: str) -> list[Any]:
+        found = self._present(node, key, where, list, required=False)
+        return [] if found is None else list(found)
+
+    def objects(
+        self, node: dict[str, Any], key: str, where: str
+    ) -> list[tuple[dict[str, Any], str]]:
+        """A list of objects, each with the location to report it at.
+
+        Anything in the list that is not an object is reported and dropped,
+        so one malformed clip does not take the rest of the channel with it -
+        and `load` still refuses the file, because the problem was recorded.
+        """
+        found = []
+        for index, item in enumerate(self.sequence(node, key, where)):
+            at = f"{where}.{key}[{index}]"
+            if isinstance(item, dict):
+                found.append((item, at))
+            else:
+                self.note(at, f"is {type(item).__name__}, not an object")
+        return found
+
+
+def _read_position(reading: _Reading, node: dict[str, Any], where: str) -> Position:
+    return Position(
+        x=reading.number(node, "x", where, 0.0),
+        y=reading.number(node, "y", where, 0.0),
+        z=reading.number(node, "z", where, 0.0),
+    )
+
+
+def _read_fade(reading: _Reading, node: dict[str, Any], where: str) -> Fade:
+    return Fade(
+        length=reading.integer(node, "length", where, 0),
+        shape=reading.member(node, "shape", where, FadeShape, FadeShape.LINEAR),
+    )
+
+
+def _read_snap(reading: _Reading, node: dict[str, Any], where: str) -> SnapSetting:
+    return SnapSetting(
+        enabled=reading.flag(node, "enabled", where, True),
+        division=reading.member(node, "division", where, Division, Division.SIXTEENTH),
+        triplet=reading.flag(node, "triplet", where, False),
+    )
+
+
+def _read_hrtf(reading: _Reading, node: dict[str, Any], where: str) -> HrtfRef:
+    return HrtfRef(
+        kind=reading.text(node, "kind", where, "builtin"),
+        id=reading.text(node, "id", where, "sadie-d1"),
+    )
+
+
+def _read_distance(reading: _Reading, node: dict[str, Any], where: str) -> Distance:
+    return Distance(
+        rolloff=reading.number(node, "rolloff", where, 1.0),
+        min_distance=reading.number(node, "min_distance", where, 0.2),
+        ref_distance=reading.number(node, "ref_distance", where, 1.0),
+    )
+
+
+def _read_master(reading: _Reading, node: dict[str, Any], where: str) -> Master:
+    return Master(
+        gain_db=reading.number(node, "gain_db", where, 0.0),
+        limiter_on=reading.flag(node, "limiter_on", where, True),
+    )
+
+
+def _read_handle(
+    reading: _Reading, node: dict[str, Any], key: str, where: str
+) -> tuple[float, float]:
+    """One `[dt, dv]` pair, or zero when the key is not there.
+
+    Absent means zero displacement, which is what `curves.py` already does
+    with a handle it has not been given - so the file's "either key may be
+    absent" and the model's `(0.0, 0.0)` are the same statement.
+    """
+    if key not in node:
+        return (0.0, 0.0)
+    pair = node[key]
+    numbers = (
+        isinstance(pair, list)
+        and len(pair) == 2
+        and all(
+            isinstance(part, int | float) and not isinstance(part, bool)
+            for part in pair
+        )
+    )
+    if not numbers:
+        reading.note(where, f"handles {key} is {pair!r}, not a pair of numbers")
+        return (0.0, 0.0)
+    return (float(pair[0]), float(pair[1]))
+
+
+def _read_keyframe(reading: _Reading, node: dict[str, Any], where: str) -> Keyframe:
+    handles = None
+    if "handles" in node:
+        found = reading.mapping(node, "handles", where)
+        handles = Handles(
+            outgoing=_read_handle(reading, found, "out", where),
+            incoming=_read_handle(reading, found, "in", where),
+        )
+    return Keyframe(
+        t=reading.integer(node, "t", where, 0, required=True),
+        value=reading.number(node, "value", where, 0.0, required=True),
+        interp=reading.member(node, "interp", where, Interp, Interp.LINEAR),
+        handles=handles,
+    )
+
+
+def _read_curve(reading: _Reading, node: dict[str, Any], where: str) -> Curve:
+    return Curve(
+        keyframes=[
+            _read_keyframe(reading, keyframe, at)
+            for keyframe, at in reading.objects(node, "keyframes", where)
+        ]
+    )
+
+
+def _read_media(
+    reading: _Reading, node: dict[str, Any], where: str, project_directory: Path
+) -> MediaFile:
+    return MediaFile(
+        id=reading.required_text(node, "id", where),
+        path=_path_in_memory(
+            reading.required_text(node, "path", where), project_directory
+        ),
+        name=reading.required_text(node, "name", where),
+        source_rate=reading.integer(node, "source_rate", where, 0, required=True),
+        channels=reading.integer(node, "channels", where, 0, required=True),
+        frames=reading.integer(node, "frames", where, 0, required=True),
+        hash=reading.text(node, "hash", where, ""),
+    )
+
+
+def _read_clip(reading: _Reading, node: dict[str, Any], where: str) -> Clip:
+    return Clip(
+        id=reading.required_text(node, "id", where),
+        media_id=reading.required_text(node, "media_id", where),
+        start=reading.integer(node, "start", where, 0, required=True),
+        offset=reading.integer(node, "offset", where, 0, required=True),
+        length=reading.integer(node, "length", where, 0, required=True),
+        gain_db=reading.number(node, "gain_db", where, 0.0),
+        fade_in=_read_fade(
+            reading, reading.mapping(node, "fade_in", where), f"{where}.fade_in"
+        ),
+        fade_out=_read_fade(
+            reading, reading.mapping(node, "fade_out", where), f"{where}.fade_out"
+        ),
+    )
+
+
+def _read_channel(reading: _Reading, node: dict[str, Any], where: str) -> Channel:
+    # `snap_override` distinguishes null from absent the way the model
+    # distinguishes `None` from a setting: null means "inherit the project's",
+    # and so does not being there at all.
+    override = None
+    if node.get("snap_override") is not None:
+        override = _read_snap(
+            reading,
+            reading.mapping(node, "snap_override", where),
+            f"{where}.snap_override",
+        )
+
+    automation = {}
+    for name, curve in reading.mapping(node, "automation", where).items():
+        at = f"{where}.automation[{name!r}]"
+        if isinstance(curve, dict):
+            automation[name] = _read_curve(reading, curve, at)
+        else:
+            reading.note(at, f"is {type(curve).__name__}, not an object")
+
+    return Channel(
+        id=reading.required_text(node, "id", where),
+        name=reading.required_text(node, "name", where),
+        color=reading.required_text(node, "color", where),
+        gain_db=reading.number(node, "gain_db", where, 0.0),
+        mute=reading.flag(node, "mute", where, False),
+        solo=reading.flag(node, "solo", where, False),
+        hrtf_bypass=reading.flag(node, "hrtf_bypass", where, False),
+        pan=reading.number(node, "pan", where, 0.0),
+        snap_override=override,
+        position=_read_position(
+            reading, reading.mapping(node, "position", where), f"{where}.position"
+        ),
+        automation=automation,
+        clips=[
+            _read_clip(reading, clip, at)
+            for clip, at in reading.objects(node, "clips", where)
+        ],
+    )
+
+
+def _read_time_signature(
+    reading: _Reading, node: dict[str, Any], where: str
+) -> tuple[int, int]:
+    """`[num, den]` back into the tuple the model holds.
+
+    A tuple, not the list JSON hands over: `Project.time_signature` is typed
+    as one, `time.py` unpacks it as one, and a project reloaded with a list
+    there compares unequal to the one that was saved - which would fail M1's
+    acceptance for a reason that has nothing to do with the music.
+    """
+    if "time_signature" not in node:
+        return (4, 4)
+    pair = reading.sequence(node, "time_signature", where)
+    whole = [
+        part for part in pair if isinstance(part, int) and not isinstance(part, bool)
+    ]
+    if len(whole) != 2 or len(pair) != 2:
+        reading.note(where, f"time_signature is {pair!r}, not two whole numbers")
+        return (4, 4)
+    return (whole[0], whole[1])
+
+
+def _path_in_memory(stored: str, project_directory: Path) -> str:
+    """The absolute path `stored` names, given where the project file is (D-71).
+
+    The other half of `_path_for_file`. `normpath` rather than `resolve()` for
+    the same reason the writer does not resolve either - a project inside a
+    symlinked directory keeps the path the person typed - but normalising is
+    not optional: media written as `../audio/kick.wav` would otherwise come
+    back as a project directory with `..` still in it, and a reloaded project
+    would not compare equal to the one that was saved.
+
+    An absolute path in the file is left alone. That is what the writer
+    produces when there is no relative form to write - media on another
+    Windows drive - and rewriting it relative to somewhere it does not live
+    would turn a project that merely is not portable into one that is wrong.
+    """
+    return os.path.normpath(Path(project_directory, stored))
+
+
+def _read_project(
+    reading: _Reading, document: dict[str, Any], project_directory: Path
+) -> Project:
+    """Every key the current schema knows, and **only** those (D-73).
+
+    Anything else in the file is dropped rather than carried: the model has
+    nowhere to put untyped data that `validate()` cannot check and the undo
+    stack cannot edit. The cost is that opening a newer project in an older
+    build and saving it loses what the newer build added, which is why the
+    version gate exists.
+    """
+    return Project(
+        sample_rate=reading.integer(document, "sample_rate", "project", SAMPLE_RATE),
+        bpm=reading.number(document, "bpm", "project", 120.0),
+        time_signature=_read_time_signature(reading, document, "project"),
+        snap=_read_snap(
+            reading, reading.mapping(document, "snap", "project"), "project.snap"
+        ),
+        hrtf=_read_hrtf(
+            reading, reading.mapping(document, "hrtf", "project"), "project.hrtf"
+        ),
+        distance=_read_distance(
+            reading,
+            reading.mapping(document, "distance", "project"),
+            "project.distance",
+        ),
+        master=_read_master(
+            reading, reading.mapping(document, "master", "project"), "project.master"
+        ),
+        media_pool=[
+            _read_media(reading, media, at, project_directory)
+            for media, at in reading.objects(document, "media_pool", "")
+        ],
+        channels=[
+            _read_channel(reading, channel, at)
+            for channel, at in reading.objects(document, "channels", "")
+        ],
+    )
+
+
+def load(path: str | os.PathLike[str]) -> LoadResult:
+    """Read a `.3dim` back into a project.
+
+    The inverse of `save`, and held to it by test: a project saved and
+    reloaded compares equal, and saving what was loaded reproduces the file
+    byte for byte. The second is what catches a reader and a writer that are
+    wrong in the same direction, which the first cannot.
+
+    Refuses anything `validate()` rejects, for the same reason `save` does -
+    a project the undo stack guarantees cannot exist should not arrive
+    through the filesystem instead.
+    """
+    source = Path(path)
+    document = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ProjectFileError(
+            f"{source} does not hold a project",
+            [Problem("", f"the file is a JSON {type(document).__name__}")],
+        )
+
+    reading = _Reading()
+    reading.integer(document, "schema_version", "", 0, required=True)
+    project = _read_project(reading, document, _directory_of(source))
+
+    problems = reading.problems + validate(project)
+    if problems:
+        raise ProjectFileError(
+            f"{source} is not a project that can be opened", problems
+        )
+    return LoadResult(project, [])

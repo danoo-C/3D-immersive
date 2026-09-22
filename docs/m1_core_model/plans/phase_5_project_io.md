@@ -156,6 +156,23 @@ model change and `03` as a documentation change, and they are the same change.
 A field that is never serialised is still part of the entity the document
 describes.
 
+## ⚠️ The reader collects problems rather than raising on the first
+
+Not in the plan, and it changes the shape of step 5 rather than its content.
+Every `_read_*` function needs somewhere to record "this key is the wrong
+type" and the location it was at, and threading a list and a path through
+twenty functions is the kind of noise that gets dropped at one call site and
+noticed by nobody. So there is a small `_Reading` object holding the problem
+list, passed down once.
+
+The consequence is that reading is **lenient while it runs and fatal at the
+end**: a bad field is recorded, replaced by its default, and the pass carries
+on to find the rest. Whether any of it is fatal is decided once, by `load`.
+That is `validate()`'s own rule — somebody reporting a bad file wants the
+list, not the first line of it — and it means step 5 inherits a reader that
+already reports what and where, and has to add the file-level failures rather
+than retrofit locations into twenty functions.
+
 ## Steps
 
 1. ✅ **The decisions, then the writer.** Three rows in the decision log, the
@@ -168,7 +185,7 @@ describes.
    is present, is `immersive.__version__`, and is not `schema_version`; no key
    anywhere holds a timestamp.
 
-2. **The reader, and round-trip equality.** `from_dict` per entity, `load()`
+2. ✅ **The reader, and round-trip equality.** `from_dict` per entity, `load()`
    returning a `LoadResult(project, problems)`.
    *Test:* the milestone's own acceptance — a project exercising every field,
    every `StrEnum` member, an absent `snap_override`, an empty `automation`,
