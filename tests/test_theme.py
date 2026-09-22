@@ -6,6 +6,7 @@ theme.py has no Qt dependency at import time, so this runs headless.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -132,3 +133,63 @@ def test_surfaces_are_monotonic() -> None:
     """bg-0 is deepest and each step is lighter; widgets rely on the ordering."""
     levels = [_luminance(s) for s in SURFACES]
     assert levels == sorted(levels), levels
+
+
+# --------------------------------------------------------------------------- #
+# the palette table in 04 is the vocabulary
+# --------------------------------------------------------------------------- #
+
+SPEC = Path(__file__).resolve().parent.parent / "docs" / "04-ui-spec.md"
+
+#: A token name as D-74 settled it: lowercase words, dot-separated.
+TOKEN_NAME = re.compile(r"^[a-z]+(?:\.[a-z]+)*$")
+
+
+def palette_table() -> dict[str, str]:
+    """The Colour palette table in 04, as `{token: hex}`.
+
+    Parsed rather than duplicated, for the reason `test_model.py` parses the
+    Entities block: a copy in a test is a second home for a fact, and the two
+    drift in the direction nobody is looking.
+    """
+    text = SPEC.read_text(encoding="utf-8")
+    section = re.search(r"## Colour palette\n(.*?)\n### ", text, re.S)
+    assert section, "04-ui-spec.md no longer has a Colour palette section"
+    rows = re.findall(
+        r"^\| `([a-z.]+)` \| `(#[0-9A-Fa-f]{6})` \|", section.group(1), re.M
+    )
+    return dict(rows)
+
+
+def test_the_palette_table_is_well_formed() -> None:
+    """Thirteen tokens, each named as D-74 says and valued as a hex."""
+    palette = palette_table()
+
+    assert len(palette) == 13, sorted(palette)
+    for token in palette:
+        assert TOKEN_NAME.match(token), f"{token!r} is not a token name"
+    assert len(set(palette.values())) == len(palette), "two tokens share a colour"
+
+
+def test_the_palette_table_holds_the_colours_the_code_holds() -> None:
+    """The document and `theme.py` agree on the thirteen colours.
+
+    Checked by value here, because D-74's rename lands in the document before
+    the object that will carry the names exists. Phase 1's next step ties the
+    *names* together too, and this assertion stops being the interesting one
+    then — but it is what can be true today, and a value drift between the
+    spec and the palette is worth catching either way.
+    """
+    assert set(palette_table().values()) == set(PALETTE)
+
+
+def test_the_old_token_names_are_gone() -> None:
+    """D-74: one vocabulary, not two.
+
+    The failure this guards against is not a typo, it is a habit — `bg-1` was
+    the name for two milestones and is what anyone who read 04 before today
+    would reach for.
+    """
+    text = SPEC.read_text(encoding="utf-8")
+    stale = re.findall(r"`(bg-[0-3]|text-(?:hi|lo|dim)|accent-(?:dim|glow))`", text)
+    assert not stale, f"04-ui-spec.md still uses the old token names: {set(stale)}"

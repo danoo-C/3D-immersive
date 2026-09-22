@@ -58,29 +58,31 @@ was going to a view that cannot be dragged in at all.
 ## Colour palette
 
 Surfaces are VS Code's dark greys; the accent stays purple (D-44). The
-surfaces are monotonic — `bg-0` is the deepest and each step is lighter — and
-widgets must rely on that ordering rather than on the literal values, because
-a theme may replace them ([theming](#theming)).
+surfaces are monotonic — `surface.window`, `surface.panel`, `surface.raised`,
+`surface.hover`, deepest to lightest — and widgets must rely on that ordering
+rather than on the literal values, because a theme may replace them
+([theming](#theming)). The names are the ones a `.3dimtheme` uses (D-74);
+there is deliberately only one set.
 
 | Token | Hex | Use |
 |---|---|---|
-| `bg-0` | `#181818` | application background, deepest |
-| `bg-1` | `#1F1F1F` | panel surfaces |
-| `bg-2` | `#252526` | headers, raised elements |
-| `bg-3` | `#2D2D2D` | hover, selected row |
+| `surface.window` | `#181818` | application background, deepest |
+| `surface.panel` | `#1F1F1F` | panel surfaces |
+| `surface.raised` | `#252526` | headers, raised elements |
+| `surface.hover` | `#2D2D2D` | hover, selected row |
 | `border` | `#3C3C3C` | 1px separators, splitter handles |
-| `text-hi` | `#CCCCCC` | primary text |
-| `text-lo` | `#9D9D9D` | labels, secondary text |
-| `text-dim` | `#6E6E6E` | disabled |
+| `text.primary` | `#CCCCCC` | primary text |
+| `text.secondary` | `#9D9D9D` | labels, secondary text |
+| `text.disabled` | `#6E6E6E` | disabled |
 | `accent` | `#A855F7` | purple **fills and strokes**: playhead, focus ring, active toggle |
-| `accent-dim` | `#7E3FF2` | pressed state |
-| `accent-glow` | `#C77DFF` | hover, keyframe highlight, and **any purple that carries text** |
+| `accent.pressed` | `#7E3FF2` | pressed state |
+| `accent.text` | `#C77DFF` | hover, keyframe highlight, and **any purple that carries text** |
 | `warn` | `#F59E0B` | clipping, missing media |
 | `error` | `#F88A8A` | xruns, load failures |
 
-⚠️ `accent` is 4.17:1 against `bg-1` — enough for a UI component, not enough
+⚠️ `accent` is 4.17:1 against `surface.panel` — enough for a UI component, not enough
 for text. That is why it is specified as a fill and stroke colour and why
-`accent-glow` (6.13:1) exists as the text-safe purple. On the previous
+`accent.text` (6.13:1) exists as the text-safe purple. On the previous
 purple-black surfaces `accent` cleared 4.5:1; against lighter greys it does
 not, and the same shift is why `error` moved from `#EF4444` (4.38:1, failing)
 to VS Code's own error-text red. `tests/test_theme.py` computes these ratios,
@@ -89,7 +91,7 @@ so the rule cannot rot quietly.
 ### Channel palette
 
 Assigned round-robin on channel creation, user-overridable. All chosen to stay
-legible on `bg-1` and distinguishable from each other and from `accent`.
+legible on `surface.panel` and distinguishable from each other and from `accent`.
 
 `#A855F7` `#22D3EE` `#F59E0B` `#34D399` `#F472B6` `#60A5FA` `#FB923C` `#A3E635`
 
@@ -114,15 +116,15 @@ icon in the application without shipping a second copy of any of them.
 |---|---|
 | Grid | 16 px, rendered at 16 and 32 for hidpi |
 | Ink | `currentColor`, substituted at load |
-| Normal state | `text-hi` |
-| Disabled state | `text-dim`, supplied explicitly |
+| Normal state | `text.primary` |
+| Disabled state | `text.disabled`, supplied explicitly |
 | Shipped today | `transport_start` `play` `pause` `stop` `loop` `undo` `redo` `arm` `app` |
 
 Two of those are not toolbar glyphs. `arm` is the dot this document draws as
 `● ARM`, an icon rather than a character so that the Craft rule against ASCII
 glyphs as UI holds for it too — and so a theme retints it with everything
 else. `app` is the application's own mark, used for the window and taskbar
-icon; it is the one icon drawn in `accent` rather than `text-hi`, because it
+icon; it is the one icon drawn in `accent` rather than `text.primary`, because it
 has to carry identity rather than sit quietly in a panel, and it renders from
 its own size ladder up to 256 px since alt-tab and dock previews ask for sizes
 no toolbar ever does.
@@ -161,7 +163,7 @@ looks broken next to the panels that do not.
 
 | Rule | Because |
 |---|---|
-| Every panel has a **header bar** — small caps, `text-lo` on `bg-2`, 1 px bottom border — not a caption floating in the middle | A titled panel reads as a region of an application; a centred label reads as an empty box |
+| Every panel has a **header bar** — small caps, `text.secondary` on `surface.raised`, 1 px bottom border — not a caption floating in the middle | A titled panel reads as a region of an application; a centred label reads as an empty box |
 | **No ASCII glyphs as UI.** `|<` and `[]` are placeholders, never shipped | They are the single loudest signal that something is unfinished |
 | One **font stack**, resolved per platform, never a single named family | Naming one family gets an unchosen fallback on the two platforms that lack it |
 | Spacing is a multiple of 2 px, padding of 4 | Arbitrary offsets read as misalignment even when nobody can say why |
@@ -279,6 +281,14 @@ not stand between someone and their project.
 
 "Reported" means visible in the UI, not a line on stderr nobody reads.
 
+**None of this applies to the built-in theme**, which is code rather than
+input. A group of it naming a token that does not exist is a bug that must not
+ship, so it raises where it is constructed and a test catches it on the way in.
+The same split runs through the next section, where contrast is enforced on
+the default and merely reported for a user's: one rule, two audiences. A typo
+in somebody's own theme file must not stand between them and their project; a
+typo in ours must not reach them at all.
+
 ### Contrast is checked, not enforced
 
 A theme is validated against the 4.5:1 rule in *Accessibility and feel* below
@@ -300,7 +310,7 @@ who owns what. M9 is built *third*, before all of them:
 
 | Groups | Owner |
 |---|---|
-| window, panel, menu, toolbar, button, splitter, scrollbar, status bar, tooltip | M9 — the widgets that exist when the system is built |
+| window, panel, menu, toolbar, button, **tab**, splitter, scrollbar, status bar, tooltip, **focus** | M9 — the widgets that exist when the system is built. Tab and focus were missing from this row until M9 phase 1 went looking: the tab bar exists because of D-49 and the focus ring is required by *Accessibility and feel*, and the stylesheet has styled both since M0 |
 | notice line, notice count, notice list | M9 — it builds them (D-65) |
 | tree view, header, filter field, waveform thumbnail | M2 |
 | ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 |
@@ -596,8 +606,8 @@ set on all of them.
 - No information conveyed by colour alone: mute, solo, arm, bypass and
   missing-media all carry an icon or text as well as a colour.
 - Minimum 4.5:1 contrast for text against its surface, on every surface from
-  `bg-0` to `bg-3`, asserted by `tests/test_theme.py`. Two documented
-  exemptions, both standard: `text-dim`, which is disabled text, and `accent`,
+  `surface.window` to `surface.hover`, asserted by `tests/test_theme.py`. Two documented
+  exemptions, both standard: `text.disabled`, which is disabled text, and `accent`,
   which is not a text colour — see the palette note above.
 - Every destructive action is undoable, so no confirmation dialogs except for
   discarding an unsaved project.
