@@ -17,21 +17,23 @@ from immersive.ui import theme
 
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
-PALETTE = (
-    theme.BG_0,
-    theme.BG_1,
-    theme.BG_2,
-    theme.BG_3,
-    theme.BORDER,
-    theme.TEXT_HI,
-    theme.TEXT_LO,
-    theme.TEXT_DIM,
-    theme.ACCENT,
-    theme.ACCENT_DIM,
-    theme.ACCENT_GLOW,
-    theme.WARN,
-    theme.ERROR,
+PALETTE = tuple(theme.BUILTIN.tokens.values())
+
+#: The surfaces, in the order 04-ui-spec.md requires them to be: deepest
+#: first, each step lighter. Widgets rely on that ordering rather than on the
+#: values, because a theme may replace them.
+SURFACE_TOKENS = (
+    "surface.window",
+    "surface.panel",
+    "surface.raised",
+    "surface.hover",
 )
+
+#: 04-ui-spec.md promises 4.5:1 for text on every surface. `text.disabled`
+#: (disabled) and `accent` (a fill and stroke colour, never text) are the two
+#: documented exemptions; `accent.text` is the text-safe purple and is held to
+#: the rule.
+TEXT_TOKENS = ("text.primary", "text.secondary", "accent.text", "warn", "error")
 
 
 @pytest.mark.parametrize("value", PALETTE)
@@ -40,26 +42,29 @@ def test_palette_entries_are_hex(value: str) -> None:
 
 
 def test_channel_colors_are_distinct_and_hex() -> None:
-    assert len(theme.CHANNEL_COLORS) == 8
-    assert len(set(theme.CHANNEL_COLORS)) == len(theme.CHANNEL_COLORS)
-    for value in theme.CHANNEL_COLORS:
+    channels = theme.BUILTIN.channels
+    assert len(channels) == 8
+    assert len(set(channels)) == len(channels)
+    for value in channels:
         assert HEX.match(value), value
 
 
 def test_channel_color_wraps() -> None:
-    n = len(theme.CHANNEL_COLORS)
-    assert theme.channel_color(0) == theme.CHANNEL_COLORS[0]
-    assert theme.channel_color(n) == theme.CHANNEL_COLORS[0]
-    assert theme.channel_color(n + 3) == theme.CHANNEL_COLORS[3]
+    """`channel_color(i)` keeps the signature and behaviour it always had."""
+    channels = theme.BUILTIN.channels
+    n = len(channels)
+    assert theme.channel_color(0) == channels[0]
+    assert theme.channel_color(n) == channels[0]
+    assert theme.channel_color(n + 3) == channels[3]
 
 
 def test_stylesheet_substitutes_every_placeholder() -> None:
     qss = theme.stylesheet()
-    assert "{" not in qss.replace("{{", "").replace("}}", "") or "QWidget" in qss
-    # No unsubstituted format fields should survive.
-    assert not re.search(r"\{[a-z_]+\}", qss)
-    assert theme.ACCENT in qss
-    assert theme.BG_0 in qss
+    # No unsubstituted placeholder should survive; `substitute` would have
+    # raised on a missing one, so what this catches is a stray `$`.
+    assert not re.search(r"\$[a-z_]+", qss)
+    assert theme.color("accent") in qss
+    assert theme.color("surface.window") in qss
 
 
 def test_stylesheet_parses(capfd: pytest.CaptureFixture[str]) -> None:
@@ -106,35 +111,33 @@ def contrast(a: str, b: str) -> float:
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
-SURFACES = (theme.BG_0, theme.BG_1, theme.BG_2, theme.BG_3)
-
-# 04-ui-spec.md promises 4.5:1 for text on every surface. TEXT_DIM (disabled)
-# and ACCENT (a fill and stroke colour, never text) are the two documented
-# exemptions; ACCENT_GLOW is the text-safe purple and is held to the rule.
-TEXT_TOKENS = (theme.TEXT_HI, theme.TEXT_LO, theme.ACCENT_GLOW, theme.WARN, theme.ERROR)
+SURFACES = tuple(theme.color(name) for name in SURFACE_TOKENS)
 
 
-@pytest.mark.parametrize("colour", TEXT_TOKENS)
-@pytest.mark.parametrize("surface", SURFACES)
-def test_text_contrast_meets_the_spec(colour: str, surface: str) -> None:
-    assert contrast(colour, surface) >= 4.5, f"{colour} on {surface}"
+@pytest.mark.parametrize("token", TEXT_TOKENS)
+@pytest.mark.parametrize("surface", SURFACE_TOKENS)
+def test_text_contrast_meets_the_spec(token: str, surface: str) -> None:
+    """Named by token, so a failure says which colour rather than which hex."""
+    ratio = contrast(theme.color(token), theme.color(surface))
+    assert ratio >= 4.5, f"{token} on {surface} is {ratio:.2f}:1"
 
 
-@pytest.mark.parametrize("colour", theme.CHANNEL_COLORS)
+@pytest.mark.parametrize("colour", theme.BUILTIN.channels)
 def test_channel_colours_are_legible_on_panels(colour: str) -> None:
-    """04-ui-spec.md: channel colours must stay legible on bg-1."""
-    assert contrast(colour, theme.BG_1) >= 3.0, colour
+    """04-ui-spec.md: channel colours must stay legible on surface.panel."""
+    assert contrast(colour, theme.color("surface.panel")) >= 3.0, colour
 
 
 def test_accent_clears_the_ui_component_threshold() -> None:
-    """ACCENT is not text, but a playhead nobody can see is still a bug."""
-    for surface in SURFACES:
-        assert contrast(theme.ACCENT, surface) >= 3.0, surface
+    """`accent` is not text, but a playhead nobody can see is still a bug."""
+    for surface in SURFACE_TOKENS:
+        ratio = contrast(theme.color("accent"), theme.color(surface))
+        assert ratio >= 3.0, f"accent on {surface} is {ratio:.2f}:1"
 
 
 def test_surfaces_are_monotonic() -> None:
-    """bg-0 is deepest and each step is lighter; widgets rely on the ordering."""
-    levels = [_luminance(s) for s in SURFACES]
+    """Deepest first, each step lighter; widgets rely on the ordering."""
+    levels = [_luminance(theme.color(name)) for name in SURFACE_TOKENS]
     assert levels == sorted(levels), levels
 
 
@@ -490,3 +493,69 @@ def test_no_widget_source_names_a_hex() -> None:
         if path.name != "theme.py"
     }
     assert not {name: hexes for name, hexes in offenders.items() if hexes}
+
+
+# --------------------------------------------------------------------------- #
+# the constants are gone, and the widgets followed
+# --------------------------------------------------------------------------- #
+
+
+def test_no_module_level_colour_constant_survives() -> None:
+    """The goal of the phase, asserted rather than assumed.
+
+    A constant left behind is a colour resolved once, when this module was
+    first imported, which is the one thing D-76 forbids. Checked by looking
+    at the module rather than by grepping the file, so a constant reintroduced
+    under any name is caught.
+    """
+    colours = {
+        name: value
+        for name, value in vars(theme).items()
+        if name.isupper() and isinstance(value, str) and HEX.match(value)
+    }
+    assert not colours, f"colour constants back on the module: {colours}"
+
+
+def test_the_only_place_a_hex_appears_is_the_built_in_theme() -> None:
+    """F-44 at its strongest: even `theme.py` says colours in exactly one place.
+
+    Every hex in this module's source has to be inside `BUILTIN` — its
+    thirteen tokens and its eight channel colours, twenty-one in all. A hex
+    anywhere else in the file is a colour that no theme can replace, which is
+    the failure this milestone exists to prevent, one file earlier than
+    anybody would look for it.
+    """
+    source = Path(theme.__file__).read_text(encoding="utf-8")
+    found = re.findall(r"#[0-9A-Fa-f]{6}", source)
+    expected = list(theme.BUILTIN.tokens.values()) + list(theme.BUILTIN.channels)
+
+    assert sorted(found) == sorted(expected), "a hex outside the built-in theme"
+
+
+@pytest.mark.gui
+def test_a_widget_built_under_a_new_theme_wears_it() -> None:
+    """The assertion the module constants could never have passed.
+
+    A widget that baked its colour in at import would go on painting the old
+    theme's grey no matter what was switched, and it would do it silently.
+    This is the property the milestone's last phase is built on; it costs one
+    test here and four phases of confusion if it is left until then.
+    """
+    from immersive.app import build_application
+    from immersive.ui.widgets.placeholder import Placeholder
+
+    build_application([])
+
+    before = Placeholder("Pool").styleSheet()
+    assert theme.color("surface.panel") in before
+
+    theme.use(
+        theme.Theme(
+            name="Green",
+            tokens={**theme.BUILTIN.tokens, "surface.panel": "#00FF00"},
+            channels=theme.BUILTIN.channels,
+            groups=theme.BUILTIN.groups,
+        )
+    )
+
+    assert "#00FF00" in Placeholder("Pool").styleSheet()

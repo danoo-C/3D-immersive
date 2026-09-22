@@ -374,30 +374,6 @@ def channel_color(index: int, theme: Theme | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# transitional — removed later in this phase
-# --------------------------------------------------------------------------- #
-
-# The stylesheet below and eleven widget call sites still read these. The step
-# that rewires the sheet onto groups and the step that moves the widgets onto
-# `color()` delete them; they exist for exactly as long as it takes to do that
-# without a commit in which the application does not start.
-BG_0: Final = BUILTIN.tokens["surface.window"]
-BG_1: Final = BUILTIN.tokens["surface.panel"]
-BG_2: Final = BUILTIN.tokens["surface.raised"]
-BG_3: Final = BUILTIN.tokens["surface.hover"]
-BORDER: Final = BUILTIN.tokens["border"]
-TEXT_HI: Final = BUILTIN.tokens["text.primary"]
-TEXT_LO: Final = BUILTIN.tokens["text.secondary"]
-TEXT_DIM: Final = BUILTIN.tokens["text.disabled"]
-ACCENT: Final = BUILTIN.tokens["accent"]
-ACCENT_DIM: Final = BUILTIN.tokens["accent.pressed"]
-ACCENT_GLOW: Final = BUILTIN.tokens["accent.text"]
-WARN: Final = BUILTIN.tokens["warn"]
-ERROR: Final = BUILTIN.tokens["error"]
-CHANNEL_COLORS: Final[tuple[str, ...]] = BUILTIN.channels
-
-
-# --------------------------------------------------------------------------- #
 # stylesheet
 # --------------------------------------------------------------------------- #
 

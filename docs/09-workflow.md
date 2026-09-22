@@ -85,6 +85,36 @@ The test: can you write the acceptance checklist before writing any code, and
 is every line of it something a test or a screenshot can settle? If the
 acceptance is "the model is nicer", it is not a phase yet.
 
+## Naming the mutations
+
+Every plan since M1 phase 2 ends with a table of **mutations named before the
+tests are written** — specific ways this code could be broken — which are then
+applied one at a time against the finished suite. A mutation nothing notices
+is a test that asserts a mechanism without distinguishing it, which is exactly
+what that phase found in two of its own tests and why the habit exists.
+
+It is in every plan and was in no document, so: the shape of it.
+
+1. **Name them in the plan**, before the tests exist. A list written afterwards
+   is written to flatter the tests that got written.
+2. Apply each one, run the phase's tests, restore, and record caught or
+   survived.
+3. A survivor is one of two things, and saying which is the point. Either a
+   **missing test** — write it — or an **equivalent mutation**, one the code's
+   own invariants make unreachable. Pin an equivalent one with a test that
+   asserts *why* it cannot fire, rather than quietly dropping it from the
+   list. M1 phase 4's unreachable `bisect` edge and M9 phase 1's group-value
+   fallback are the worked examples.
+
+⚠️ **Run them with `PYTHONDONTWRITEBYTECODE=1`, and purge `__pycache__` first.**
+A mutation the same byte length as the original, restored within the same
+second, leaves a `.pyc` that Python still considers valid — the cache is
+keyed on mtime to the second plus size, and neither changed. The *next* run
+then silently tests the previous mutation against the restored source. Found
+in M9 phase 1, where `#252526` became `#101010` and six tests then failed
+against a file that was already correct. It can produce a false result in
+either direction and it leaves no trace in the source.
+
 ## Lifecycle
 
 1. **Milestone starts.** Create `docs/<id>_<name>/` and its `README.md`. Break

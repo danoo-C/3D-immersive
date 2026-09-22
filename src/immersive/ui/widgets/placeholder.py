@@ -20,8 +20,9 @@ class Placeholder(QFrame):
         super().__init__(parent)
         self.setObjectName("Placeholder")
         self.setFrameShape(QFrame.Shape.NoFrame)
+        body = theme.color("surface.panel")
         self.setStyleSheet(
-            f"#Placeholder {{ background-color: {theme.BG_1}; border: none; }}"
+            f"#Placeholder {{ background-color: {body}; border: none; }}"
         )
 
         # A header bar rather than a caption floating in the middle of an empty
@@ -29,11 +30,13 @@ class Placeholder(QFrame):
         # as unfinished rather than as badly laid out.
         header = QLabel(title.upper())
         header.setObjectName("PanelHeader")
+        # 04-ui-spec.md, Craft: small caps, text.secondary on surface.raised,
+        # with a one-pixel bottom border.
         header.setStyleSheet(
             f"#PanelHeader {{"
-            f" color: {theme.TEXT_LO};"
-            f" background: {theme.BG_2};"
-            f" border-bottom: 1px solid {theme.BORDER};"
+            f" color: {theme.color('text.secondary')};"
+            f" background: {theme.color('surface.raised')};"
+            f" border-bottom: 1px solid {theme.color('border')};"
             f" font-size: 10px; font-weight: 600; letter-spacing: 1.2px;"
             f" padding: 6px 10px;"
             f" }}"
@@ -50,7 +53,9 @@ class Placeholder(QFrame):
             hint = QLabel(subtitle)
             hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
             hint.setWordWrap(True)
-            hint.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 11px;")
+            hint.setStyleSheet(
+                f"color: {theme.color('text.disabled')}; font-size: 11px;"
+            )
             layout.addWidget(hint)
 
         layout.addStretch(1)

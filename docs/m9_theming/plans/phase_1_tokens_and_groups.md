@@ -1,6 +1,6 @@
 # Plan — M9 · Phase 1 — Tokens and groups
 
-**Written:** 2026-09-22 · **Status:** in progress
+**Written:** 2026-09-22 · **Status:** ✅ complete
 
 ## Approach
 
@@ -251,7 +251,7 @@ everybody who installed it rather than checked it out.
    captured before a line of this phase was written. Qt still parses it — the
    existing test already covers that and is the one that catches a stray `*/`.
 
-4. **The call sites, and the last of the constants.** The eleven references
+4. ✅ **The call sites, and the last of the constants.** The eleven references
    above move onto the accessor, and the module constants are deleted rather
    than deprecated.
    *Test:* no module-level colour constant survives, asserted by inspecting
@@ -259,7 +259,7 @@ everybody who installed it rather than checked it out.
    active theme, which is the assertion the constants could never have passed
    and the one phase 4 is built on.
 
-5. **The tests that keep it true.** The contrast suite reads the object; the
+5. ✅ **The tests that keep it true.** The contrast suite reads the object; the
    hex grep becomes a test over `src/immersive/ui/`; `channel_color(i)` keeps
    its signature and its wrapping.
    *Test:* the existing contrast expectations pass unchanged in value —
@@ -343,7 +343,82 @@ settled, because phase 1 does not need it and phase 2 cannot start without it.
 
 ## Outcome
 
-Filled in at the end. What actually happened, what this plan got wrong, which
-mutations survived the first suite, and what phase 2 inherits — in particular
-whether the file's token vocabulary held up once something other than this
-module had to read it.
+Five steps, in order, and `stylesheet()` returns the bytes it returned before
+any of it. The three decisions went in as D-74, D-75 and D-76 and none needed
+revisiting once code depended on them.
+
+### What the plan got wrong
+
+**It assumed the stylesheet stayed a Python string.** Naming roles costs more
+characters than naming colours, four rules went past the line limit, and the
+byte-identical acceptance meant they could not be wrapped. The sheet is now
+`assets/app.qss`, and the full argument is in the amendment above. The plan
+was not wrong about the work, it was wrong about where the work lived.
+
+**Step 4 and step 5 were one step.** Deleting the module constants breaks
+every test that reads one, so porting the contrast suite onto the object was
+not a separate thing that could follow — it was the same commit. The split
+looked real when the plan was written because the constants looked like a
+source concern and the contrast suite like a test concern; they were one
+dependency.
+
+**The `@cache` on the icon set was not anticipated at all**, and it is the
+more interesting miss. D-76 is satisfied — the tint is *read* at call time —
+and the rendered `QIcon` is then memoised against its arguments, so the first
+call under one theme answers every later call under any other. Reading at call
+time and caching the result are both right and together they reintroduce the
+exact problem D-76 exists to prevent, one layer up. Phase 4 has to call
+`cache_clear()`, the docstring now says so, and a test asserts both halves.
+
+### Which mutations survived the first suite
+
+Twenty-nine named across the phase. Three survived a first run:
+
+| Survivor | What it was |
+|---|---|
+| a group value falling back to itself rather than raising | **equivalent** — construction refuses any value that is not a literal, the reserved `channel`, or a token that exists, so the fallback cannot fire. Pinned by a test asserting that invariant, because it is the guarantee phase 2 has to keep |
+| the icon tint pinned to the built-in theme | a missing test, and the one that found the `@cache` problem |
+| the transport chip's two states collapsed | a missing test — and a sweep that was not running the file the test would live in |
+
+The third is worth its own line, because the fix was not a test. The sweep ran
+`test_theme.py` and `test_icons.py` and not `test_main_window.py`, so a
+mutation in the window could only ever survive. **A mutation sweep is only as
+honest as the set of tests it runs**, and a survivor is meaningless until you
+have checked the suite it survived was the right one.
+
+### ⚠️ And one that was not a mutation at all
+
+Six tests failed against a source file that was already correct. The cause was
+`__pycache__`: `#252526` and `#101010` are the same length, the restore landed
+in the same second, and Python's bytecode cache — keyed on mtime to the second
+plus size — considered the stale `.pyc` valid. The interpreter was running the
+previous mutation against a file that no longer contained it.
+
+This is a flaw in the *practice*, not in this phase, and it has been available
+to every sweep since M1 phase 2. Most mutations change length enough to be
+safe; the ones that do not are exactly the value-for-value swaps, which are
+the most common kind. Every sweep in the project was re-run with
+`PYTHONDONTWRITEBYTECODE=1` and a purged cache, and all sixty-seven mutations
+across M1 phase 5 and M9 phase 1 hold — so nothing previously recorded was
+wrong. The practice and the trap are now written into
+[09-workflow.md](../../09-workflow.md), which owned neither.
+
+### What phase 2 inherits
+
+**The token vocabulary held up**, and the strongest evidence is small: the
+`button` group matches `04`'s worked example key for key, which means the
+example in the specification is literally what the code contains. Phase 2 is
+the first thing other than this module to read those names, and it starts from
+a document and an implementation that already agree.
+
+**A reader that must not use `Theme`'s constructor to validate.** This module
+raises, deliberately, because the built-in theme is code. A user's file cannot
+be allowed to. Phase 2 drops what it cannot use, reports it, merges what is
+left over the default, and hands `Theme` something already known to be
+well-formed — and the invariant test above is what says that is still true.
+
+**Nowhere to put the parser.** [02](../../02-architecture.md)'s layout gained
+`assets/app.qss` in this phase and still names no module for theme file I/O.
+It cannot sit in `core/io/` beside `project_io.py`, because a theme is a UI
+concern and N-5 keeps `core/` to the model. That is phase 2's first decision
+and it is unmade.

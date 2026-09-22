@@ -90,6 +90,39 @@ def test_disabled_state_is_supplied_explicitly(app: object) -> None:
 
 
 def test_icons_follow_the_palette_by_default(app: object) -> None:
-    explicit = icons.icon("stop", theme.TEXT_HI).pixmap(16, 16).toImage()
+    explicit = icons.icon("stop", theme.color("text.primary")).pixmap(16, 16).toImage()
     default = icons.icon("stop").pixmap(16, 16).toImage()
     assert explicit == default
+
+
+def test_icons_follow_a_theme_change(app: object) -> None:
+    """D-76 reaches the icon set — but only once its cache is cleared.
+
+    The tint is read at call time, which is what the decision asks for, and
+    the rendered `QIcon` is then memoised against the arguments. Both are
+    deliberate and together they mean a theme switch has to call
+    `cache_clear()`. This is the test that says so out loud, because nothing
+    about `icon("stop")` hints that the answer it gives is the first theme's.
+    """
+    original = theme.active()
+    try:
+        icons.icon.cache_clear()
+        before = icons.icon("stop").pixmap(16, 16).toImage()
+
+        theme.use(
+            theme.Theme(
+                name="Green",
+                tokens={**theme.BUILTIN.tokens, "text.primary": "#00FF00"},
+                channels=theme.BUILTIN.channels,
+                groups=theme.BUILTIN.groups,
+            )
+        )
+        assert icons.icon("stop").pixmap(16, 16).toImage() == before, (
+            "the cache is expected to hold the old tint until it is cleared"
+        )
+
+        icons.icon.cache_clear()
+        assert icons.icon("stop").pixmap(16, 16).toImage() != before
+    finally:
+        theme.use(original)
+        icons.icon.cache_clear()

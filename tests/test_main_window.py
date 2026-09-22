@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from immersive.app import build_application
+from immersive.ui import theme
 from immersive.ui.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -213,3 +214,19 @@ def test_no_control_is_a_label_dressed_as_a_button(app: object) -> None:
     assert arm.isCheckable()
     assert not arm.isEnabled()
     assert not arm.icon().isNull()
+
+
+def test_the_transport_readout_is_the_only_primary_chip(app: object) -> None:
+    """04-ui-spec.md: the position readout leads, the rest of the bar supports.
+
+    Asserted because the two states are one boolean apart, and a `_chip` that
+    forgot the distinction would render a toolbar where nothing leads and no
+    test would mind.
+    """
+    window = MainWindow()
+    primary = window._chip("1.1.000", primary=True).styleSheet()
+    secondary = window._chip("120.0 BPM").styleSheet()
+
+    assert theme.color("text.primary") in primary
+    assert theme.color("text.secondary") in secondary
+    assert primary != secondary

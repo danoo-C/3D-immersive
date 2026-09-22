@@ -280,7 +280,7 @@ class MainWindow(QMainWindow):
 
     def _chip(self, text: str, *, primary: bool = False) -> QLabel:
         label = QLabel(text)
-        colour = theme.TEXT_HI if primary else theme.TEXT_LO
+        colour = theme.color("text.primary" if primary else "text.secondary")
         label.setStyleSheet(f"color: {colour}; padding: 0 8px;")
         return label
 
@@ -341,12 +341,12 @@ class MainWindow(QMainWindow):
         bar.showMessage("No project")
 
         self._xruns = QLabel("xruns 0")
-        self._xruns.setStyleSheet(f"color: {theme.TEXT_DIM};")
+        self._xruns.setStyleSheet(f"color: {theme.color('text.disabled')};")
         self._xruns.setToolTip("Audio dropouts since the stream started")
         bar.addPermanentWidget(self._xruns)
 
         version = QLabel(f"v{__version__}")
-        version.setStyleSheet(f"color: {theme.TEXT_DIM};")
+        version.setStyleSheet(f"color: {theme.color('text.disabled')};")
         bar.addPermanentWidget(version)
 
         self.setStatusBar(bar)

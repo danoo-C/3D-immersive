@@ -1,6 +1,6 @@
 # M9 · Phase 1 — Tokens and groups
 
-**Status:** in progress · **Plan:**
+**Status:** ✅ complete · **Plan:**
 [plans/phase_1_tokens_and_groups.md](plans/phase_1_tokens_and_groups.md)
 
 ## Goal
@@ -25,19 +25,19 @@ per the standing obligation in `04`.
 
 ## Acceptance
 
-- [ ] `theme.stylesheet()` returns a string **byte-identical** to the one it
+- [x] `theme.stylesheet()` returns a string **byte-identical** to the one it
       returns today. This phase changes no pixels, and that is the cheapest
       possible proof of it.
-- [ ] A group value that names a token resolves to that token's colour; a group
+- [x] A group value that names a token resolves to that token's colour; a group
       value that is a literal `#RRGGBB` is used as-is. Both covered by tests.
-- [ ] A group naming a token that does not exist fails loudly **at
+- [x] A group naming a token that does not exist fails loudly **at
       construction**, not at paint time. A theme error that surfaces three
       hours later as a wrong-coloured button is the failure mode this whole
       milestone exists to prevent.
-- [ ] `grep -rniE '#[0-9a-f]{6}' src/immersive/ui/` finds hexes in `theme.py`
+- [x] `grep -rniE '#[0-9a-f]{6}' src/immersive/ui/` finds hexes in `theme.py`
       and nowhere else, and a test asserts that so it stays true.
-- [ ] The existing contrast tests still pass unchanged against the object.
-- [ ] `channel_color(i)` keeps its signature and behaviour.
+- [x] The existing contrast tests still pass unchanged against the object.
+- [x] `channel_color(i)` keeps its signature and behaviour.
 
 ## Implements
 
@@ -47,6 +47,53 @@ F-44, D-46. The token vocabulary and the two-layer split are specified in the
 ## Notes
 
 Appended while building.
+
+### Steps 4-5 — the constants are gone, and two layers of capture
+
+The thirteen module constants are deleted, not deprecated, and the eleven
+widget call sites read `theme.color("text.primary")` instead. They read
+*tokens* rather than groups, because that is how `04` specifies them: its
+Icons table says `text.primary` and `text.disabled`, and its Craft section
+says a panel header is `text.secondary` on `surface.raised`. Inventing group
+keys for those would have been inventing vocabulary the specification did not
+ask for.
+
+**D-76 is satisfied one layer and defeated the next.** The icon tint is read
+at call time, exactly as the decision requires — and `icons.icon()` is
+`@cache`d, so the rendered `QIcon` from the first call answers every later
+call under any theme. Both halves are right on their own and together they
+rebuild the problem the decision exists to prevent. Phase 4 has to call
+`icon.cache_clear()` and `app_icon.cache_clear()` when it switches; the
+docstring says so and a test asserts both halves, including that the cache
+*does* hold the old tint until it is cleared, because that is the part
+somebody will otherwise discover by seeing a purple icon on a green theme.
+
+### ⚠️ Six tests failed against a file that was already correct
+
+Not a mutation, and the most useful thing this phase found.
+
+A mutation sweep changed `"surface.raised"` from `#252526` to `#101010` and
+restored it. The source was correct afterwards; the interpreter was not.
+Python's bytecode cache is keyed on the source's mtime **to the second** plus
+its size — and `#252526` and `#101010` are the same length, and the restore
+landed inside the same second. The stale `.pyc` stayed valid, so the next run
+tested the previous mutation against a file that no longer contained it.
+
+The practice this breaks is the project's most consistent testing habit, used
+in every plan since M1 phase 2, and it has been available to every sweep since.
+The mutations most likely to trigger it are value-for-value swaps, which are
+also the most common kind. Every sweep in the project was re-run with
+`PYTHONDONTWRITEBYTECODE=1` against a purged cache: all sixty-seven mutations
+across M1 phase 5 and M9 phase 1 hold, so nothing previously recorded was
+wrong. The practice and the trap are now in
+[09-workflow.md](../09-workflow.md), which documented neither.
+
+**And one survivor was a sweep that was not running the right tests.** The
+transport chip's two states collapsed into one and nothing failed, because the
+sweep ran `test_theme.py` and `test_icons.py` and not `test_main_window.py`.
+A mutation in a file no test in the run touches can only survive. **A sweep is
+only as honest as the set of tests it runs**, and a survivor means nothing
+until that set has been checked.
 
 ### Steps 1-3 — the vocabulary, the object, and a sheet that did not move
 

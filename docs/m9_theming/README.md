@@ -9,7 +9,7 @@ roadmap's preamble says why.
 
 | Phase | Status |
 |---|---|
-| [1 — Tokens and groups](phase_1_tokens_and_groups.md) | in progress — [plan written](plans/phase_1_tokens_and_groups.md) |
+| [1 — Tokens and groups](phase_1_tokens_and_groups.md) | ✅ |
 | [2 — The `.3dimtheme` file](phase_2_file_format.md) | not started |
 | [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | not started |
 | [4 — Discovery and switching](phase_4_discovery_and_switching.md) | not started |
@@ -41,3 +41,28 @@ Copied verbatim from the roadmap's "Done when":
 ## Notes
 
 Appended as phases complete.
+
+**Phase 1.** `theme.py` carries a `Theme` — thirteen tokens, eight channel
+colours, eleven groups, forty-six group keys — and the stylesheet is built
+from it without a single pixel moving. Three decisions came out of it: one
+token vocabulary rather than the two `04` was carrying (D-74), the channel
+list as a third top-level key rather than a token (D-75), and one active theme
+read through an accessor that resolves at call time rather than at import
+(D-76). `04` also gained the two groups its own ownership table was missing,
+`tab` and `focus`.
+
+The stylesheet moved out of Python into `assets/app.qss`, because naming roles
+costs more characters than naming colours and four rules would not fit a line.
+It should not have been a Python string in the first place.
+
+Two things phase 2 starts from. The `button` group matches `04`'s worked
+example key for key, so the specification's example is literally what the code
+holds — which is the cheapest evidence the vocabulary is usable by something
+other than the module that invented it. And `Theme` raises on anything
+malformed, deliberately, so phase 2 has to drop and report *before* it
+constructs one: the strictness is the contract, not an obstacle to it.
+
+Still unmade, and phase 2's first decision: [02](../02-architecture.md) names
+no module for theme file I/O, and it cannot go in `core/io/` beside
+`project_io.py`, because a theme is a UI concern and N-5 keeps `core/` to the
+model.

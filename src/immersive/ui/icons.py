@@ -58,14 +58,24 @@ def icon(name: str, colour: str | None = None, disabled: str | None = None) -> Q
     Giving Qt the disabled pixmap explicitly beats letting it grey the normal
     one out: its default is a washed-out blend that reads as a rendering fault
     rather than as a deliberate state.
+
+    ⚠️ **Cached, and the cache outlives a theme change.** The colours are read
+    at call time, per D-76, but the rendered `QIcon` is memoised against the
+    arguments — so the first call under one theme answers every later call
+    under any other. The phase that adds a theme picker has to call
+    `icon.cache_clear()` and `app_icon.cache_clear()` when it switches, and
+    this is the note that says so, because nothing about the signature hints
+    at it.
     """
     result = QIcon()
     for size in _SIZES:
         result.addPixmap(
-            _render(name, colour or theme.TEXT_HI, size), QIcon.Mode.Normal
+            _render(name, colour or theme.color("text.primary"), size),
+            QIcon.Mode.Normal,
         )
         result.addPixmap(
-            _render(name, disabled or theme.TEXT_DIM, size), QIcon.Mode.Disabled
+            _render(name, disabled or theme.color("text.disabled"), size),
+            QIcon.Mode.Disabled,
         )
     return result
 
@@ -74,13 +84,13 @@ def icon(name: str, colour: str | None = None, disabled: str | None = None) -> Q
 def app_icon() -> QIcon:
     """The application icon: a source placed on a ring around the listener.
 
-    Accent-coloured rather than `text-hi`, because this one is not a control
+    Accent-coloured rather than `text.primary`, because this one is not a control
     on a toolbar - it is the application's mark in a taskbar and an alt-tab
     list, where it has to carry identity rather than blend into a panel.
     """
     result = QIcon()
     for size in _APP_SIZES:
-        result.addPixmap(_render("app", theme.ACCENT, size), QIcon.Mode.Normal)
+        result.addPixmap(_render("app", theme.color("accent"), size), QIcon.Mode.Normal)
     return result
 
 
