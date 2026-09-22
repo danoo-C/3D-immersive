@@ -283,6 +283,11 @@ git-friendliness D-13 was for. The filesystem already knows.
       "id": "m-3f2a91c7", "path": "samples/kick.wav", "name": "kick.wav",
       "source_rate": 44100, "channels": 1, "frames": 12480,
       "hash": "sha256:9c1d…"
+    },
+    {
+      "id": "m-9e40b2d1", "path": "samples/backing.wav", "name": "backing.wav",
+      "source_rate": 48000, "channels": 2, "frames": 5760000,
+      "hash": "sha256:41b7…"
     }
   ],
   "channels": [
@@ -332,6 +337,12 @@ git-friendliness D-13 was for. The filesystem already knows.
 The second channel is the motivating case: a finished stereo stem that should
 reach the output exactly as it was authored, with the spatial mix built around
 it.
+
+> This example was not loadable until M1 phase 5 tried it. The backing mix's
+> clip referenced `m-9e40b2d1` while the pool held only the kick, which
+> `validate()` refuses — every clip's media must be in the pool. The missing
+> entry has been added. `tests/test_project_io.py` now loads this block
+> directly, so the example cannot drift away from the format again.
 
 ## Caches, not project data
 

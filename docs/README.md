@@ -24,8 +24,12 @@ sequenced.
 Alongside these, each milestone under way has its own directory — holding one
 document per build phase and a `plans/` subdirectory beside them.
 [09](09-workflow.md) defines that system; the directories are created one
-milestone at a time, as work reaches them. Currently live:
-[`s0_listening_spike/`](s0_listening_spike/README.md).
+milestone at a time, as work reaches them. Complete:
+[`s0_listening_spike/`](s0_listening_spike/README.md) and
+[`m1_core_model/`](m1_core_model/README.md). Next:
+[`m9_theming/`](m9_theming/README.md), whose phase documents are written and
+whose phases have not started — M9 is built third, after M1, for the reason
+[06](06-roadmap.md) gives.
 
 The original hand-written spec is in [`../README.md`](../README.md) and is kept
 as the source of intent; where it and these documents disagree, these win —

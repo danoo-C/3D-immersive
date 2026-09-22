@@ -1,6 +1,6 @@
 # Plan — M1 · Phase 5 — Project I/O
 
-**Written:** 2026-09-21 · **Status:** in progress
+**Written:** 2026-09-21 · **Status:** ✅ complete
 
 ## Approach
 
@@ -218,7 +218,7 @@ than retrofit locations into twenty functions.
    A project whose audio has been deleted still loads, and the one whose file
    is gone is the one marked.
 
-6. **A hand-written fixture, and the milestone end to end.**
+6. ✅ **A hand-written fixture, and the milestone end to end.**
    `tests/fixtures/handwritten.3dim`, typed by a person rather than produced by
    `save()`.
    *Test:* it loads, and what it loads is what it says. This is the only test
@@ -295,6 +295,77 @@ nothing in the file changes either way, because it is never written.
 
 ## Outcome
 
-Filled in at the end. What actually happened, what this plan got wrong, which
-mutations survived the first suite, and what M2 inherits — in particular
-whether `MediaFile.missing` held up and what the hand-written fixture caught.
+All six steps landed, in order, and the phase closed M1. The three decisions
+went in as D-71, D-72 and D-73 and none of them needed revisiting while the
+code was written, which is the outcome this plan's long middle section was
+for.
+
+### What the plan got wrong
+
+**Two steps traded work, and the trade was the right way round.** Step 1 took
+the writer's half of paths from step 3, because `save()` cannot put a path in
+a file without deciding which form it takes and D-71 was written in the same
+commit. Step 3 then became almost entirely tests — which was not a smaller
+step, because two of its five mutations survived the first sweep and both
+needed a new *kind* of test rather than another assertion.
+
+**`03` needed a field, not the one line budgeted.** `tests/test_model.py`
+asserts that the Entities block lists exactly the fields each dataclass has,
+so adding `MediaFile.missing` turned it red immediately. The plan had filed
+the field as a model change and the `03` line as a documentation change; they
+were one change. A field that is never serialised is still part of the entity
+the document describes.
+
+**The reader wanted an accumulator the plan did not name.** `_Reading`
+collects problems with their locations instead of raising at the first, which
+is `validate()`'s rule applied to parsing. It made step 5 smaller rather than
+larger: the locations were already there.
+
+### Which mutations survived the first suite
+
+Eleven were named up front. Twenty-seven more were named as the steps went in,
+because each step's implementation suggested its own. Of the thirty-eight,
+**four survived their first run** and every one of them is worth keeping:
+
+| Survivor | Why it survived | What closed it |
+|---|---|---|
+| separators left as `os.sep` | `as_posix()` is a no-op on Linux, so CI's only leg cannot see it | the path flavour made injectable, and one test that pretends to be Windows |
+| `save` resolves through a symlink | the reader undoes it, so the round trip comes home | an assertion on what the file *says* |
+| the project directory used unabsolutised | every test saved to an absolute path | saving by a relative name from a different working directory |
+| `validate()` removed from `load` | nothing fed `load` a file `validate()` would reject | step 5's hand-written overlapping clips |
+
+Three of the four are the same failure wearing different clothes: **a round
+trip proves the reader and the writer agree, not that either is right.** The
+fourth is the sharper version — a test environment that cannot observe the
+behaviour at all. Both are written up in the phase Notes, because they are
+lessons about testing a *format* and M9 inherits the same problem with
+`.3dimtheme`.
+
+All thirty-eight are caught by the finished suite.
+
+### What M2 inherits
+
+**`MediaFile.missing` held up.** It is a boolean, set at load, never written,
+and outside equality, and nothing in the phase wanted it to be anything else.
+The genuine unknown this plan named is still open and still M2's: if media
+resolution wants a richer answer than yes-or-no — resolved, missing, wrong
+length, wrong hash — the field becomes a small enum or moves to a resolution
+table. Nothing in the file changes either way, which is what makes that a
+cheap decision to defer.
+
+**The hand-written fixture caught what it was built to catch, on the first
+run, and not in the fixture.** Loading the `.3dim` listing out of
+[03](../../03-data-model.md) itself showed the document's own worked example
+was **not loadable**: the backing mix's clip referenced a media id that was
+not in its pool. That block is what anyone implementing against this format
+would read first. It is corrected, and the test now loads it out of the
+document on every run, so it cannot drift again.
+
+That test is also the better form of what step 6 asked for, and it is worth
+saying why: a fixture in `tests/` is written by whoever is writing the tests,
+and drifts with them. The example in `03` is written for readers, and is the
+thing an implementer actually trusts. Both are kept — the fixture covers what
+the example does not, including omitted optional fields and a `../` media
+path — and a third test asserts the fixture still *looks* hand-written, so
+that regenerating it with `save()` cannot quietly turn the one test that is
+not round-tripping this module against itself into one that is.

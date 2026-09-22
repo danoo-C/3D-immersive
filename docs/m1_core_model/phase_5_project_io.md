@@ -1,6 +1,6 @@
 # M1 · Phase 5 — Project I/O
 
-**Status:** in progress · **Plan:**
+**Status:** ✅ complete · **Plan:**
 [plans/phase_5_project_io.md](plans/phase_5_project_io.md)
 
 ## Goal
@@ -29,32 +29,32 @@ problems, and something later shows them.
 
 ## Acceptance
 
-- [ ] **Round-trip equality.** A project built in code, saved and reloaded
+- [x] **Round-trip equality.** A project built in code, saved and reloaded
       compares equal — the milestone's own acceptance, and the reason
       [phase 1](phase_1_dataclasses.md)'s equality had to be load-bearing.
-- [ ] The file is byte-identical across two saves of the same project: sorted
+- [x] The file is byte-identical across two saves of the same project: sorted
       keys, fixed float formatting, no timestamps (D-60). A project that
       rewrites itself differently every save is unusable in git, which is what
       D-13 was protecting.
-- [ ] `app_version` records the build that wrote the file and is **not**
+- [x] `app_version` records the build that wrote the file and is **not**
       `schema_version` (D-60). A project that loads wrong is a bug report, and
       the writing version is the first thing anyone asks for.
-- [ ] Media paths are relative to the project file, and a project plus its
+- [x] Media paths are relative to the project file, and a project plus its
       audio survives being moved to another directory — and to another
       platform, which means separators are normalised on write rather than
       whatever `os.sep` happened to be (F-2, D-13).
-- [ ] A file whose `schema_version` is older than current loads through the
+- [x] A file whose `schema_version` is older than current loads through the
       migration hook; a file with fields the current version does not know is
       loaded, not rejected. Both have a test even though there is nothing to
       migrate yet, because the first real migration should be a function body
       and not a redesign.
-- [ ] A **malformed** file — bad JSON, a missing required key, a clip whose
+- [x] A **malformed** file — bad JSON, a missing required key, a clip whose
       `offset + length` exceeds its media — fails with a report naming what is
       wrong and where, and never leaves a half-built project behind.
-- [ ] Missing media is reported and is **not fatal** (F-3): the clip survives,
+- [x] Missing media is reported and is **not fatal** (F-3): the clip survives,
       the `MediaFile` is marked missing, and the project loads. Relinking is
       M8's; being loadable without the audio is this phase's.
-- [ ] A deliberately hand-edited `.3dim` in `tests/fixtures/` loads — the
+- [x] A deliberately hand-edited `.3dim` in `tests/fixtures/` loads — the
       format is meant to be human-editable (F-2 calls it JSON for a reason),
       and a fixture written by hand catches the schema drifting away from what
       a person would reasonably type.
@@ -252,6 +252,38 @@ carried the value, someone would be sent looking for an empty string they
 never wrote. The reader's messages now carry the offending value, truncated,
 rather than only its type. Cheap, and it is the difference between a report
 that locates a hand-edit and one that describes it.
+
+### Step 6 — the test that reads the document, and what it found
+
+The plan asked for a `.3dim` typed by a person rather than produced by
+`save()`, because every other test in this phase round-trips the module
+against itself and none of them can notice the format drifting away from what
+the document describes. That fixture exists —
+`tests/fixtures/handwritten.3dim`, with omitted optional fields, a `../` media
+path, inline arrays and blank lines between sections — and a third test
+asserts it still *looks* hand-written, so regenerating it with `save()` cannot
+quietly turn the one test that is not round-tripping into one that is.
+
+But the stronger version of the same idea is to load the listing out of
+[03](../03-data-model.md) directly, and **that found something on its first
+run**:
+
+> `03`'s own worked example of the file format **was not loadable.** The
+> backing mix's clip referenced `m-9e40b2d1` while the pool held only the
+> kick, and `validate()` refuses a clip whose media is not in the pool.
+
+That block is the first thing anyone implementing against this format reads.
+It has been corrected in place, and the test now lifts it out of the document
+and opens it on every run, so it cannot drift again. A fixture under `tests/`
+is written by whoever is writing the tests and drifts with them; the example
+in `03` is written for readers and is what an implementer trusts. Both are
+worth having, and the document's is worth more.
+
+**The milestone's acceptance is one test**, and every phase of M1 is in it:
+phase 1's dataclasses and their equality, phase 2's curve evaluation, phase
+3's snapping, phase 4's undo stack, and phase 5 carrying the result to disk
+and back. Built in code, edited, undone, redone, saved, reloaded, compared
+equal — with no window open and no audio device, which is N-5.
 
 ### What `03` cost that the plan did not expect
 

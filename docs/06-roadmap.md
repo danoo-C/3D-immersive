@@ -147,7 +147,7 @@ Notes as the record of what was already learned the hard way.
 
 ---
 
-## M1 — Core model, headless *in progress*
+## M1 — Core model, headless ✅ *complete*
 *No UI work at all.*
 
 - ✅ Pin `numpy>=2.0` in `pyproject.toml` — a hard floor, not a preference
@@ -166,6 +166,37 @@ Phases: [`docs/m1_core_model/`](m1_core_model/README.md)
 
 **Done when:** a project can be built in code, edited, undone, saved, reloaded
 and compared equal — all in pytest, with no window open.
+
+**Delivered, and the acceptance is one test.** `model.py`, `curves.py`,
+`time.py`, `commands.py`, `edits.py` and `core/io/project_io.py`, in five
+phases: the entity spine and its equality, curve evaluation with the bezier
+solve, bars:beats and snapping, the undo stack and the first seven commands,
+and the `.3dim` file. A project is built in code, edited through the stack,
+undone, redone, saved, reloaded and compared equal — with no window open and
+no audio device, which is N-5 and which is why the whole milestone was
+verifiable on WSL.
+
+Three decisions came out of the file format: media paths are absolute in
+memory and relative on disk (D-71), missing media is a field excluded from
+equality (D-72), and a key the schema does not know is dropped rather than
+preserved or refused (D-73). The `.3dim` sorts its keys, coerces its numbers,
+writes no timestamp (D-60), records the build that wrote it, and is written
+through a temporary file so an interrupted save cannot truncate the project
+that was already there.
+
+**The phase found `03`'s own worked example of the file format was not
+loadable** — the backing mix's clip referenced a media id that was not in its
+pool. It is corrected, and a test now lifts that listing out of the document
+and opens it on every run. Every other test in the phase round-trips the
+module against itself and none of them could have noticed.
+
+Two lessons that M9 inherits with `.3dimtheme`, and that the phase Notes
+argue at length: a round trip proves the reader and the writer *agree*, not
+that either is right, so every assertion pinning a format has to read the
+file; and a cross-platform behaviour asserted only end to end is asserted on
+one platform, because CI's only leg is Linux. Thirty-eight mutations were
+named across the phase and four survived their first run — all four real, all
+four now caught.
 
 ---
 

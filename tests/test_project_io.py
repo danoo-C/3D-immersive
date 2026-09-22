@@ -18,6 +18,7 @@ import copy
 import json
 import math
 import os
+import re
 import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path, PureWindowsPath
@@ -26,7 +27,14 @@ from typing import Any
 import pytest
 
 import immersive
+from immersive.core.commands import UndoStack
 from immersive.core.curves import Curve, Handles, Interp, Keyframe
+from immersive.core.edits import (
+    AddChannel,
+    AddClip,
+    MoveClip,
+    SetAttribute,
+)
 from immersive.core.io import project_io
 from immersive.core.io.project_io import (
     SCHEMA_VERSION,
@@ -51,7 +59,9 @@ from immersive.core.model import (
     SnapSetting,
     validate,
 )
-from immersive.core.time import Division
+from immersive.core.time import Division, snap
+
+REPO = Path(__file__).resolve().parent.parent
 
 KICK = "m-00000001"
 STEM = "m-00000002"
@@ -1638,3 +1648,143 @@ def test_a_project_loaded_with_missing_media_saves_unchanged(tmp_path: Path) -> 
 
     assert path.read_text(encoding="utf-8") == before
     assert result.project == project, "and it is still the same project (D-72)"
+
+
+# --------------------------------------------------------------------------- #
+# what a person would type, and the milestone end to end
+# --------------------------------------------------------------------------- #
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_the_documented_example_in_03_loads(tmp_path: Path) -> None:
+    """`03`'s own `.3dim` listing, lifted out of the document and opened.
+
+    Every other test in this file round-trips this module against itself, so
+    none of them can notice the format drifting away from what the document
+    describes. This one can, and it caught something the first time it ran:
+    the example's backing mix referenced a media id that was not in its pool,
+    so the block `03` offers as *the* worked example of the file format could
+    not be opened by the code that implements it.
+    """
+    document = (REPO / "docs" / "03-data-model.md").read_text(encoding="utf-8")
+    block = re.search(r"## Project file\n.*?```json\n(.*?)\n```", document, re.S)
+    assert block, "03-data-model.md no longer has a Project file listing"
+
+    path = tmp_path / "from_03.3dim"
+    path.write_text(block.group(1), encoding="utf-8")
+
+    project = load(path).project
+    assert [channel.name for channel in project.channels] == ["Kick", "Backing mix"]
+    assert project.bpm == 124.0
+    assert project.channels[1].hrtf_bypass is True
+
+
+def test_the_handwritten_fixture_loads_and_says_what_it_says() -> None:
+    """A `.3dim` typed by a person, not produced by `save()`.
+
+    Deliberately in the document's style rather than the writer's: inline
+    arrays, blank lines between sections, `snap_override` omitted on one
+    channel and spelled out on the other, `hash` present on one media file
+    and absent on the other, fade shapes left off a clip entirely. No output
+    of `save()` looks like this, and every value below is asserted against
+    what the file plainly reads as, not against what a round trip produced.
+    """
+    result = load(FIXTURES / "handwritten.3dim")
+    project = result.project
+
+    assert project.bpm == 92.5
+    assert project.time_signature == (3, 4)
+    assert project.snap == SnapSetting(True, Division.EIGHTH, triplet=True)
+    assert project.distance.rolloff == 1.2
+    assert project.master == Master(gain_db=-1.0, limiter_on=True)
+
+    rain, click = project.media_pool
+    assert rain.channels == 2 and rain.frames == 480_000
+    assert rain.hash == "", "an omitted hash is empty, not an error"
+    assert click.hash == "sha256:0f3c"
+    assert Path(rain.path).name == "rain.wav"
+    assert Path(click.path).is_absolute(), "a ../ path still resolves"
+    assert "shared" in Path(click.path).parts
+
+    first, second = project.channels
+    assert first.snap_override is None, "null means inherit"
+    assert second.snap_override == SnapSetting(False, Division.THIRTY_SECOND, False)
+    assert first.position == Position(-1.5, 2.0, 0.8)
+    assert second.pan == -0.5 and second.hrtf_bypass is True
+
+    keyframes = first.automation["pos.x"].keyframes
+    assert [k.interp for k in keyframes] == [Interp.EASE, Interp.HOLD]
+    assert keyframes[0].handles == Handles(outgoing=(48_000.0, 0.0))
+    assert keyframes[1].handles == Handles(incoming=(-48_000.0, 0.0))
+    assert first.automation["gain"].keyframes[0].interp is Interp.LINEAR, (
+        "an omitted interp defaults, it does not fail"
+    )
+
+    clip = first.clips[0]
+    assert clip.fade_in == Fade(24_000, FadeShape.EQUAL_POWER)
+    assert second.clips[1].fade_in == Fade(), "omitted fades default to none"
+    assert second.clips[1].offset == 400
+
+
+def test_the_handwritten_fixture_is_not_something_save_would_write() -> None:
+    """The fixture is only worth having while it stays hand-shaped.
+
+    Regenerating it with `save()` the next time it needs a field added would
+    turn the one test that is not round-tripping this module against itself
+    into one that is, silently.
+    """
+    raw = (FIXTURES / "handwritten.3dim").read_text(encoding="utf-8")
+    assert '"out": [48000, 0.0]' in raw, "the writer explodes arrays over lines"
+    assert "\n\n" in raw, "the writer emits no blank lines"
+    assert '"snap_override": null' in raw and raw.index('"bpm"') < raw.index('"snap"')
+
+
+def test_the_milestone_acceptance(tmp_path: Path) -> None:
+    """M1's "done when", verbatim from the roadmap:
+
+        a project can be built in code, edited, undone, saved, reloaded and
+        compared equal - all in pytest, with no window open.
+
+    Every phase of this milestone is in this one test: phase 1's dataclasses
+    and their equality, phase 2's curves, phase 3's snapping, phase 4's undo
+    stack, and phase 5 carrying the result to disk and back.
+    """
+    project = materialise(a_project_with_its_audio(tmp_path))
+    stack = UndoStack(project)
+
+    # built in code
+    channel = Channel(
+        "c-00000002",
+        "Reverse",
+        "#22D3EE",
+        position=Position(1.0, 2.0, 0.5),
+        automation={"pos.x": Curve([Keyframe(0, 1.0), Keyframe(48_000, -1.0)])},
+    )
+    stack.push(AddChannel(project, channel))
+    stack.push(AddClip(channel, Clip("k-00000002", KICK, 0, 0, 480)))
+
+    # edited, onto the grid phase 3 defines
+    landed = snap(
+        24_000 + 37,
+        bpm=project.bpm,
+        time_signature=project.time_signature,
+        division=Division.QUARTER,
+    )
+    stack.push(MoveClip(channel.clips[0], landed))
+    stack.push(SetAttribute(channel, "gain_db", -4.5))
+    assert channel.clips[0].start == landed != 24_000 + 37
+    edited = copy.deepcopy(project)
+
+    # undone
+    assert stack.undo() and channel.gain_db == 0.0
+    assert stack.redo() and project == edited, "redo restores exactly what undo took"
+
+    # saved, reloaded, compared equal
+    path = tmp_path / "acceptance.3dim"
+    save(project, path)
+    result = load(path)
+
+    assert result.project == project
+    assert result.problems == []
+    assert result.project.channels[1].automation["pos.x"].value_at(24_000) == 0.0

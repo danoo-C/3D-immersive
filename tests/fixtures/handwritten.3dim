@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "app_version": "0.1.0",
+  "sample_rate": 48000,
+  "bpm": 92.5,
+  "time_signature": [3, 4],
+  "snap": { "enabled": true, "division": "1/8", "triplet": true },
+  "hrtf": { "kind": "builtin", "id": "sadie-d1" },
+  "distance": { "rolloff": 1.2, "min_distance": 0.2, "ref_distance": 1.0 },
+  "master": { "gain_db": -1.0, "limiter_on": true },
+
+  "media_pool": [
+    {
+      "id": "m-1a2b3c4d", "path": "samples/rain.wav", "name": "rain.wav",
+      "source_rate": 44100, "channels": 2, "frames": 480000
+    },
+    {
+      "id": "m-5e6f7a8b", "path": "../shared/click.wav", "name": "click.wav",
+      "source_rate": 48000, "channels": 1, "frames": 2400,
+      "hash": "sha256:0f3c"
+    }
+  ],
+
+  "channels": [
+    {
+      "id": "c-11111111", "name": "Rain", "color": "#4ADE80",
+      "gain_db": -6.0, "mute": false, "solo": false,
+      "hrtf_bypass": false, "pan": 0.0,
+      "snap_override": null,
+      "position": { "x": -1.5, "y": 2.0, "z": 0.8 },
+      "automation": {
+        "pos.x": { "keyframes": [
+          { "t": 0,      "value": -1.5, "interp": "ease",
+            "handles": { "out": [48000, 0.0] } },
+          { "t": 240000, "value":  1.5, "interp": "hold",
+            "handles": { "in": [-48000, 0.0] } }
+        ]},
+        "gain": { "keyframes": [
+          { "t": 0, "value": -6.0 }
+        ]}
+      },
+      "clips": [
+        {
+          "id": "k-aaaa0001", "media_id": "m-1a2b3c4d",
+          "start": 0, "offset": 0, "length": 240000, "gain_db": 0.0,
+          "fade_in":  { "length": 24000, "shape": "equal_power" },
+          "fade_out": { "length": 24000, "shape": "equal_power" }
+        }
+      ]
+    },
+    {
+      "id": "c-22222222", "name": "Click", "color": "#F472B6",
+      "hrtf_bypass": true, "pan": -0.5,
+      "snap_override": { "enabled": false, "division": "1/32", "triplet": false },
+      "automation": {},
+      "clips": [
+        {
+          "id": "k-bbbb0001", "media_id": "m-5e6f7a8b",
+          "start": 48000, "offset": 0, "length": 2400
+        },
+        {
+          "id": "k-bbbb0002", "media_id": "m-5e6f7a8b",
+          "start": 96000, "offset": 400, "length": 2000
+        }
+      ]
+    }
+  ]
+}

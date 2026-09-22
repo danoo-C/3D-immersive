@@ -15,7 +15,7 @@ the whole thing verifiable on WSL.
 | [2 — Curve evaluation](phase_2_curve_evaluation.md) | ✅ |
 | [3 — Time and snapping](phase_3_time_and_snapping.md) | ✅ |
 | [4 — Undo stack](phase_4_undo_stack.md) | ✅ |
-| [5 — Project I/O](phase_5_project_io.md) | in progress — [plan written](plans/phase_5_project_io.md) |
+| [5 — Project I/O](phase_5_project_io.md) | ✅ |
 
 The order is dependency order, and each phase is usable on its own. Phase 1
 defines the shapes; 2 and 3 make two of them mean something; 4 is the only way
@@ -55,4 +55,34 @@ has anything to bite on. Nothing to build; something to watch.
 
 ## Notes
 
-Appended as phases complete.
+**M1 is complete.** A project can be built in code, edited through the undo
+stack, undone, saved, reloaded and compared equal, all in pytest with no
+window open and no audio device — which is the milestone's own acceptance and
+also N-5, and it is why every phase of this milestone could be verified on
+WSL.
+
+What the five phases found, one line each, with the detail in each phase's
+Notes:
+
+| Phase | What it turned up |
+|---|---|
+| 1 — Dataclasses | `03` had no id scheme at all: it called `MediaFile.id` a uuid while its example used hand-written mnemonics, and neither was implementable |
+| 2 — Curve evaluation | two of five mutations went uncaught, and they were the two things the plan had argued hardest for — the handle clamp and the solver's bisection bracket. Every plan since names its mutations up front because of this |
+| 3 — Time and snapping | 960 ticks per beat rather than 1000, because F-16's triplets are not expressible in a resolution that is not divisible by three |
+| 4 — Undo stack | the stack applies, validates and rolls back rather than predicting, so no command re-derives the rules it might break — and the one surviving mutation is unreachable, pinned by a test that asserts why |
+| 5 — Project I/O | `03`'s own worked example of the file format was not loadable, and a round trip cannot tell a reader and a writer that are wrong together from two that are right |
+
+The habit that came out of phase 2 — **name the mutations before writing the
+tests, then run them against the finished suite** — has now been applied in
+every phase of this milestone. Phase 5 named thirty-eight and four survived
+their first run; all four were real, and the two lessons behind them are about
+testing a *format* rather than a model:
+
+- **A round trip proves the reader and the writer agree, not that either is
+  right.** Every assertion that pins the format has to read the file.
+- **A cross-platform behaviour asserted only end to end is asserted on one
+  platform.** CI is Linux, `as_posix()` is a no-op there, and deleting the
+  separator conversion left the whole suite green.
+
+M9 inherits both with `.3dimtheme`, which is a different file with the same
+shape of problem.

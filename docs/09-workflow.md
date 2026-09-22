@@ -57,14 +57,15 @@ A plan **mirrors its phase's filename exactly**. That is the whole convention
 for pairing them: `plans/phase_2_curve_evaluation.md` belongs to
 `phase_2_curve_evaluation.md`, and a plan with no matching phase is a mistake.
 
-Reserved directory names, matching [06-roadmap.md](06-roadmap.md). None of
-these exist yet except where a milestone is underway:
+Reserved directory names, matching [06-roadmap.md](06-roadmap.md). A directory
+exists only once its milestone has started, so a blank row below is a
+milestone nobody has opened yet:
 
 | | |
 |---|---|
 | `m0_scaffolding/` | complete — built before this system existed, no phase docs |
-| `s0_listening_spike/` | **underway** — the throwaway spike; gets a directory like anything else |
-| `m1_core_model/` | |
+| `s0_listening_spike/` | complete — the throwaway spike; got a directory like anything else |
+| `m1_core_model/` | complete |
 | `m2_media/` | |
 | `m3_timeline/` | |
 | `m4_binaural_engine/` | |
@@ -72,7 +73,7 @@ these exist yet except where a milestone is underway:
 | `m6_automation/` | |
 | `m7_render/` | |
 | `m8_polish_and_ship/` | |
-| `m9_theming/` | built after M1, not last — see [06](06-roadmap.md) |
+| `m9_theming/` | **next** — phase documents written, no phases started. Built after M1, not last — see [06](06-roadmap.md) |
 
 ## Sizing a phase
 
