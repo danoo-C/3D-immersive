@@ -19,7 +19,7 @@ import json
 import math
 import os
 import shutil
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
@@ -27,6 +27,7 @@ import pytest
 
 import immersive
 from immersive.core.curves import Curve, Handles, Interp, Keyframe
+from immersive.core.io import project_io
 from immersive.core.io.project_io import (
     SCHEMA_VERSION,
     ProjectFileError,
@@ -1132,3 +1133,215 @@ def test_a_project_saved_by_a_relative_name_still_loads_absolute(
     assert Path(media.path).is_absolute()
     assert Path(media.path) == tmp_path / "sub" / "samples" / "kick.wav"
     assert load("sub/mix.3dim").project == project
+
+
+# --------------------------------------------------------------------------- #
+# version tolerance and the migration hook
+# --------------------------------------------------------------------------- #
+
+
+def a_written_document(path: Path, **overrides: Any) -> Path:
+    """A minimal valid `.3dim` on disk, with fields overridden or removed.
+
+    Typed here rather than produced by `save`, because every test below is
+    about a file this build did not write: one from the future, one from the
+    past, one missing a field and one carrying a field too many.
+    """
+    document: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "app_version": "0.1.0",
+        "sample_rate": 48000,
+        "bpm": 120.0,
+        "time_signature": [4, 4],
+        "media_pool": [],
+        "channels": [
+            {
+                "id": "c-00000001",
+                "name": "Kick",
+                "color": "#A855F7",
+                "gain_db": -3.0,
+                "clips": [],
+            }
+        ],
+    }
+    for key, value in overrides.items():
+        if value is REMOVE:
+            document.pop(key, None)
+        else:
+            document[key] = value
+    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    return path
+
+
+REMOVE = object()
+
+
+def bump_bpm(document: dict[str, Any]) -> dict[str, Any]:
+    """A migration with something visible to do, so the hook can be seen."""
+    return {**document, "bpm": document["bpm"] + 1.0, "schema_version": 2}
+
+
+def test_a_registered_migration_runs_and_its_output_is_what_is_parsed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hook has nothing real to do yet, so the test gives it something.
+
+    A registry that is never exercised is a registry that does not work, and
+    nobody finds out until the first migration - at which point it is being
+    written and debugged at the same moment as the schema change that needed
+    it. Registering one from here is the only way to know the wiring is live.
+    """
+    path = a_written_document(tmp_path / "old.3dim", bpm=120.0)
+    monkeypatch.setattr(project_io, "SCHEMA_VERSION", 2)
+    monkeypatch.setattr(project_io, "MIGRATIONS", {1: bump_bpm})
+
+    assert load(path).project.bpm == 121.0
+
+
+def test_migrations_run_in_order_from_the_file_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two steps, and the order is the thing being asserted.
+
+    A registry applied out of order, or applied once and stopped, still moves
+    a version-1 file - it just arrives somewhere nobody designed.
+    """
+    seen: list[int] = []
+
+    def step(number: int) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        def run(document: dict[str, Any]) -> dict[str, Any]:
+            seen.append(number)
+            return {**document, "bpm": document["bpm"] + number}
+
+        return run
+
+    path = a_written_document(tmp_path / "old.3dim", bpm=100.0)
+    monkeypatch.setattr(project_io, "SCHEMA_VERSION", 3)
+    monkeypatch.setattr(project_io, "MIGRATIONS", {1: step(1), 2: step(2)})
+
+    assert load(path).project.bpm == 103.0
+    assert seen == [1, 2]
+
+
+def test_a_current_file_is_not_migrated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A registry entry for the current version must not fire.
+
+    The mirror of the test above, and the more damaging failure: a hook that
+    runs when there is nothing to do rewrites every project on every open.
+    """
+    path = a_written_document(tmp_path / "current.3dim", bpm=120.0)
+    monkeypatch.setattr(project_io, "MIGRATIONS", {SCHEMA_VERSION: bump_bpm})
+
+    assert load(path).project.bpm == 120.0
+
+
+def test_a_file_from_the_future_is_refused_by_version(tmp_path: Path) -> None:
+    """Refused for the right reason, and before anything else is parsed.
+
+    A newer schema may have changed what a field means, so parsing first
+    produces a report about the symptom - a pan that is suddenly a string -
+    when the cause is one number at the top of the file.
+    """
+    path = a_written_document(
+        tmp_path / "future.3dim",
+        schema_version=SCHEMA_VERSION + 3,
+        channels="not what a channel list looks like in this schema",
+    )
+
+    with pytest.raises(ProjectFileError) as raised:
+        load(path)
+
+    assert [problem.where for problem in raised.value.problems] == ["schema_version"]
+    assert "newer build" in str(raised.value)
+    assert str(SCHEMA_VERSION + 3) in str(raised.value)
+
+
+def test_a_file_with_no_migration_path_is_refused_clearly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An older file this build has no route from says so, rather than
+    loading into whatever the defaults happen to be."""
+    path = a_written_document(tmp_path / "ancient.3dim", schema_version=1)
+    monkeypatch.setattr(project_io, "SCHEMA_VERSION", 5)
+    monkeypatch.setattr(project_io, "MIGRATIONS", {})
+
+    with pytest.raises(ProjectFileError, match="no migration from schema 1"):
+        load(path)
+
+
+@pytest.mark.parametrize("version", [REMOVE, "1", 1.5, True, None])
+def test_a_file_that_does_not_say_its_schema_is_refused(
+    tmp_path: Path, version: Any
+) -> None:
+    """Including `true`, which is an `int` in Python and is not a version."""
+    path = a_written_document(tmp_path / "vague.3dim", schema_version=version)
+
+    with pytest.raises(ProjectFileError, match="which schema"):
+        load(path)
+
+
+def test_a_field_the_file_omits_loads_with_its_default(tmp_path: Path) -> None:
+    """A project written before a field existed is not a broken project.
+
+    This is what makes adding a field a non-breaking change, and it is the
+    half of version tolerance that does not need a migration at all - which
+    is why most schema changes should be shaped to need only this.
+    """
+    path = a_written_document(
+        tmp_path / "older.3dim",
+        snap=REMOVE,
+        hrtf=REMOVE,
+        distance=REMOVE,
+        master=REMOVE,
+        bpm=REMOVE,
+        time_signature=REMOVE,
+    )
+
+    project = load(path).project
+
+    assert project.bpm == 120.0
+    assert project.time_signature == (4, 4)
+    assert project.snap == SnapSetting()
+    assert project.hrtf == HrtfRef()
+    assert project.distance == Distance()
+    assert project.master == Master()
+    # The channel keeps what it did say, and defaults the rest.
+    assert project.channels[0].gain_db == -3.0
+    assert project.channels[0].hrtf_bypass is False
+    assert project.channels[0].position == Position()
+
+
+def test_a_field_the_schema_does_not_know_is_dropped(tmp_path: Path) -> None:
+    """D-73. Dropped, not preserved and not refused.
+
+    Refusing would make every forward-compatible addition a breaking change,
+    which is the opposite of what a `schema_version` is for. Preserving would
+    put untyped data in the model that `validate()` cannot check and the undo
+    stack cannot edit. The cost is stated in the decision: saving a newer
+    project from an older build loses what the newer build added.
+    """
+    path = a_written_document(
+        tmp_path / "newer.3dim",
+        reverb_send=0.4,
+        channels=[
+            {
+                "id": "c-00000001",
+                "name": "Kick",
+                "color": "#A855F7",
+                "clips": [],
+                "sidechain_from": "c-00000002",
+            }
+        ],
+    )
+
+    project = load(path).project
+    assert not hasattr(project, "reverb_send")
+    assert not hasattr(project.channels[0], "sidechain_from")
+
+    # And it is genuinely gone, not carried somewhere invisible.
+    resaved = tmp_path / "resaved.3dim"
+    save(project, resaved)
+    assert "sidechain_from" not in resaved.read_text(encoding="utf-8")
+    assert "reverb_send" not in resaved.read_text(encoding="utf-8")

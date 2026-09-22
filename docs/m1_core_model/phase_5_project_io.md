@@ -179,6 +179,40 @@ Twenty-five mutations have been named and run across the three steps.
 Twenty-four are caught; the outstanding one remains `validate()` removed from
 `load`, which is step 5's.
 
+### Step 4 — version tolerance, and the half of it that needs no migration
+
+The registry is `version -> a function returning the next version's document`,
+applied one step at a time, and it is empty. A migration registered **by a
+test** runs, two of them run in order, and one registered for the current
+version does not run at all — which is the more damaging of the two failures,
+because a hook that fires when there is nothing to do rewrites every project
+on every open.
+
+**The version is read before anything else is parsed**, and that ordering is
+the whole mechanism. The test for it feeds in a file from the future whose
+`channels` is deliberately not a list of channels: it is refused by version,
+naming the version, rather than by a report about the garbage. A newer schema
+may have changed what a field *means*, so a parse-first reader describes the
+symptom while the cause is one number at the top of the file.
+
+**The step counter is the loop's own, not the document's.** A migration that
+forgets to update `schema_version` is a bug in that migration and should not
+be able to express itself as an infinite loop in the loader. This is not a
+hypothetical: the two-step ordering test registers migrations that never touch
+`schema_version`, and it terminates because of this choice.
+
+**The cheap half of version tolerance needs no migration at all.** A field the
+file omits loads with its dataclass default — `bpm`, `snap`, `hrtf`,
+`distance`, `master`, a channel's `hrtf_bypass` — which is what makes adding a
+field a non-breaking change. Worth stating as guidance rather than just
+behaviour: *a schema change shaped so that old files simply lack the new key
+costs one default; one shaped so they lack it under a different name costs a
+migration.* Prefer the first.
+
+And `true` is an `int` in Python for the second time this phase — once in the
+numeric field readers, once in the version check. Both reject it explicitly.
+It is worth expecting anywhere this code asks "is this a number".
+
 ### What `03` cost that the plan did not expect
 
 The plan budgeted one clarifying line in [03](../03-data-model.md). Adding

@@ -30,7 +30,7 @@ import json
 import math
 import os
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Any
@@ -59,6 +59,17 @@ from immersive.core.time import SAMPLE_RATE, Division
 #: write schema 1 and still disagree about a default, so the version that
 #: wrote a file is recorded separately and drives nothing.
 SCHEMA_VERSION = 1
+
+#: How a document written by an older schema is brought up to the current one:
+#: `version -> a function returning the *next* version's document`, applied one
+#: step at a time.
+#:
+#: Empty, because `SCHEMA_VERSION` has never been anything but 1 - and present
+#: anyway, because the alternative is that the first real migration is also the
+#: redesign that introduces migrations, at the moment when there are already
+#: projects in the world that need it. A registry with nothing in it costs a
+#: dozen lines now; retrofitting one costs a format change later.
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
 
 class ProjectFileError(Exception):
@@ -821,6 +832,54 @@ def _read_project(
     )
 
 
+def _migrated(document: dict[str, Any], where: Path) -> dict[str, Any]:
+    """`document`, brought up to `SCHEMA_VERSION` one step at a time.
+
+    The version is read before anything else is parsed, and that ordering is
+    the point of the whole mechanism. A schema 4 file opened by a build that
+    reads schema 1 would otherwise fail somewhere deep inside a field that
+    changed meaning between them, and the report would describe the symptom -
+    "channels[2].pan is a string" - rather than the cause. Refusing by version
+    says the one true thing: this file is newer than this application.
+
+    The step counter is this function's own, not the document's. A migration
+    that forgets to update `schema_version` is a bug in that migration, and
+    it should not be able to express itself as an infinite loop here.
+    """
+    version = document.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ProjectFileError(
+            f"{where} does not say which schema it was written with",
+            [Problem("schema_version", f"is {version!r}, not a whole number")],
+        )
+    if version > SCHEMA_VERSION:
+        raise ProjectFileError(
+            f"{where} was written by a newer build of this application",
+            [
+                Problem(
+                    "schema_version",
+                    f"is {version}, and this build reads {SCHEMA_VERSION}",
+                )
+            ],
+        )
+
+    while version < SCHEMA_VERSION:
+        migrate = MIGRATIONS.get(version)
+        if migrate is None:
+            raise ProjectFileError(
+                f"{where} cannot be brought up to date",
+                [
+                    Problem(
+                        "schema_version",
+                        f"there is no migration from schema {version}",
+                    )
+                ],
+            )
+        document = migrate(document)
+        version += 1
+    return document
+
+
 def load(path: str | os.PathLike[str]) -> LoadResult:
     """Read a `.3dim` back into a project.
 
@@ -842,8 +901,7 @@ def load(path: str | os.PathLike[str]) -> LoadResult:
         )
 
     reading = _Reading()
-    reading.integer(document, "schema_version", "", 0, required=True)
-    project = _read_project(reading, document, _directory_of(source))
+    project = _read_project(reading, _migrated(document, source), _directory_of(source))
 
     problems = reading.problems + validate(project)
     if problems:

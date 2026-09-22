@@ -200,7 +200,7 @@ than retrofit locations into twenty functions.
    path whatever the platform separator is. Symlinked project directories are
    not resolved through, so a project inside one keeps the path the user typed.
 
-4. **Version tolerance and the migration hook.** `SCHEMA_VERSION`, a registry
+4. ✅ **Version tolerance and the migration hook.** `SCHEMA_VERSION`, a registry
    of `from_version -> callable` applied in order, a file from the future
    refused by version rather than by a confusing parse error.
    *Test:* a migration registered **by the test** runs and its output is what
