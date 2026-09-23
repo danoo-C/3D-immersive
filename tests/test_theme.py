@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator, Mapping
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from importlib import resources
 from pathlib import Path
 
@@ -19,21 +19,12 @@ HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 PALETTE = tuple(theme.BUILTIN.tokens.values())
 
-#: The surfaces, in the order 04-ui-spec.md requires them to be: deepest
-#: first, each step lighter. Widgets rely on that ordering rather than on the
-#: values, because a theme may replace them.
-SURFACE_TOKENS = (
-    "surface.window",
-    "surface.panel",
-    "surface.raised",
-    "surface.hover",
-)
-
-#: 04-ui-spec.md promises 4.5:1 for text on every surface. `text.disabled`
-#: (disabled) and `accent` (a fill and stroke colour, never text) are the two
-#: documented exemptions; `accent.text` is the text-safe purple and is held to
-#: the rule.
-TEXT_TOKENS = ("text.primary", "text.secondary", "accent.text", "warn", "error")
+#: The rule moved into the package in M9 phase 2, exemptions and all: the
+#: theme loader has to apply it to a user's file, and a rule implemented in a
+#: test suite cannot be applied to anything. Aliased so the tests below read
+#: as they always did.
+SURFACE_TOKENS = theme.SURFACE_TOKENS
+TEXT_TOKENS = theme.TEXT_TOKENS
 
 
 @pytest.mark.parametrize("value", PALETTE)
@@ -97,47 +88,85 @@ def test_stylesheet_parses(capfd: pytest.CaptureFixture[str]) -> None:
     assert app.styleSheet() == theme.stylesheet()
 
 
-def _luminance(hex_colour: str) -> float:
-    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
-    linear = [
-        c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels
-    ]
-    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-
-
-def contrast(a: str, b: str) -> float:
-    """WCAG contrast ratio between two hex colours."""
-    la, lb = _luminance(a), _luminance(b)
-    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
-
-
-SURFACES = tuple(theme.color(name) for name in SURFACE_TOKENS)
-
-
 @pytest.mark.parametrize("token", TEXT_TOKENS)
 @pytest.mark.parametrize("surface", SURFACE_TOKENS)
 def test_text_contrast_meets_the_spec(token: str, surface: str) -> None:
     """Named by token, so a failure says which colour rather than which hex."""
-    ratio = contrast(theme.color(token), theme.color(surface))
+    ratio = theme.contrast(theme.color(token), theme.color(surface))
     assert ratio >= 4.5, f"{token} on {surface} is {ratio:.2f}:1"
 
 
 @pytest.mark.parametrize("colour", theme.BUILTIN.channels)
 def test_channel_colours_are_legible_on_panels(colour: str) -> None:
     """04-ui-spec.md: channel colours must stay legible on surface.panel."""
-    assert contrast(colour, theme.color("surface.panel")) >= 3.0, colour
+    assert theme.contrast(colour, theme.color("surface.panel")) >= 3.0, colour
 
 
 def test_accent_clears_the_ui_component_threshold() -> None:
     """`accent` is not text, but a playhead nobody can see is still a bug."""
     for surface in SURFACE_TOKENS:
-        ratio = contrast(theme.color("accent"), theme.color(surface))
+        ratio = theme.contrast(theme.color("accent"), theme.color(surface))
         assert ratio >= 3.0, f"accent on {surface} is {ratio:.2f}:1"
+
+
+def _variant(tokens: Mapping[str, str]) -> theme.Theme:
+    """The built-in theme with some tokens given different values."""
+    return replace(theme.BUILTIN, tokens={**theme.BUILTIN.tokens, **tokens})
+
+
+def test_the_builtin_has_no_contrast_problems() -> None:
+    """The default is *held* to the rule; a user's theme is only told about it."""
+    assert theme.BUILTIN.contrast_problems() == []
+
+
+def test_contrast_problems_names_every_failing_pair() -> None:
+    """All of them, not the first: an author wants the list, not one a run."""
+    problems = _variant({"text.primary": "#202020"}).contrast_problems()
+
+    assert len(problems) == len(SURFACE_TOKENS)
+    for surface in SURFACE_TOKENS:
+        assert any(f"text.primary on {surface}" in line for line in problems), surface
+    assert all(line.startswith("text.primary") for line in problems), problems
+
+
+def test_contrast_problems_keeps_the_two_documented_exemptions() -> None:
+    """`text.disabled` and `accent` are exempt, and stay exempt once it moves.
+
+    A check that rediscovered them as failures would fire on every load of
+    every theme including the built-in, and a report that is never empty is a
+    report nobody reads.
+    """
+    invisible = _variant({"text.disabled": "#1A1A1A", "accent": "#1A1A1A"})
+    assert invisible.contrast_problems() == []
+
+
+def test_contrast_problems_skips_tokens_a_theme_does_not_define() -> None:
+    """Completeness is the merge's job, not this rule's."""
+    partial = theme.Theme(
+        name="partial",
+        tokens={"surface.panel": "#1F1F1F", "text.primary": "#CCCCCC"},
+        channels=("#A855F7",),
+    )
+    assert partial.contrast_problems() == []
+
+
+def test_the_contrast_vocabulary_cannot_go_empty() -> None:
+    """A guard against a vacuous parametrization, not a second home for the lists.
+
+    The parametrized tests above draw from `theme`'s own tuples, which is what
+    stops the spec and the code drifting - and it also means emptying either
+    tuple would produce zero cases and a green run. This asserts the shape
+    rather than the contents, so it is not itself something that can drift.
+    """
+    assert len(theme.SURFACE_TOKENS) == 4
+    assert len(theme.TEXT_TOKENS) == 5
+    assert "text.disabled" not in theme.TEXT_TOKENS, "04 exempts it"
+    assert "accent" not in theme.TEXT_TOKENS, "04 exempts it"
 
 
 def test_surfaces_are_monotonic() -> None:
     """Deepest first, each step lighter; widgets rely on the ordering."""
-    levels = [_luminance(theme.color(name)) for name in SURFACE_TOKENS]
+    levels = [theme.luminance(theme.color(name)) for name in SURFACE_TOKENS]
     assert levels == sorted(levels), levels
 
 
@@ -377,7 +406,7 @@ def test_the_builtin_surfaces_are_monotonic() -> None:
             "surface.hover",
         )
     ]
-    levels = [_luminance(colour) for colour in surfaces]
+    levels = [theme.luminance(colour) for colour in surfaces]
     assert levels == sorted(levels), surfaces
 
 

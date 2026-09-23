@@ -51,6 +51,57 @@ _NAME = re.compile(r"^[a-z]+(?:\.[a-z]+)*$")
 CHANNEL: Final = "channel"
 
 
+# --------------------------------------------------------------------------- #
+# contrast
+# --------------------------------------------------------------------------- #
+
+#: The surfaces text is checked against. Their *ordering* - deepest first,
+#: each step lighter - is a property of a theme's values and is asserted by
+#: test; the rule below needs only the set.
+SURFACE_TOKENS: Final = (
+    "surface.window",
+    "surface.panel",
+    "surface.raised",
+    "surface.hover",
+)
+
+#: The tokens that carry text, and so are held to 4.5:1 on every surface.
+#: docs/04-ui-spec.md names two exemptions and they are expressed here by
+#: absence: `text.disabled` is disabled text, and `accent` is a fill and
+#: stroke colour that never carries any. `accent.text` is the text-safe
+#: purple D-44 exists to provide, and is held to the rule.
+#:
+#: The exemptions have to live with the rule rather than with the test that
+#: used to own it. A check that rediscovered them as failures would fire on
+#: every load of every theme including the built-in, which is the fastest
+#: way to teach somebody to ignore a report.
+TEXT_TOKENS: Final = (
+    "text.primary",
+    "text.secondary",
+    "accent.text",
+    "warn",
+    "error",
+)
+
+#: docs/04-ui-spec.md, *Accessibility and feel*.
+TEXT_CONTRAST: Final = 4.5
+
+
+def luminance(hex_colour: str) -> float:
+    """WCAG relative luminance of a `#RRGGBB` colour."""
+    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [
+        c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast(a: str, b: str) -> float:
+    """WCAG contrast ratio between two hex colours."""
+    la, lb = luminance(a), luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
 class ThemeError(Exception):
     """A theme that cannot be used, and every reason it cannot.
 
@@ -145,6 +196,44 @@ class Theme:
                     continue
                 if raw not in self.tokens:
                     found.append(f"{where}: names no token {raw!r}")
+        return found
+
+    def contrast_problems(self) -> list[str]:
+        """Every text token that falls below 4.5:1 on a surface.
+
+        One rule, two audiences - the same split `problems()` makes, and the
+        reason this is a method rather than something either caller owns. The
+        built-in theme is *held* to it: `tests/test_theme.py` asserts this
+        list is empty, and a built-in that failed would be a bug shipped to
+        everybody. A user's theme is merely *told*: the loader reports every
+        pair and loads the theme anyway, because refusing somebody's own
+        theme on their own machine is not a call this application gets to
+        make. docs/04-ui-spec.md argues both halves under *Contrast is
+        checked, not enforced*.
+
+        All of them rather than the first, for the reason `problems()`
+        returns a list: an author fixing a palette wants to know everything
+        that is wrong with it, not one item per attempt.
+
+        A token this theme does not define is skipped rather than reported.
+        Completeness is the merge's job - a loaded theme is merged over the
+        built-in and therefore has every token - and a contrast check that
+        also complained about absence would be answering a question nobody
+        asked it.
+        """
+        found: list[str] = []
+        for token in TEXT_TOKENS:
+            if token not in self.tokens:
+                continue
+            for surface in SURFACE_TOKENS:
+                if surface not in self.tokens:
+                    continue
+                ratio = contrast(self.tokens[token], self.tokens[surface])
+                if ratio < TEXT_CONTRAST:
+                    found.append(
+                        f"{token} on {surface} is {ratio:.2f}:1, "
+                        f"below {TEXT_CONTRAST}:1"
+                    )
         return found
 
     # ----------------------------------------------------------- resolution
