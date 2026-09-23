@@ -1,7 +1,7 @@
 # M9 · Phase 2 — The `.3dimtheme` file
 
-**Status:** not started · **Plan:** not written yet —
-`plans/phase_2_file_format.md`
+**Status:** in progress · **Plan:**
+[plans/phase_2_file_format.md](plans/phase_2_file_format.md)
 
 ## Goal
 
