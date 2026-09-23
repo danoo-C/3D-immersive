@@ -48,8 +48,6 @@ def test_bundled_resources_are_reachable_as_resources() -> None:
     # M9 phase 3: the default palette is a bundled file, and D-79 says there
     # is no fallback for it. Missing from the wheel is not "unstyled", it is
     # an application that will not start.
-    theme = resources.files("immersive.assets.themes").joinpath(
-        "vscode_dark.3dimtheme"
-    )
+    theme = resources.files("immersive.assets.themes").joinpath("vscode_dark.3dimtheme")
     assert theme.is_file(), "the built-in theme is not in the package"
     assert '"schema_version"' in theme.read_text(encoding="utf-8")

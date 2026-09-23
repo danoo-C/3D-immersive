@@ -93,9 +93,7 @@ def test_opening_the_list_marks_everything_read(
     assert count.isHidden(), "and the count goes away"
 
 
-def test_the_list_holds_one_row_per_notice(
-    count: NoticeCount, log: NoticeLog
-) -> None:
+def test_the_list_holds_one_row_per_notice(count: NoticeCount, log: NoticeLog) -> None:
     log.add(Severity.WARN, "first")
     log.add(Severity.ERROR, "second")
 
@@ -117,9 +115,7 @@ def test_an_empty_list_says_so_rather_than_showing_nothing(
     assert "Nothing reported" in rows[0].text()
 
 
-def test_a_notices_detail_reaches_the_list(
-    count: NoticeCount, log: NoticeLog
-) -> None:
+def test_a_notices_detail_reaches_the_list(count: NoticeCount, log: NoticeLog) -> None:
     """The status line shows one line; the list can afford the rest."""
     log.add(Severity.WARN, "ocean.3dimtheme has problems", ["tokens.nope", "bad hex"])
 

@@ -182,8 +182,10 @@ class NoticeCount(QToolButton):
         self._list.populate()
         self._list.adjustSize()
         corner = self.mapToGlobal(self.rect().topLeft())
-        self._list.move(corner.x() - self._list.width() + self.width(),
-                        corner.y() - self._list.height())
+        self._list.move(
+            corner.x() - self._list.width() + self.width(),
+            corner.y() - self._list.height(),
+        )
         self._list.show()
         self._log.mark_read()
         self.refresh()

@@ -870,7 +870,7 @@ def test_importing_the_module_does_not_read_the_bundled_theme() -> None:
 def test_the_bundled_theme_goes_through_this_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """"Not a shortcut past it" - the phase's own acceptance, asserted.
+    """ "Not a shortcut past it" - the phase's own acceptance, asserted.
 
     The concern behind that line is that the default gets built by some
     private route the format never has to express, at which point the format

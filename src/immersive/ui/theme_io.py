@@ -104,9 +104,7 @@ class ThemeReport:
         with two keys ignored"* and *"your theme is not loaded"* are different
         sentences, and only the severity of the problems tells them apart.
         """
-        return not any(
-            problem.severity is Severity.ERROR for problem in self.problems
-        )
+        return not any(problem.severity is Severity.ERROR for problem in self.problems)
 
 
 class _Reading:
@@ -161,9 +159,7 @@ def _kind(value: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _versioned(
-    reading: _Reading, document: dict[str, Any]
-) -> dict[str, Any] | None:
+def _versioned(reading: _Reading, document: dict[str, Any]) -> dict[str, Any] | None:
     """`document`, brought up to `SCHEMA_VERSION`. `None` if it cannot be.
 
     Read before anything else is parsed, for the reason `project_io` reads it
@@ -183,9 +179,7 @@ def _versioned(
 
     version = document["schema_version"]
     if not isinstance(version, int) or isinstance(version, bool):
-        reading.error(
-            "schema_version", f"is {_shown(version)}, not a whole number"
-        )
+        reading.error("schema_version", f"is {_shown(version)}, not a whole number")
         return None
 
     if version > SCHEMA_VERSION:
@@ -323,9 +317,7 @@ def _groups(
 
     for group, values in node.items():
         if group not in over.groups:
-            reading.warn(
-                f"groups.{group}", "is not a group this build draws; ignored"
-            )
+            reading.warn(f"groups.{group}", "is not a group this build draws; ignored")
             continue
         if not isinstance(values, dict):
             reading.warn(
@@ -629,9 +621,7 @@ def loads(
     return ThemeReport(theme, source, reading.problems)
 
 
-def load(
-    path: str | os.PathLike[str], *, over: Theme | None = None
-) -> ThemeReport:
+def load(path: str | os.PathLike[str], *, over: Theme | None = None) -> ThemeReport:
     """Read a `.3dimtheme` from disk and merge it over `over`.
 
     A file that cannot be read is a reported problem rather than the
