@@ -207,16 +207,20 @@ def test_the_palette_table_is_well_formed() -> None:
     assert len(set(palette.values())) == len(palette), "two tokens share a colour"
 
 
-def test_the_palette_table_holds_the_colours_the_code_holds() -> None:
-    """The document and `theme.py` agree on the thirteen colours.
+def test_the_palette_table_is_the_bundled_theme() -> None:
+    """The document and the shipped file agree, name for name and value for value.
 
-    Checked by value here, because D-74's rename lands in the document before
-    the object that will carry the names exists. Phase 1's next step ties the
-    *names* together too, and this assertion stops being the interesting one
-    then — but it is what can be true today, and a value drift between the
-    spec and the palette is worth catching either way.
+    This used to compare the two as *sets of colours*, and said so: the names
+    could not be tied together while D-74's rename lived in the document and
+    the object that would carry it did not exist yet. Both exist now, and the
+    palette is a file, so the assertion gets to be the whole mapping.
+
+    Which makes 04's Colour palette table the specification and
+    `assets/themes/vscode_dark.3dimtheme` its implementation, checked against
+    each other on every run. A colour edited in one and not the other fails
+    here rather than shipping.
     """
-    assert set(palette_table().values()) == set(PALETTE)
+    assert palette_table() == dict(theme_io.builtin().tokens)
 
 
 def test_the_old_token_names_are_gone() -> None:

@@ -64,6 +64,14 @@ rather than on the literal values, because a theme may replace them
 ([theming](#theming)). The names are the ones a `.3dimtheme` uses (D-74);
 there is deliberately only one set.
 
+**This table is the specification; its implementation is a file.** The values
+below ship as `src/immersive/assets/themes/vscode_dark.3dimtheme`, read at
+startup through the same module that reads anybody else's theme (D-47). They
+were thirteen constants in `theme.py` until M9 phase 3, and that module now
+holds no colour at all — a test asserts it. A value edited here and not there
+fails a test too: the built-in theme is loaded and compared against this
+table on every run.
+
 | Token | Hex | Use |
 |---|---|---|
 | `surface.window` | `#181818` | application background, deepest |
