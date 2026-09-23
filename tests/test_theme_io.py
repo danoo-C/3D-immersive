@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -637,3 +638,47 @@ def test_the_example_only_reports_groups_no_milestone_has_built_yet() -> None:
         "groups.clip",
     ]
     assert all(p.severity is theme_io.Severity.WARN for p in problems)
+
+
+# --------------------------------------------------------------------------- #
+# the bundled theme
+# --------------------------------------------------------------------------- #
+
+
+def bundled() -> str:
+    """The built-in theme's file, read the way the application reads it.
+
+    Through `importlib.resources` and never by walking up from `__file__`
+    (D-30), in the test as well as in the code - a test that reaches the file
+    by a route the application cannot use proves the file exists and not that
+    it ships.
+    """
+    return (
+        resources.files("immersive.assets.themes")
+        .joinpath("vscode_dark.3dimtheme")
+        .read_text(encoding="utf-8")
+    )
+
+
+def test_the_bundled_file_is_the_built_in_theme() -> None:
+    """Generated from `BUILTIN`, and proved equal to it while both exist.
+
+    This is the one moment the comparison is worth making. After the palette
+    is deleted from `theme.py` there is nothing on the other side of the
+    equals sign, so the migration is two steps and this assertion is the
+    reason.
+    """
+    report = theme_io.loads(bundled(), over=theme.BUILTIN)
+
+    assert report.problems == []
+    assert report.theme == theme.BUILTIN
+
+
+def test_the_bundled_file_is_exactly_what_the_writer_produces() -> None:
+    """It is generated, not typed, and stays that way.
+
+    A hand-edit that changes formatting rather than colour would make the
+    file and `dumps()` disagree, and the next regeneration would produce a
+    diff nobody asked for.
+    """
+    assert bundled() == theme_io.dumps(theme.BUILTIN)
