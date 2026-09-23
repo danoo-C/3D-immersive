@@ -274,6 +274,12 @@ reported. That is what makes merging safe in both directions — a name that
 means nothing today cannot quietly come to mean something else in the release
 that adds it.
 
+`tokens` and `groups` merge key by key; **`channels` is replaced wholesale.**
+A file that gives a channel palette gives all of it. The list is an ordered
+sequence indexed by position rather than a set of keys (D-75), so merging it
+per index would treat those indices as keys — and it would make the palette's
+*length* unthemeable, so a four-colour theme could not exist.
+
 It has one consequence worth stating plainly, because it produces **two
 reports for one mistake**. A file that defines `"my.purple"` and then writes
 `"playhead": "my.purple"` in a group has its token dropped as unknown; the

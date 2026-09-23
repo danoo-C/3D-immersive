@@ -102,6 +102,16 @@ def contrast(a: str, b: str) -> float:
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
+def is_colour(value: str) -> bool:
+    """True when `value` is a `#RRGGBB` literal.
+
+    Public because `theme_io` has to ask the same question of every value in
+    a user's file, and a second regex in a second module is a second home for
+    one fact about the format.
+    """
+    return bool(_HEX.match(value))
+
+
 class ThemeError(Exception):
     """A theme that cannot be used, and every reason it cannot.
 
@@ -142,6 +152,11 @@ class Theme:
     tokens: Mapping[str, str]
     channels: tuple[str, ...]
     groups: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    #: Last because the fields above have no defaults, not because it matters
+    #: least. 04-ui-spec.md's file example carries an `author`, so the object
+    #: has to hold one - otherwise loading the specification's own example
+    #: would report a key the format documents.
+    author: str = ""
 
     def __post_init__(self) -> None:
         problems = self.problems()
@@ -289,6 +304,7 @@ class Theme:
 #: first time somebody edits one of them.
 BUILTIN: Final = Theme(
     name="VS Code Dark",
+    author="3d immersive",
     tokens={
         # Surfaces are VS Code's dark greys (D-44), and monotonic:
         # surface.window is deepest and each step is lighter. Widgets rely on
