@@ -10,7 +10,7 @@ roadmap's preamble says why.
 | Phase | Status |
 |---|---|
 | [1 — Tokens and groups](phase_1_tokens_and_groups.md) | ✅ |
-| [2 — The `.3dimtheme` file](phase_2_file_format.md) | in progress |
+| [2 — The `.3dimtheme` file](phase_2_file_format.md) | ✅ |
 | [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | not started |
 | [4 — Discovery and switching](phase_4_discovery_and_switching.md) | not started |
 
@@ -66,3 +66,20 @@ Still unmade, and phase 2's first decision: [02](../02-architecture.md) names
 no module for theme file I/O, and it cannot go in `core/io/` beside
 `project_io.py`, because a theme is a UI concern and N-5 keeps `core/` to the
 model.
+
+**Phase 2.** `theme_io.py` reads a `.3dimtheme`, merges it over a target
+theme and reports what it dropped, and nothing in it raises. Two decisions:
+the module's home (D-77) and a report whose entries carry a severity taken
+from `04`'s *Notices* vocabulary (D-78). `04` gained three things it was
+missing — the closed token vocabulary, the wholesale channel merge, and two
+rows in its failure table.
+
+The phase found that a five-line theme file could stop the application
+starting: `"channel"` is a value `04` documents, `Theme` accepts it, and
+`stylesheet()` then raises on it. A theme can be well-formed and still be one
+the application cannot paint with. The battery that asserts nothing raises
+now builds a stylesheet from every theme it produces.
+
+Phase 3 starts from a reader whose merge target is already a parameter, and
+from the one thing that is still unsolved: when the built-in *is* the file,
+there is nothing to merge it over.

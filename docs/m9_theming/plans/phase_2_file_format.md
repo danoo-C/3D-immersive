@@ -1,6 +1,6 @@
 # Plan — M9 · Phase 2 — The `.3dimtheme` file
 
-**Written:** 2026-09-23 · **Status:** in progress
+**Written:** 2026-09-23 · **Status:** ✅ complete
 
 ## Approach
 
@@ -331,4 +331,85 @@ they should be mandatory, that is a finding about the format and it belongs in
 
 ## Outcome
 
-Filled in at the end.
+Six steps, in the order planned, and all seven acceptance boxes tick. 662
+tests. Eighteen mutations applied against the finished suite with
+`PYTHONDONTWRITEBYTECODE=1` and a purged cache, and **none survived**.
+
+### What the plan got right, and it is worth saying which
+
+The ordering argument. The plan insisted tokens merge before group values are
+checked, and that single line of sequencing is what makes the acceptance case
+about resolving against the default work at all. Written down before the code
+existed, it cost nothing; found afterwards it would have been a rewrite of
+the merge.
+
+Naming `BUILTIN` as a parameter rather than a constant, for phase 3's sake.
+Cheap when planned, and it is the kind of thing that is genuinely expensive
+to unpick from eleven call sites later.
+
+### What the plan did not see
+
+**A theme file could stop the application starting.** The plan's risk table
+has a row for the contrast check turning into a gate, and nothing at all for
+the far worse failure one row over: `"channel"` is a value `04` documents,
+`Theme` accepts it, `Theme.value()` raises on it by design, and
+`stylesheet()` asks for every group key there is. Every check the plan named
+passed on that file. The battery found it only because the battery existed,
+and then only once it was strengthened from *"this is a well-formed theme"*
+to *"this is a theme the application can paint with"*.
+
+The general lesson is worth more than the fix: **an acceptance line about
+something never being fatal has to be asserted at the point where it would be
+fatal.** `Theme.problems() == []` is a statement about a constructor.
+Startup is a statement about `stylesheet()`.
+
+**`author` was not in the plan and the format needs it.** `04`'s file example
+carries one, so a `Theme` that could not hold one would have reported the
+specification's own example as containing a key nobody can use — which step 6
+would have found, one step after the writer had already been built without
+it. The plan listed `name` and `author` under its "genuine unknown" as a
+question about whether they were *required*; it never asked whether the
+object could hold them.
+
+**`is_colour()` was not anticipated either**, and it is the same shape of
+miss: the plan assumed the reader could validate values without the palette
+module growing anything, and the alternative was a second hex regex in a
+second module — a second home for one fact about the format.
+
+### The step that was not a step
+
+Step 1 was planned as documents only and stayed that way, which is unusual
+enough to note. Every other phase in this project has found a document
+amendment mid-build; this one found three — the closed vocabulary, the
+wholesale channel merge, and the `"channel"` restriction — and two of them
+landed in steps 3 and 5 rather than in step 1, exactly as
+[09](../../09-workflow.md) says to do it: amend as reality intervenes, and
+leave what changed visible.
+
+### Which mutations survived
+
+None, on the first sweep, which has not happened before in this project and
+is worth being suspicious of rather than pleased about. Two things make it
+credible rather than lucky. The sweep ran the **whole suite** rather than the
+phase's own files, which is the correction M9 phase 1 made after a mutation
+in `main_window.py` survived a sweep that never ran `test_main_window.py`.
+And the eighteenth mutation is the bug step 5 actually found in the working
+code, added to the list afterwards and confirmed to be caught by the test
+written for it.
+
+One mutation earned its place beyond being caught. **M17 made the reader and
+the writer wrong in the same direction** — `dumps` writing `"colours"` and
+`loads` reading `"colours"` — and it was run twice on purpose. Against the
+round-trip tests alone it **passes**. Against the assertion that reads the
+written text it fails. That is M1 phase 5's lesson reproduced as evidence
+rather than repeated as advice: a round trip proves the reader and the writer
+agree, not that either is right.
+
+### What phase 3 starts from
+
+A reader whose merge target is a parameter, and the bootstrap problem
+untouched and honestly labelled: when the built-in *is* the file, there is
+nothing to validate it against and nothing to merge it over. The plan's
+position — that phase 3 reads its file with no target and hands the result
+straight to `Theme`, which raises, because at that moment the file is code
+rather than input — is still only a position. It is phase 3's to decide.
