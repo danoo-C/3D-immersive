@@ -248,7 +248,12 @@ edit by hand. Both layers earn their place.
 
 `"channel"` is the one reserved value: it means *this channel's own colour*,
 resolved per channel at paint time. It is what keeps the colour thread from
-the Channel palette section intact under any theme.
+the Channel palette section intact under any theme. A theme file may use it
+**only for a key the built-in theme already paints per channel** — `clip.body`
+and its like, once M3 draws them. Anywhere else it is ignored and reported:
+there is no channel for it to resolve against, so a five-line theme file would
+otherwise be able to stop the application painting, which is the one thing
+F-47 says a theme must never do.
 
 `schema_version` carries the same migration discipline as `.3dim` — see
 [03-data-model.md](03-data-model.md).

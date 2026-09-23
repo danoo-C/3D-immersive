@@ -320,6 +320,11 @@ def _groups(
     ordering is what makes the phase's hardest acceptance line work: a group
     value naming a token the file does not define, but the default does,
     resolves against the default.
+
+    The reserved `channel` value is accepted only for a key the merge target
+    already paints per channel. Nothing does today - M3 draws the first one -
+    so today it is accepted nowhere, and that is the point rather than a
+    limitation.
     """
     merged = {name: dict(values) for name, values in over.groups.items()}
     if node is None:
@@ -353,11 +358,22 @@ def _groups(
                     f"keeping the default",
                 )
                 continue
-            if raw != CHANNEL and not is_colour(raw) and raw not in tokens:
-                reading.warn(
-                    where,
-                    f"names no token {raw!r}; keeping the default",
-                )
+            if raw == CHANNEL:
+                # Only where the merge target already paints per channel.
+                # Anywhere else there is no channel to resolve against, and
+                # `Theme.value` raises rather than inventing one - so a
+                # five-line theme file would stop the application painting,
+                # which is exactly what F-47 forbids.
+                if over.groups[group].get(key) != CHANNEL:
+                    reading.warn(
+                        where,
+                        f"is {CHANNEL!r}, which means a channel's own colour "
+                        f"and only resolves for a key that is painted once "
+                        f"per channel; keeping the default",
+                    )
+                    continue
+            elif not is_colour(raw) and raw not in tokens:
+                reading.warn(where, f"names no token {raw!r}; keeping the default")
                 continue
             merged[group][key] = raw
     return merged

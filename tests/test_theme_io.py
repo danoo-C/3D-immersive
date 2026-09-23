@@ -305,3 +305,242 @@ def test_a_theme_that_is_not_the_builtin_round_trips() -> None:
     ).theme
 
     assert theme_io.loads(theme_io.dumps(original)).theme == original
+
+
+# --------------------------------------------------------------------------- #
+# 04's failure table, row by row
+# --------------------------------------------------------------------------- #
+#
+# Every row of *When a theme is wrong* gets a test, and each asserts the same
+# two things: a usable theme comes back, and the problem is named. The row
+# that says "never fatally" is not any one of these - it is a property of the
+# whole set, and it is asserted as one at the foot of this section.
+
+
+def test_a_missing_file_is_reported(tmp_path: Path) -> None:
+    report = theme_io.load(tmp_path / "nothing.3dimtheme")
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+    assert report.problems[0].severity is theme_io.Severity.ERROR
+
+
+def test_a_file_that_cannot_be_read_is_reported(tmp_path: Path) -> None:
+    """A directory, which every platform refuses to read as a file."""
+    directory = tmp_path / "themes.3dimtheme"
+    directory.mkdir()
+
+    report = theme_io.load(directory)
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+
+
+def test_a_file_that_is_not_utf8_is_reported(tmp_path: Path) -> None:
+    path = tmp_path / "bad.3dimtheme"
+    path.write_bytes(b'{"schema_version": 1, "name": "\xff\xfe"}')
+
+    report = theme_io.load(path)
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+    assert "UTF-8" in report.problems[0].message
+
+
+def test_malformed_json_is_reported_with_the_parse_error() -> None:
+    report = theme_io.loads('{"schema_version": 1, "tokens": {')
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+    # 04: "reported with the parse error" - so the line and column are in it.
+    assert "line" in report.problems[0].where
+    assert "column" in report.problems[0].where
+
+
+@pytest.mark.parametrize("text", ["[]", '"a theme"', "7", "null", "true"])
+def test_valid_json_that_is_not_an_object_is_reported(text: str) -> None:
+    report = theme_io.loads(text)
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+
+
+def test_an_unknown_group_is_ignored_and_reported() -> None:
+    report = theme_io.loads(written(groups={"spaceship": {"hull": "#FF0000"}}))
+
+    assert "spaceship" not in report.theme.groups
+    assert [problem.where for problem in report.problems] == ["groups.spaceship"]
+    assert report.applied, "a theme with one odd group is still a theme"
+
+
+def test_an_unknown_key_inside_a_known_group_is_ignored_and_reported() -> None:
+    report = theme_io.loads(written(groups={"button": {"sparkle": "#FF0000"}}))
+
+    assert "sparkle" not in report.theme.groups["button"]
+    assert [problem.where for problem in report.problems] == ["groups.button.sparkle"]
+
+
+def test_a_group_value_naming_nothing_falls_back_and_is_reported() -> None:
+    report = theme_io.loads(written(groups={"focus": {"ring": "nonsense"}}))
+
+    assert report.theme.value("focus", "ring") == theme.BUILTIN.value("focus", "ring")
+    assert [problem.where for problem in report.problems] == ["groups.focus.ring"]
+
+
+def test_a_missing_schema_version_is_reported() -> None:
+    report = theme_io.loads(json.dumps({"tokens": {"accent": "#FF0000"}}))
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+    assert report.problems[0].where == "schema_version"
+
+
+@pytest.mark.parametrize("version", ["1", 1.0, True, None, [1]])
+def test_a_schema_version_that_is_not_a_whole_number_is_reported(
+    version: object,
+) -> None:
+    """`True` is in that list deliberately: in Python it is an `int`."""
+    report = theme_io.loads(json.dumps({"schema_version": version}))
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+
+
+def test_a_newer_schema_keeps_what_it_recognises_and_says_so() -> None:
+    """Where this and `project_io` part company, and it is deliberate.
+
+    A .3dim is the work and refusing a newer one is right. A .3dimtheme is
+    cosmetic, and the worst case of a partial load is the wrong shade of grey.
+    """
+    report = theme_io.loads(
+        json.dumps(
+            {
+                "schema_version": theme_io.SCHEMA_VERSION + 1,
+                "tokens": {"accent": "#FF0000"},
+                "constellations": {"orion": True},
+            }
+        )
+    )
+
+    assert report.theme.token("accent") == "#FF0000", "what it recognised"
+    assert report.applied
+    versions = [p for p in report.problems if p.where == "schema_version"]
+    assert len(versions) == 1
+    assert versions[0].severity is theme_io.Severity.WARN
+
+
+def test_a_schema_too_old_to_migrate_is_reported() -> None:
+    """MIGRATIONS is empty, so schema 0 has no route forward. It says so."""
+    report = theme_io.loads(json.dumps({"schema_version": 0}))
+
+    assert report.theme == theme.BUILTIN
+    assert not report.applied
+    assert "migration" in report.problems[0].message
+
+
+#: One of every row above, plus a few shapes nobody sensible would write.
+HOSTILE = [
+    "",
+    "{",
+    "[]",
+    "null",
+    "not json at all",
+    '{"schema_version": 1}',
+    '{"schema_version": 0}',
+    '{"schema_version": 99}',
+    '{"schema_version": "1"}',
+    '{"tokens": {"accent": "#FF0000"}}',
+    '{"schema_version": 1, "tokens": null}',
+    '{"schema_version": 1, "tokens": {"accent": null}}',
+    '{"schema_version": 1, "tokens": {"": ""}}',
+    '{"schema_version": 1, "channels": []}',
+    '{"schema_version": 1, "channels": "#FF0000"}',
+    '{"schema_version": 1, "channels": [null, 7, {}]}',
+    '{"schema_version": 1, "groups": []}',
+    '{"schema_version": 1, "groups": {"button": null}}',
+    '{"schema_version": 1, "groups": {"button": {"background": 7}}}',
+    '{"schema_version": 1, "groups": {"button": {"background": "channel"}}}',
+    '{"schema_version": 1, "name": null, "author": 7}',
+]
+
+
+@pytest.mark.parametrize("text", HOSTILE)
+def test_no_theme_file_can_raise(text: str) -> None:
+    """The acceptance line, and it is a property of the set, not of a row.
+
+    F-47 and D-48: a typo in a cosmetic file must not stand between somebody
+    and their project. A caller that never looks at `problems` still gets a
+    theme it can paint with.
+    """
+    report = theme_io.loads(text)
+
+    assert isinstance(report.theme, theme.Theme)
+    assert report.theme.problems() == [], "and it is a theme that resolves"
+    # The assertion that actually bites. A theme can be well-formed and still
+    # be one the application cannot paint with, and "never fatally" is a
+    # promise about startup rather than about construction.
+    assert theme.stylesheet(report.theme)
+
+
+@pytest.mark.parametrize("text", HOSTILE)
+def test_no_theme_file_can_raise_from_disk(text: str, tmp_path: Path) -> None:
+    """The same set through `load`, because that path has its own failures."""
+    path = tmp_path / "hostile.3dimtheme"
+    path.write_text(text, encoding="utf-8")
+
+    assert isinstance(theme_io.load(path).theme, theme.Theme)
+
+
+# --------------------------------------------------------------------------- #
+# the reserved `channel` value
+# --------------------------------------------------------------------------- #
+
+
+def test_channel_is_refused_where_nothing_is_painted_per_channel() -> None:
+    """A theme must not be able to stop the application painting.
+
+    `Theme.value` raises on a `channel` value rather than inventing a channel
+    to resolve it against, and `stylesheet()` asks for every group key there
+    is. So a file setting one QSS-backed key to `channel` would take startup
+    down - which is the one thing F-47 says a cosmetic file must never do.
+    Nothing in the built-in paints per channel yet; M3 draws the first.
+    """
+    report = theme_io.loads(
+        written(groups={"button": {"background": theme.CHANNEL}})
+    )
+
+    assert [problem.where for problem in report.problems] == [
+        "groups.button.background"
+    ]
+    assert report.theme.value("button", "background") == theme.BUILTIN.value(
+        "button", "background"
+    )
+    assert theme.stylesheet(report.theme), "and startup survives"
+
+
+def test_channel_is_kept_where_the_default_paints_per_channel() -> None:
+    """The rule is "where the default already does", not "never".
+
+    Asserted against a merge target that has such a key, because the built-in
+    will not have one until M3 - and a rule tested only in the direction that
+    refuses is a rule that could simply be a refusal.
+    """
+    over = theme.Theme(
+        name="With clips",
+        tokens={"accent": "#A855F7"},
+        channels=("#A855F7",),
+        groups={"clip": {"body": theme.CHANNEL, "selected.border": "accent"}},
+    )
+
+    kept = theme_io.loads(
+        written(groups={"clip": {"body": theme.CHANNEL}}), over=over
+    )
+    assert kept.problems == []
+    assert kept.theme.groups["clip"]["body"] == theme.CHANNEL
+
+    moved = theme_io.loads(
+        written(groups={"clip": {"selected.border": theme.CHANNEL}}), over=over
+    )
+    assert [problem.where for problem in moved.problems] == [
+        "groups.clip.selected.border"
+    ]
