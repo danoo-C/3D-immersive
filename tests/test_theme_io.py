@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -682,3 +683,123 @@ def test_the_bundled_file_is_exactly_what_the_writer_produces() -> None:
     diff nobody asked for.
     """
     assert bundled() == theme_io.dumps(theme.BUILTIN)
+
+
+# --------------------------------------------------------------------------- #
+# the strict read: a theme that is code
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=True)
+def _clear_builtin_cache() -> Iterator[None]:
+    """`builtin()` is cached, and a test that swaps the resource must not
+    inherit a theme read three tests ago. The same trap phase 1 found one
+    module over, with `icons.icon()`."""
+    theme_io.builtin.cache_clear()
+    yield
+    theme_io.builtin.cache_clear()
+
+
+def test_builtin_reads_the_bundled_file() -> None:
+    assert theme_io.builtin() == theme.BUILTIN
+
+
+def test_builtin_reads_once_per_process() -> None:
+    """Cached for `_template()`'s reason: one small file, unchanging answer."""
+    assert theme_io.builtin() is theme_io.builtin()
+
+
+def test_the_built_in_theme_can_render_the_stylesheet() -> None:
+    """The check that makes a short vocabulary impossible to ship.
+
+    `app.qss` names every group key the application draws, and
+    `Template.substitute` raises on a placeholder with no value. So a bundled
+    theme missing a key cannot render the sheet - which is why nothing extra
+    had to be built to validate a file that nothing can be validated against.
+    """
+    assert theme.stylesheet(theme_io.builtin())
+
+
+def test_the_built_in_theme_holds_the_contrast_line() -> None:
+    """The shipped default is *held* to 4.5:1, and now it is held off disk."""
+    assert theme_io.builtin().contrast_problems() == []
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ('{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": ["#FF0000"],'
+         ' "name": "x", "groups": {"g": {"k": "nope"}}}', "names no token"),
+        ('{"schema_version": 1, "tokens": {"a": "red"}, "channels": ["#FF0000"],'
+         ' "name": "x"}', "not a #RRGGBB"),
+        ('{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": [],'
+         ' "name": "x"}', "at least one channel"),
+        ('{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": ["#FF0000"]}',
+         "called something"),
+    ],
+)
+def test_strict_raises_and_names_what_is_wrong(document: str, expected: str) -> None:
+    """A bundled theme is code. A bug in one must not reach anybody."""
+    with pytest.raises(theme.ThemeError) as raised:
+        theme_io.strict(document)
+
+    assert any(expected in problem for problem in raised.value.problems)
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ("{", "not valid JSON"),
+        ("[]", "does not hold a theme"),
+        ('{"tokens": {}}', "does not say which schema"),
+        ('{"schema_version": "1"}', "does not say which schema"),
+        ('{"schema_version": 2}', "not written by this build"),
+        ('{"schema_version": 1, "tokens": []}', "can use"),
+        ('{"schema_version": 1, "tokens": {"a": 7}}', "can use"),
+        ('{"schema_version": 1, "channels": "#FF0000"}', "can use"),
+        ('{"schema_version": 1, "channels": [7]}', "can use"),
+        ('{"schema_version": 1, "groups": {"g": 7}}', "can use"),
+        ('{"schema_version": 1, "groups": {"g": {"k": 7}}}', "can use"),
+    ],
+)
+def test_strict_refuses_a_document_it_cannot_read(
+    document: str, expected: str
+) -> None:
+    """Shape guards, so `Theme` is never handed something it would trip over.
+
+    Without them a token whose value is a number reaches a regular
+    expression, and a `TypeError` from inside a validator says nothing about
+    which key somebody got wrong.
+    """
+    with pytest.raises(theme.ThemeError, match=expected):
+        theme_io.strict(document)
+
+
+def test_a_newer_bundled_schema_is_refused_where_a_user_theme_is_not() -> None:
+    """The same field, two answers, and both are right.
+
+    A user's file may be from a newer build and is kept for what it holds. A
+    bundled theme ships *with* the build that reads it, so a disagreement is
+    not an old file in the world - it is a build put together wrong.
+    """
+    newer = json.dumps({"schema_version": theme_io.SCHEMA_VERSION + 1})
+
+    assert theme_io.loads(newer).applied, "a user's theme survives it"
+    with pytest.raises(theme.ThemeError):
+        theme_io.strict(newer)
+
+
+def test_a_missing_bundled_theme_names_the_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-79: no fallback palette, and a message that says what is missing.
+
+    The failure is a broken installation rather than a runtime condition, so
+    what matters is that it names the file instead of surfacing a bare
+    FileNotFoundError from inside importlib.
+    """
+    monkeypatch.setattr(theme_io, "_BUILTIN_FILE", "not_a_theme.3dimtheme")
+    theme_io.builtin.cache_clear()
+
+    with pytest.raises(theme.ThemeError, match="missing from this installation"):
+        theme_io.builtin()

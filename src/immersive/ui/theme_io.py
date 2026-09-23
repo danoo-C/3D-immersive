@@ -41,10 +41,12 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cache
+from importlib import resources
 from pathlib import Path
 from typing import Any, Final
 
-from immersive.ui.theme import BUILTIN, CHANNEL, Theme, is_colour
+from immersive.ui.theme import BUILTIN, CHANNEL, Theme, ThemeError, is_colour
 
 #: The on-disk schema this build writes, and what drives forward migration on
 #: load. Same discipline as `.3dim` - see docs/03-data-model.md.
@@ -377,6 +379,162 @@ def _groups(
                 continue
             merged[group][key] = raw
     return merged
+
+
+# --------------------------------------------------------------------------- #
+# the built-in theme, which is code
+# --------------------------------------------------------------------------- #
+
+#: The bundled default, reached through importlib.resources and never by
+#: walking up from __file__ (D-30).
+_THEME_PACKAGE: Final = "immersive.assets.themes"
+_BUILTIN_FILE: Final = "vscode_dark.3dimtheme"
+
+
+def _object(document: dict[str, Any], key: str, where: str) -> dict[str, Any]:
+    """`document[key]` as a mapping, or a `ThemeError` saying what it was."""
+    value = document.get(key, {})
+    if not isinstance(value, dict):
+        raise ThemeError(
+            f"{where} is not a theme this build can use",
+            [f"{key}: is a JSON {_kind(value)}, not an object"],
+        )
+    return value
+
+
+def _strings(values: dict[str, Any], prefix: str, where: str) -> dict[str, str]:
+    """Every value is a string, or a `ThemeError` naming the one that is not.
+
+    `Theme.problems()` would otherwise be handed an int and ask a regular
+    expression to match it, and a `TypeError` from inside a validator says
+    nothing about which key somebody got wrong.
+    """
+    for key, value in values.items():
+        if not isinstance(value, str):
+            raise ThemeError(
+                f"{where} is not a theme this build can use",
+                [f"{prefix}{key}: is a JSON {_kind(value)}, not a string"],
+            )
+    return dict(values)
+
+
+def strict(text: str, *, source: str = "the theme") -> Theme:
+    """Read a theme that is **code**, and raise on anything wrong with it.
+
+    The other half of the split that runs through this milestone. `loads()`
+    drops what it cannot use and reports, because a user's theme is input and
+    a typo in a cosmetic file must not stand between somebody and their
+    project. This reads a theme that ships *inside the wheel*, where the same
+    typo is a bug that must not reach anybody - so it raises, on the
+    developer's machine, in a test.
+
+    It cannot go through `loads()`, and the reason is structural rather than
+    stylistic: `loads()` filters every key against a merge target's
+    vocabulary, and a theme read by this function **is** that vocabulary.
+    There is nothing to merge it over and nothing to validate it against
+    except itself - which turns out to be enough. `Theme` refuses a group
+    naming a token the file does not define, `stylesheet()` refuses a
+    vocabulary too short to render `app.qss`, and `contrast_problems()`
+    refuses a default that breaks 4.5:1.
+
+    A `schema_version` that is merely *different* is refused rather than
+    migrated. A bundled theme ships with the build that reads it, so the two
+    disagreeing is not an old file in the world, it is a build that was put
+    together wrong.
+    """
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError as broken:
+        raise ThemeError(
+            f"{source} is not valid JSON",
+            [f"line {broken.lineno}, column {broken.colno}: {broken.msg}"],
+        ) from broken
+
+    if not isinstance(document, dict):
+        raise ThemeError(
+            f"{source} does not hold a theme",
+            [f"the file is a JSON {_kind(document)}, not an object"],
+        )
+
+    version = document.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ThemeError(
+            f"{source} does not say which schema it was written with",
+            [f"schema_version: is {_shown(version)}, not a whole number"],
+        )
+    if version != SCHEMA_VERSION:
+        raise ThemeError(
+            f"{source} was not written by this build",
+            [
+                f"schema_version: is {version} and this build writes "
+                f"{SCHEMA_VERSION}; a bundled theme ships with its build"
+            ],
+        )
+
+    # In the document's own order, so a file with two problems in it reports
+    # the first one a reader would meet rather than whichever check ran first.
+    tokens = _strings(_object(document, "tokens", source), "tokens.", source)
+
+    channels = document.get("channels", [])
+    if not isinstance(channels, list):
+        raise ThemeError(
+            f"{source} is not a theme this build can use",
+            [f"channels: is a JSON {_kind(channels)}, not an array"],
+        )
+    for index, value in enumerate(channels):
+        if not isinstance(value, str):
+            raise ThemeError(
+                f"{source} is not a theme this build can use",
+                [f"channels[{index}]: is a JSON {_kind(value)}, not a string"],
+            )
+
+    groups = {}
+    for name, values in _object(document, "groups", source).items():
+        if not isinstance(values, dict):
+            raise ThemeError(
+                f"{source} is not a theme this build can use",
+                [f"groups.{name}: is a JSON {_kind(values)}, not an object"],
+            )
+        groups[name] = _strings(values, f"groups.{name}.", source)
+
+    # Everything left is `Theme`'s to refuse, and it does.
+    return Theme(
+        name=document.get("name", ""),
+        author=document.get("author", ""),
+        tokens=tokens,
+        channels=tuple(channels),
+        groups=groups,
+    )
+
+
+@cache
+def builtin() -> Theme:
+    """The default palette, read once per process from its bundled file.
+
+    `@cache`d for `_template()`'s reason - it is one small file and the
+    answer never changes within a run - and with `icons.icon()`'s warning
+    attached: **a test that swaps the resource underneath this has to call
+    `builtin.cache_clear()`**, or it asserts against a theme read three tests
+    ago.
+
+    There is no fallback (D-79). An installation without this file is one
+    that cannot paint anything, and a second palette kept in Python for a run
+    that never happens would be a second definition of the default that
+    nothing ever checks.
+    """
+    where = f"{_THEME_PACKAGE}/{_BUILTIN_FILE}"
+    try:
+        text = (
+            resources.files(_THEME_PACKAGE)
+            .joinpath(_BUILTIN_FILE)
+            .read_text(encoding="utf-8")
+        )
+    except (OSError, ModuleNotFoundError) as missing:
+        raise ThemeError(
+            "the built-in theme is missing from this installation",
+            [f"{where}: {missing}"],
+        ) from missing
+    return strict(text, source=where)
 
 
 # --------------------------------------------------------------------------- #
