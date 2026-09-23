@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings, QStandardPaths
+from PySide6.QtCore import QSettings
 
 from immersive.app import build_application
 from immersive.ui import theme_io, theme_menu
@@ -22,27 +22,17 @@ pytestmark = pytest.mark.gui
 
 
 @pytest.fixture(autouse=True)
-def _isolated_config(
-    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[None]:
-    """Redirect everything Qt would write, before it writes any of it.
+def _application() -> Iterator[None]:
+    """A QApplication, and settings emptied between tests.
 
-    `setTestModeEnabled` moves `QStandardPaths` and `QSettings` into a
-    throwaway corner of the home directory, which is most of the job. `HOME`
-    is redirected too because "a throwaway corner of *the developer's* home
-    directory" is still the developer's home directory, and a suite that
-    makes files there is a suite that changes the machine it ran on.
+    Redirecting the home directory is `conftest.py`'s, autouse for every
+    test in the suite - building a `MainWindow` is enough to reach for it,
+    so confining the guard to this file would not have been a guard.
     """
-    home = tmp_path_factory.mktemp("home")
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
-    monkeypatch.setenv("APPDATA", str(home / "AppData"))
     build_application([])
-    QStandardPaths.setTestModeEnabled(True)
     QSettings().clear()
     yield
     QSettings().clear()
-    QStandardPaths.setTestModeEnabled(False)
 
 
 # --------------------------------------------------------------------------- #

@@ -95,6 +95,12 @@ class NoticeList(QFrame):
         while self._rows.count():
             item = self._rows.takeAt(0)
             if item is not None and (widget := item.widget()) is not None:
+                # Unparented *and* deleted. `deleteLater` alone leaves the row
+                # a child of this widget until the event loop next turns, so a
+                # theme change would find stale rows still carrying the old
+                # palette - harmless on screen, and enough to make "no widget
+                # kept an old colour" unassertable.
+                widget.setParent(None)
                 widget.deleteLater()
 
         notices = self._log.newest_first()

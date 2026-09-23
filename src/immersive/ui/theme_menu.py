@@ -9,9 +9,12 @@ headless (D-81 makes the same argument for the notice model).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QStandardPaths
+from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtWidgets import QMenu, QWidget
 
 from immersive.ui import theme_io
 
@@ -47,8 +50,14 @@ def user_theme_directory(*, create: bool = True) -> Path:
 
 
 def user_themes() -> list[Path]:
-    """Every theme file the user has put in their theme directory."""
-    return theme_io.discover(user_theme_directory())
+    """Every theme file the user has put in their theme directory.
+
+    Never creates it. Listing a directory is not a reason to make one, and
+    `discover` already treats a missing directory as "no user themes" - which
+    is the truthful answer on a first run. Creation is `run()`'s, once, on a
+    real launch.
+    """
+    return theme_io.discover(user_theme_directory(create=False))
 
 
 def remember(path: Path | None) -> None:
@@ -68,3 +77,76 @@ def remembered() -> Path | None:
     if not isinstance(stored, str) or stored == BUILTIN_SENTINEL or not stored:
         return None
     return Path(stored)
+
+
+class ThemeMenu(QMenu):
+    """`View > Theme`: the bundled theme, then whatever the user has put in.
+
+    **Repopulated every time it is opened**, which is what F-48's "discovered"
+    costs: a `.3dimtheme` dropped into the directory has to appear without a
+    restart, and the only moment that can be true without a file watcher is
+    the moment somebody asks to see the list. It is one `iterdir` of a
+    directory holding a handful of files.
+
+    A file watcher would make it appear a few seconds sooner and would be a
+    thread, a debounce and a class of bug, for a directory people edit twice
+    a year. Hot-reload is explicitly out of scope for M9.
+    """
+
+    def __init__(
+        self,
+        title: str,
+        parent: QWidget | None,
+        choose: Callable[[Path | None], None],
+    ) -> None:
+        super().__init__(title, parent)
+        self._choose = choose
+        self._current: Path | None = None
+        self._group = QActionGroup(self)
+        self._group.setExclusive(True)
+        self.aboutToShow.connect(self.repopulate)
+        self.repopulate()
+
+    def current(self) -> Path | None:
+        """Which theme is ticked. `None` is the bundled one."""
+        return self._current
+
+    def set_current(self, path: Path | None) -> None:
+        """Tick `path` without choosing it, for restoring a remembered one."""
+        self._current = path
+        self.repopulate()
+
+    def repopulate(self) -> None:
+        """Rebuild from the directory as it is right now."""
+        for action in self.actions():
+            self._group.removeAction(action)
+        self.clear()
+
+        self._entry(theme_io.builtin().name, None)
+        found = user_themes()
+        if found:
+            self.addSeparator()
+        for path in found:
+            self._entry(path.stem, path)
+
+        if not found:
+            missing = QAction("No user themes found", self)
+            missing.setEnabled(False)
+            missing.setToolTip(
+                f"Put a {theme_io.SUFFIX} file in {user_theme_directory(create=False)}"
+            )
+            self.addAction(missing)
+
+    def _entry(self, label: str, path: Path | None) -> QAction:
+        action = QAction(label, self)
+        action.setCheckable(True)
+        action.setChecked(path == self._current)
+        action.setToolTip(str(path) if path is not None else "The bundled theme")
+        action.triggered.connect(lambda _checked=False, p=path: self._picked(p))
+        self._group.addAction(action)
+        self.addAction(action)
+        return action
+
+    def _picked(self, path: Path | None) -> None:
+        self._current = path
+        self._choose(path)
