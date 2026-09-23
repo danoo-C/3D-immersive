@@ -40,12 +40,12 @@ import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
 from functools import cache
 from importlib import resources
 from pathlib import Path
 from typing import Any, Final
 
+from immersive.ui.notices import Severity
 from immersive.ui.theme import CHANNEL, Theme, ThemeError, is_colour
 
 #: The on-disk schema this build writes, and what drives forward migration on
@@ -60,24 +60,6 @@ SCHEMA_VERSION: Final = 1
 MIGRATIONS: Final[dict[int, Callable[[dict[str, Any]], dict[str, Any]]]] = {}
 
 
-class Severity(StrEnum):
-    """How loudly a problem should be shown (D-78).
-
-    The three values docs/04-ui-spec.md's *Notices* section already defines,
-    taken from there rather than invented here so that M9 phase 4 - which
-    builds `ui/widgets/notices.py` and has to colour a status line from
-    exactly this - cannot end up with a second, incompatible idea of what a
-    warning is. This enum is expected to move there when that surface exists.
-    """
-
-    #: Something the user asked for did not happen: the file yielded no theme.
-    ERROR = "error"
-    #: It happened, with a caveat: a theme with one key missing out of it.
-    WARN = "warn"
-    #: It happened.
-    INFO = "info"
-
-
 @dataclass(frozen=True)
 class ThemeProblem:
     """One thing wrong with a theme file, where it was, and how loud it is.
@@ -86,6 +68,10 @@ class ThemeProblem:
     the question the notice centre asks of everything it is handed (D-78):
     that type carries a `where` and a `message`, and its own docstring says
     it is one reason a *project* is not well-formed.
+
+    `Severity` comes from `ui.notices`, which holds no Qt for exactly this
+    reason (D-81): this module is imported by tests that never build a
+    `QApplication`, and it must stay that way.
     """
 
     where: str
