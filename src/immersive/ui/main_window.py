@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
 
 from immersive import __version__
 from immersive.ui import icons, theme
+from immersive.ui.notices import NoticeLog
+from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.placeholder import Placeholder
 
 WINDOW_TITLE = "3d immersive"
@@ -101,6 +103,9 @@ def _menu_is_open(bar: QMenuBar) -> bool:
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        #: Everything this session has reported (F-56, D-65). Built before
+        #: the status bar, which draws it.
+        self._notices = NoticeLog()
         self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(icons.app_icon())
         self.resize(1500, 950)
@@ -345,8 +350,27 @@ class MainWindow(QMainWindow):
         self._xruns.setToolTip("Audio dropouts since the stream started")
         bar.addPermanentWidget(self._xruns)
 
-        version = QLabel(f"v{__version__}")
-        version.setStyleSheet(f"color: {theme.color('text.disabled')};")
-        bar.addPermanentWidget(version)
+        # 04-ui-spec.md, *Accessibility and feel*: left to right, the master
+        # meter (M3), the notice count, the version.
+        self._notice_count = NoticeCount(self._notices)
+        bar.addPermanentWidget(self._notice_count)
+        self._notices.observe(self._notices_changed)
+
+        self._version = QLabel(f"v{__version__}")
+        self._version.setStyleSheet(f"color: {theme.color('text.disabled')};")
+        bar.addPermanentWidget(self._version)
 
         self.setStatusBar(bar)
+
+    def notices(self) -> NoticeLog:
+        """This session's notice log, for anything that needs to report.
+
+        M2's missing media is the next caller after the theme picker (F-3).
+        """
+        return self._notices
+
+    def _notices_changed(self) -> None:
+        """The status line carries the newest; the count carries the rest."""
+        if (latest := self._notices.latest()) is not None:
+            self.statusBar().showMessage(latest.message)
+        self._notice_count.refresh()
