@@ -1,7 +1,7 @@
 # M9 · Phase 4 — Discovery and switching
 
-**Status:** not started · **Plan:** not written yet —
-`plans/phase_4_discovery_and_switching.md`
+**Status:** in progress · **Plan:**
+[plans/phase_4_discovery_and_switching.md](plans/phase_4_discovery_and_switching.md)
 
 ## Goal
 
