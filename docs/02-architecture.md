@@ -78,6 +78,7 @@ src/immersive/
   ui/
     main_window.py       menus, toolbar, splitter layout
     theme.py             palette + qss
+    theme_io.py          .3dimtheme parse, merge, report (D-77, M9)
     explorer/            media pool tree (top) + params pane (bottom)
     timeline/            ruler, channel headers, clip lanes, playhead
     spatial/             ortho_view.py (top & front), view3d.py (read-only)

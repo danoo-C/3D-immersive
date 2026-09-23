@@ -266,6 +266,22 @@ matters — it is *still* valid after a later milestone adds tokens for widgets
 that did not exist when it was written. A theme that replaced the palette
 wholesale would break on every release that added a colour.
 
+**The vocabulary is closed**, which is the other half of that rule and is easy
+to miss. A theme file can give a new value to a token the built-in already
+defines; it cannot introduce one. A `tokens` entry the built-in does not know
+is an unknown key, and the table below says unknown keys are ignored and
+reported. That is what makes merging safe in both directions — a name that
+means nothing today cannot quietly come to mean something else in the release
+that adds it.
+
+It has one consequence worth stating plainly, because it produces **two
+reports for one mistake**. A file that defines `"my.purple"` and then writes
+`"playhead": "my.purple"` in a group has its token dropped as unknown; the
+group value then names a token that does not exist, so that key falls back to
+the default and is reported a second time. Both messages are true and each
+names what it saw. The first one says the vocabulary is fixed, which is the
+sentence that explains the second.
+
 ### When a theme is wrong
 
 Never fatally (F-47, D-48). A theme file is cosmetic, and a typo in one must
@@ -275,8 +291,10 @@ not stand between someone and their project.
 |---|---|
 | File missing or unreadable | Default theme, reported |
 | Malformed JSON | Default theme, reported with the parse error |
+| Valid JSON, but not an object | Default theme, reported |
 | Unknown token or group key | Ignored, reported — it is probably a newer theme |
 | Invalid colour value | That key falls back to the default, reported |
+| `schema_version` absent, or not a whole number | Default theme, reported. The version is read before anything else, so there is nothing to read it as |
 | `schema_version` newer than we know | Load what we recognise, report the rest |
 
 "Reported" means visible in the UI, not a line on stderr nobody reads.
