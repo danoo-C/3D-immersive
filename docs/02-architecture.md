@@ -83,11 +83,15 @@ src/immersive/
     spatial/             ortho_view.py (top & front), view3d.py (read-only)
     keyframes/           curve editor panel
     widgets/             shared small widgets
+      notices.py         the status-bar line, count and list (F-56, M9)
+      meter.py           the master output meter (F-54, M3)
   assets/
+    app.qss              the stylesheet, substituted from a theme (M9)
     hrtf/                bundled default SOFA set
     icons/
 tests/
 docs/
+spikes/                  throwaway scripts. Never imported, never shipped.
 ```
 
 ## Imports and packaging

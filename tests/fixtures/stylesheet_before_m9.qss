@@ -1,0 +1,120 @@
+
+/* One stack, resolved per platform by Qt: Segoe UI on Windows, SF on macOS,
+   Ubuntu or Noto on Linux. Naming a single family gets a fallback nobody
+   chose on the two platforms that do not have it. */
+QWidget {
+    background-color: #1F1F1F;
+    color: #CCCCCC;
+    font-family: "Segoe UI", "SF Pro Text", "Inter", "Ubuntu", "Noto Sans",
+                 "DejaVu Sans", sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow, QMainWindow > QWidget { background-color: #181818; }
+
+QMenuBar {
+    background-color: #252526;
+    border-bottom: 1px solid #3C3C3C;
+    padding: 2px 4px;
+}
+QMenuBar::item { padding: 5px 10px; border-radius: 4px; }
+QMenuBar::item:selected { background-color: #2D2D2D; }
+
+QMenu {
+    background-color: #252526;
+    border: 1px solid #3C3C3C;
+    padding: 4px;
+}
+QMenu::item { padding: 6px 24px 6px 20px; border-radius: 4px; }
+QMenu::item:selected { background-color: #7E3FF2; color: #CCCCCC; }
+QMenu::item:disabled { color: #6E6E6E; }
+QMenu::separator { height: 1px; background: #3C3C3C; margin: 4px 8px; }
+
+QToolBar {
+    background-color: #252526;
+    border-bottom: 1px solid #3C3C3C;
+    padding: 4px 6px;
+    spacing: 4px;
+}
+QToolBar::separator { width: 1px; background: #3C3C3C; margin: 4px 6px; }
+
+QToolButton, QPushButton {
+    background-color: #2D2D2D;
+    border: 1px solid #3C3C3C;
+    border-radius: 5px;
+    padding: 5px 10px;
+    color: #CCCCCC;
+}
+QToolButton:hover, QPushButton:hover { border-color: #C77DFF; }
+QToolButton:pressed, QPushButton:pressed { background-color: #7E3FF2; }
+QToolButton:checked {
+    background-color: #7E3FF2;
+    border-color: #A855F7;
+}
+QToolButton:disabled, QPushButton:disabled {
+    color: #6E6E6E;
+    border-color: #2D2D2D;
+}
+
+/* Tabs are flat and marked by an accent rule on the selected one, rather than
+   drawn as raised folders - the workspace has two tabs (D-49), and chrome
+   heavy enough to notice would be chrome competing with the scene. */
+QTabWidget::pane { border: none; background: #1F1F1F; }
+QTabBar { background: #181818; }
+QTabBar::tab {
+    background: #181818;
+    color: #9D9D9D;
+    border: none;
+    border-top: 2px solid transparent;
+    padding: 7px 18px 8px 18px;
+}
+QTabBar::tab:hover:!selected { background: #252526; color: #CCCCCC; }
+QTabBar::tab:selected {
+    background: #1F1F1F;
+    color: #CCCCCC;
+    border-top: 2px solid #A855F7;
+}
+
+/* 04-ui-spec.md lists the focus ring among the accent's jobs. Without a rule
+   here it falls back to whatever Fusion draws, which is neither purple nor
+   consistent between platforms - and "no information by colour alone" cuts
+   both ways: a focus indicator nobody can see fails keyboard users first.
+
+   The tab bar is deliberately left out: its selected tab already carries an
+   accent rule, and a box around it on focus puts two indicators on one widget
+   and undoes the flatness the block above is for. */
+*:focus { outline: none; }
+QToolButton:focus, QPushButton:focus { border: 1px solid #A855F7; }
+QMenuBar::item:focus { background-color: #2D2D2D; }
+
+QSplitter::handle { background-color: #3C3C3C; }
+QSplitter::handle:horizontal { width: 1px; }
+QSplitter::handle:vertical { height: 1px; }
+QSplitter::handle:hover { background-color: #A855F7; }
+
+QStatusBar {
+    background-color: #252526;
+    border-top: 1px solid #3C3C3C;
+    color: #9D9D9D;
+}
+QStatusBar::item { border: none; }
+
+QLabel { background: transparent; }
+
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #1F1F1F;
+    border: none;
+}
+QScrollBar:vertical { width: 10px; }
+QScrollBar:horizontal { height: 10px; }
+QScrollBar::handle { background: #2D2D2D; border-radius: 5px; min-height: 24px; }
+QScrollBar::handle:hover { background: #7E3FF2; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+
+QToolTip {
+    background-color: #252526;
+    color: #CCCCCC;
+    border: 1px solid #7E3FF2;
+    padding: 4px 6px;
+}

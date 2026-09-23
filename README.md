@@ -32,11 +32,24 @@ Start with [`docs/00-overview.md`](docs/00-overview.md), or
 [`docs/06-roadmap.md`](docs/06-roadmap.md) for the build order.
 
 **Decided since this file was written:** Python (PySide6 + numpy + sounddevice),
-cross-platform, realtime binaural preview, full 3D including elevation. The
-workspace is two editable orthographic views (top X/Y and front X/Z) plus a
-read-only 3D view. A channel is a track holding many clips. Keyframes are pinned
-to timeline time, with Shift+drag to bring them along. Rationale for each is in
+cross-platform, realtime binaural preview, full 3D including elevation. A
+channel is a track holding many clips. Keyframes are pinned to timeline time,
+with Shift+drag to bring them along. Rationale for each is in
 [`docs/01-requirements.md`](docs/01-requirements.md).
+
+Two things above have since been **overruled**, and are left in place because
+this file is the record of what was originally wanted:
+
+- *"dark with a spice of purple"* — the surfaces are now VS Code's neutral
+  greys and only the accent stays purple. The purple-black original read as a
+  toy, and a purple playhead is more visible on grey than on purple-black
+  (D-44).
+- *"the rest is the main workspace occupying the middle"* — the workspace is
+  two editable orthographic views (top X/Y and front X/Z) plus a read-only 3D
+  view, and they are arranged as **two tabs** rather than side by side: three
+  panes each took a third of the width, too narrow to place a source precisely
+  in, and one of those thirds went to a view that cannot be dragged in at all
+  (D-5, D-49).
 
 ⚠️ The "how the explorer looks" section above is **truncated mid-sentence**. The
 missing text was never recovered; the pane has been specced as a

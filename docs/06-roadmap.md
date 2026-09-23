@@ -1,7 +1,18 @@
 # 06 — Roadmap
 
-Nine milestones. Each ends at something you can actually run and judge, not at
-an internal refactor. The ordering is driven by one principle: **de-risk the
+Ten milestones. Each ends at something you can actually run and judge, not at
+an internal refactor.
+
+**The file order is the build order; the numbers are identifiers, not
+positions.** M9 is built third, straight after M1, and sits below it here.
+It is numbered 9 because renumbering M2-M8 to make room would invalidate every
+reference to them in every document, commit message and code comment - see
+[doc-system.md](doc-system.md) §3.
+
+This file stays at the milestone level and is the index of truth for milestone
+status. The phase-by-phase breakdown of a milestone lives in its own directory
+— `docs/m1_core_model/` and so on — created when that milestone starts. See
+[09-workflow.md](09-workflow.md). The ordering is driven by one principle: **de-risk the
 audio engine early**, because it is the only part that could invalidate the
 choice of Python.
 
@@ -10,11 +21,12 @@ choice of Python.
 ## M0 — Scaffolding ✅ *complete*
 *Nothing audible.*
 
-- `pyproject.toml` (hatchling), `uv` environment, pinned dependencies
+- `pyproject.toml` (hatchling), `uv` environment, dependency floors with
+  reasons plus a committed `uv.lock` for reproducibility (D-67)
 - `pip install -e ".[dev]"`; absolute imports enforced by `ruff` `TID252`
 - Package skeleton per [02-architecture.md](02-architecture.md)
 - `ruff` + `mypy` + `pytest` configured, CI running them on Linux/macOS/Windows
-- `theme.py` with the palette, and a main window with the three splitters and
+- `theme.py` with the palette, and a main window with the splitter layout and
   empty labelled panels
 
 **Done when:** `python -m immersive` shows the dark, empty, correctly-proportioned shell.
@@ -23,14 +35,28 @@ choice of Python.
 relative imports), the full package skeleton, `ruff` + `mypy` + `pytest`
 configured and passing, GitHub Actions across Linux/macOS/Windows on 3.11 and
 3.13, `theme.py` holding the palette, and a `MainWindow` with all seven regions
-as labelled placeholders. 26 tests pass, including the import-graph test —
+as labelled placeholders — since revised: the workspace became two tabs (D-49),
+the transport grew an SVG icon set (D-50) and the palette moved to VS Code's
+greys (D-44). The suite passes, and covers the palette's contrast rules, the
+icon set, the shell's structure, the packaged distribution, the documentation
+invariants from [doc-system.md](doc-system.md) §7, and the import-graph test —
 which carries its own test proving the detector is not passing vacuously while
-`core/` is still empty.
+`core/` is still empty. Deliberately no test count here: it is exactly the
+kind of number §2 of that document warns about.
+
+**Corrected after a gap review.** Three claims above were not true when they
+were written: dependencies were floors with no lock file (now D-67 and a
+committed `uv.lock`), `pyproject.toml` declared MIT with no `LICENSE` in the
+tree, and CI installed the package editable — which is the one path that does
+*not* exercise the wheel, so D-27's stated benefit was not being collected.
+CI now builds the wheel and installs it into a clean environment.
 
 ---
 
-## S0 — Listening spike (throwaway)
+## S0 — Listening spike (throwaway) ✅ *complete*
 *Not a milestone. A script whose only job is to be listened to.*
+
+Phases: [`docs/s0_listening_spike/`](s0_listening_spike/README.md)
 
 Nothing in the plan puts a moving source in anyone's ears until M4, three
 milestones away. That is a long time to be building on an unheard assumption,
@@ -59,25 +85,74 @@ device, so it runs here on WSL and writes WAV files to listen to on headphones.
 | `orbit_noise.wav` | pink noise, 100 ms on/off bursts, orbiting 1 rev/s at ear level, 1.5 m | localisation is convincing at all |
 | `orbit_tone.wav` | sustained 440 Hz sawtooth, same orbit | **the zipper test** — must be smooth |
 | `orbit_tone_nocrossfade.wav` | same, crossfade disabled | the A/B that shows what D-37 buys |
-| `front_back_clicks.wav` | click train sweeping front → overhead → behind | elevation and front/back work |
+| `front_back_bursts.wav` | pink-noise bursts sweeping front → overhead → behind | elevation and front/back work |
 
 It also prints per-block processing time, mean and p99 — an early data point
 for the M4 benchmark.
 
-**Constraints:** under ~300 lines. numpy/scipy plus `sofar` and `soxr`, nothing
-else. Not generalised, not tidied, not moved into `src/` afterwards. If it
-turns out to be useful twice, it gets rewritten properly inside the package.
+**Constraints:** numpy/scipy plus `sofar` and `soxr`, nothing else. Not
+generalised, not tidied, never imported by the package, never moved into
+`src/`. If it turns out to be useful twice, it gets rewritten properly inside
+the package. One file plus its checks, readable top to bottom in one sitting,
+because the spike's whole job is to be *trusted* by someone deciding whether
+the design is sound.
+
+**There was a line budget here and it has been removed**, which is worth
+explaining rather than quietly dropping. It was "~300 lines", raised to "~450"
+during phase 2, and phase 2 finished at 506 with two phases still to go. Both
+numbers were estimates of *code* against a budget measured in *total lines* —
+the file is 49% code, 30% comment and docstring, 21% blank — and a third
+estimate from the same source would be worth no more than the first two.
+
+What the count was standing in for is the list above, and every item on that
+list is checkable in a way a line count is not. The prose it was implicitly
+penalising is load-bearing: the reason the cepstral `nfft` is 8192 and not the
+textbook 1024 is four lines of measured table in a comment, and deleting it to
+save lines would delete the finding.
+
+Two phases of evidence say the honest total is somewhere near 750. If the
+script ever reads like a library rather than a script, that is the thing to
+act on, and it is visible without counting anything.
 
 **Done when:** the four files exist, they have been listened to on headphones,
-and a default SOFA set has been chosen. Feeds QA-30 and M4.
+and the set the spike ran on is recorded — by name, version and licence — as
+the leading candidate for the bundled default. Choosing that default stays
+QA-30's, at M4. Feeds QA-30 and M4.
+
+**Delivered, and it answered the question it was built to ask.** D-37 was
+decided by ear: an uncrossfaded fast orbit was described, unprompted, as
+*"horrible, like a dial up tone under the sound"* against *"a clean tone"*
+crossfaded. The per-block filter crossfade is necessary and it works, and
+three milestones of design now rest on something heard rather than argued.
+`orbit_noise.wav` was *"so realistic"*, the zipper test found no buzz, and the
+front/back sweep was followable with eyes closed. Full verdicts in
+[phase 5's Notes](s0_listening_spike/phase_5_listening.md).
+
+The spike also produced the numbers M4 inherits: `max_itd_samples` 39 and so a
+convolution `nfft` of 1024, matching this document's cost estimate; 0.20 ms
+mean and 0.44 ms p99 per block for one source against a 10.7 ms budget, with
+the direction lookup in the loop. N-1's thirty-two sources remain M4's.
+
+Two findings changed the specification. **D-70** — the crossfade's benefit
+shrinks as a source speeds up, 33.7 dB at 1 rev/s down to 8.6 dB at 8 — and
+with it a correction in place to [05](05-audio-engine.md), whose claim that an
+uncrossfaded held tone is a *clearly* audible buzz is too strong at the slow
+end. And the front/back stimulus was replaced mid-phase: single-sample clicks
+could not carry their own test, and 40 ms pink-noise bursts on the identical
+trajectory could. The table above names the file that shipped.
+
+Per its own terms the spike is **not** promoted: nothing in it moves into
+`src/`. M4 rewrites the pipeline properly in `audio/hrtf/`, with the phase
+Notes as the record of what was already learned the hard way.
 
 ---
 
-## M1 — Core model, headless
+## M1 — Core model, headless ✅ *complete*
 *No UI work at all.*
 
-- Pin `numpy>=2.0` in `pyproject.toml` — a hard floor, not a preference
-  (D-38); the realtime zero-allocation rule depends on it
+- ✅ Pin `numpy>=2.0` in `pyproject.toml` — a hard floor, not a preference
+  (D-38); the realtime zero-allocation rule depends on it. Done early, during
+  S0, because the spike exercises the same `rfft`/`irfft` path
 - `model.py`, `curves.py`, `time.py` dataclasses
 - Curve evaluation: linear, hold, ease with bezier solve
 - Snapping and bars:beats ↔ samples conversion
@@ -85,9 +160,93 @@ and a default SOFA set has been chosen. Feeds QA-30 and M4.
 - `project_io.py` save/load with `schema_version` and a migration hook
 - The import-graph test that forbids Qt, `sounddevice`, `immersive.ui` and
   `immersive.audio` inside `core/` (sketch in [02-architecture.md](02-architecture.md))
+  — ✅ exists from M0; phase 1 is the first time it has anything to bite on
+
+Phases: [`docs/m1_core_model/`](m1_core_model/README.md)
 
 **Done when:** a project can be built in code, edited, undone, saved, reloaded
 and compared equal — all in pytest, with no window open.
+
+**Delivered, and the acceptance is one test.** `model.py`, `curves.py`,
+`time.py`, `commands.py`, `edits.py` and `core/io/project_io.py`, in five
+phases: the entity spine and its equality, curve evaluation with the bezier
+solve, bars:beats and snapping, the undo stack and the first seven commands,
+and the `.3dim` file. A project is built in code, edited through the stack,
+undone, redone, saved, reloaded and compared equal — with no window open and
+no audio device, which is N-5 and which is why the whole milestone was
+verifiable on WSL.
+
+Three decisions came out of the file format: media paths are absolute in
+memory and relative on disk (D-71), missing media is a field excluded from
+equality (D-72), and a key the schema does not know is dropped rather than
+preserved or refused (D-73). The `.3dim` sorts its keys, coerces its numbers,
+writes no timestamp (D-60), records the build that wrote it, and is written
+through a temporary file so an interrupted save cannot truncate the project
+that was already there.
+
+**The phase found `03`'s own worked example of the file format was not
+loadable** — the backing mix's clip referenced a media id that was not in its
+pool. It is corrected, and a test now lifts that listing out of the document
+and opens it on every run. Every other test in the phase round-trips the
+module against itself and none of them could have noticed.
+
+Two lessons that M9 inherits with `.3dimtheme`, and that the phase Notes
+argue at length: a round trip proves the reader and the writer *agree*, not
+that either is right, so every assertion pinning a format has to read the
+file; and a cross-platform behaviour asserted only end to end is asserted on
+one platform, because CI's only leg is Linux. Thirty-eight mutations were
+named across the phase and four survived their first run — all four real, all
+four now caught.
+
+---
+
+## M9 — Theming
+*Built after M1. Numbered last, built third — see the note at the top.*
+
+Colour is currently thirteen constants in `theme.py` and a QSS template. That
+is enough for a shell and not enough for an application: it cannot be changed
+without editing source, and by M6 there will be clips, waveforms, keyframes and
+three spatial views all reaching for colours that no file names.
+
+- A `Theme` object with `tokens` and `groups`, replacing the flat constants.
+  No widget anywhere names a hex (F-44)
+- The `.3dimtheme` format: versioned JSON, parsed, validated, merged over the
+  built-in default (F-45, F-46, D-45, D-46)
+- The built-in theme moved out into a bundled `.3dimtheme`, loaded through the
+  same path as a user's (D-47), via `importlib.resources` (D-30)
+- Discovery of the user theme directory, and switching without a restart
+  (F-48) from a `View > Theme` menu — the **Preferences** UI stays at M8
+- **The notice centre** (F-56, D-65): the status-bar line, the unread count
+  and the list behind it, specified in the *Notices* section of
+  [04-ui-spec.md](04-ui-spec.md). It lands here because this is the first
+  milestone that has something to report and a requirement — F-47 — that says
+  it must be visible in the UI. M2's missing media (F-3) is the next caller,
+  and M2 comes after this one
+- Failure handling: missing, malformed, unknown keys, bad colours, newer
+  schema — all non-fatal and all reported through that surface (F-47, D-48)
+- A contrast report for a loaded theme, advisory for user themes and enforced
+  by test for the built-in
+
+Full specification in the *Theming* section of
+[04-ui-spec.md](04-ui-spec.md).
+
+**Why here and not at M8:** every milestone after this one paints new widgets.
+If the vocabulary does not exist yet, each of them invents its own colours and
+M8 becomes an archaeology exercise across six milestones of hardcoded hexes.
+Doing it after M1 costs one milestone now and saves that.
+
+**Why not before M1:** the model comes first, and the two phases that need
+widgets to point at would have nothing to name.
+
+⚠️ M9 does **not** deliver a complete token vocabulary — it cannot. The
+widgets for M3-M6 do not exist yet. It delivers the *system*, and every
+milestone from here on adds its own groups to `04` as it builds them. That
+obligation is written into the spec, because the failure mode of a theme
+system is a widget quietly hardcoding a colour two milestones later.
+
+**Done when:** the application's entire palette lives in a bundled
+`.3dimtheme`, a user theme file that changes only the accent visibly works,
+and a deliberately broken theme file is reported without preventing startup.
 
 ---
 
@@ -109,8 +268,17 @@ a sample.
 - `QGraphicsView` timeline with ruler, grid, playhead, loop region
 - Drop from pool → clip; move, trim, split, duplicate, delete
 - Snap with global setting, per-channel override, and `Alt` bypass
-- Transport and keyboard shortcuts
+- Selection: multi-select across channels, rubber band, and the one-kind rule
+  (F-51, D-57)
+- Cut / copy / paste of clips within and between channels (F-50, D-58)
+- Transport and keyboard shortcuts, including the playhead readout (F-52)
 - **Non-spatial** playback: scheduler + clip reads + gains → straight stereo
+- The master meter and its clip indicator (F-54) — the first milestone that
+  produces a level at all, and the last comfortable one to add it before M4
+  starts summing 32 sources
+- `--device` and `--block` command-line flags, and the 48 kHz stream rule
+  (F-55, D-63). Preferences promotes them at M8; the gap between the first
+  sound and M8 is otherwise five milestones with no way to pick a device
 
 **Done when:** you can build an arrangement and hear it play back flat. This
 validates the whole realtime plumbing — command ring, snapshot swap, xrun
@@ -137,6 +305,9 @@ counting — *before* any HRTF complexity is layered on top.
   measured with the xrun counter **while the UI is actively repainting** —
   an idle UI will show no difference and prove nothing
 - The bypass path: stereo-preserving reads, pan law, summing after the iFFT
+- The master bus: gain, and the fixed-design limiter with its lookahead
+  compensated internally (D-54) — the compensation is what keeps M7's
+  stems-sum test honest, since stems skip the limiter (D-41)
 - Implicit 32-sample edge fades in the scheduler (D-42)
 - The zero-allocation test on `process()`
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
@@ -148,10 +319,11 @@ with the port seam still tiny, rather than after the UI is built on top.
 ---
 
 ## M5 — Spatial workspace
-- Top (X/Y) and front (X/Z) ortho views: head glyph, rings, channel icons
+- Top (X/Y) and front (X/Z) ortho views, sharing the workspace's first tab
+  (D-49): head glyph, rings, channel icons
 - Drag to position, live during playback
 - Motion trails and keyframe diamonds drawn from the curves
-- Read-only isometric 3D view via `QPainter`
+- Read-only isometric 3D view via `QPainter`, in the workspace's second tab
 - Distance-as-radius, gain-as-opacity, mute/solo states
 - The bypass strip under the top view, and bypassed channels leaving the canvases
 - Position spinboxes in the parameters pane, two-way bound
@@ -177,7 +349,10 @@ trail, the curve and the sound agree.
 
 ## M7 — Render
 - Offline render reusing `Engine.process`, no device
-- Render dialog: range, block size, stems toggle, output path
+- Render dialog: range, block size, stems toggle, output path. The range is
+  the whole project (derived, D-53), the loop region, or typed (F-53)
+- Seeded TPDF dither on the 24-bit conversion (D-56) — unseeded would make
+  F-36's determinism test fail as a mystery rather than as a decision
 - Progress + cancel on a worker thread
 - 24-bit WAV writing
 - Per-channel stems, rendered **pre-limiter** (D-41). The render dialog says
@@ -192,10 +367,16 @@ trail, the curve and the sound agree.
 ---
 
 ## M8 — Polish & ship
-- Preferences: audio device, block size, HRTF set, theme details
+- Preferences: audio device, block size, HRTF set, and the theme picker
+  promoted out of the `View` menu (the theme *system* is M9). The device and
+  block flags from M3 become fields here (F-55)
 - Session persistence: window geometry, splitters, recent projects
-- Missing-media relink dialog
-- Error surfaces: xrun indicator, load failures, clipping warning
+- Autosave and crash recovery: the sidecar file, and the offer on next launch
+  (F-49, D-64)
+- Missing-media relink dialog, hung off the notice built at M9
+- Error surfaces **promoted, not invented**: the notice centre is M9 (D-65);
+  M8 adds the actions that hang off individual notices and the first-run
+  polish around them
 - Empty states and a first-run sample project
 - `PyInstaller` bundles for Windows, macOS and Linux
 - README with install instructions per platform

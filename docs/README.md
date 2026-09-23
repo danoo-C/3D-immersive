@@ -1,5 +1,8 @@
 # Documentation
 
+How these documents are organised, numbered and changed is specified in
+[doc-system.md](doc-system.md) — read that before adding or restructuring one.
+
 | | |
 |---|---|
 | [00 — Overview](00-overview.md) | What the app is, the stack, what is in and out of scope |
@@ -11,6 +14,22 @@
 | [06 — Roadmap](06-roadmap.md) | Nine milestones and the risk register |
 | [07 — QA Archive](07-qa-archive.md) | Closed: every question asked, the answer given, and where it landed |
 | [08 — Environment](08-environment.md) | venv, `launch.py`, the `installer.py` spec, and why not PyPy |
+| [09 — Workflow](09-workflow.md) | How a milestone gets built: per-milestone directories, phases and plans |
+
+Two documents sit outside the numbered set because they are meta rather than
+product: [doc-system.md](doc-system.md), which governs the documentation
+itself, and [09-workflow.md](09-workflow.md), which governs how work is
+sequenced.
+
+Alongside these, each milestone under way has its own directory — holding one
+document per build phase and a `plans/` subdirectory beside them.
+[09](09-workflow.md) defines that system; the directories are created one
+milestone at a time, as work reaches them. Complete:
+[`s0_listening_spike/`](s0_listening_spike/README.md) and
+[`m1_core_model/`](m1_core_model/README.md). Next:
+[`m9_theming/`](m9_theming/README.md), whose phase documents are written and
+whose phases have not started — M9 is built third, after M1, for the reason
+[06](06-roadmap.md) gives.
 
 The original hand-written spec is in [`../README.md`](../README.md) and is kept
 as the source of intent; where it and these documents disagree, these win —
@@ -20,9 +39,11 @@ but the disagreement should be recorded in the decision log.
 
 New to the project: 00 → 01 → 06.
 Setting up to run it: 08.
+About to build something: 09, then the current milestone's directory.
 Implementing: 02 → 03 → the document for the area you're in.
 Deciding something: check the decision log in 01 before re-opening it, and
 [07](07-qa-archive.md) for why it went that way.
+Writing or restructuring a document: [doc-system.md](doc-system.md).
 
 There are no open questions. Section C of [07](07-qa-archive.md) lists the
 assumptions that were accepted rather than answered directly — those are the

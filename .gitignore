@@ -84,6 +84,9 @@ desktop.ini
 # See docs/07-qa-archive.md QA-30.
 src/immersive/assets/hrtf/*.sofa
 
+# S0's spike downloads a SOFA set to work on; see docs/s0_listening_spike/
+/spikes/data/
+
 # Rendered output and scratch projects
 /render/
 /out/

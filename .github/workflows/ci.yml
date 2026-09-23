@@ -60,3 +60,57 @@ jobs:
 
       - name: Test
         run: pytest
+
+  # D-27's whole rationale is that packaging mistakes surface now rather than
+  # at release. `pip install -e .` does not exercise the wheel, so on its own
+  # it cannot deliver that: a missing __init__.py, undeclared package data or
+  # a module left out of the build all stay invisible. This job installs the
+  # built artifact into a clean environment instead.
+  package:
+    name: wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/python -m pip install --upgrade pip
+          /tmp/wheeltest/bin/python -m pip install dist/*.whl
+
+      # The things a wheel silently loses. Package data is the one 02 calls
+      # out by name: the icons are declared, the SOFA sets need the explicit
+      # `artifacts` override, and neither is verified by importing from source.
+      - name: Verify the installed distribution
+        run: |
+          /tmp/wheeltest/bin/python - <<'PY'
+          from importlib.metadata import version
+          from importlib.resources import files
+
+          import immersive
+
+          assert version("immersive") == immersive.__version__
+
+          icons = sorted(
+              p.name for p in files("immersive.assets.icons").iterdir()
+              if p.name.endswith(".svg")
+          )
+          assert icons, "no icons in the wheel: package data was not declared"
+          print(len(icons), "icons:", ", ".join(icons))
+
+          assert (files("immersive.assets.hrtf")).is_dir()
+          print("ok")
+          PY
+
+      - name: Entry point runs
+        run: /tmp/wheeltest/bin/python -m immersive --version

@@ -30,7 +30,7 @@ picked.
 
 **Rationale for the recommendation:** UI-heavy app; numpy gives C-speed DSP;
 export is offline so quality is never GIL-limited; the audio callback is a
-single clean seam to port later. C++ only wins for plugin export (see QA-43).
+single clean seam to port later. C++ only wins for plugin export (see QA-27).
 
 → D-1, [02-architecture.md](02-architecture.md)
 
@@ -149,6 +149,21 @@ Offered as "object in one line and I'll change it". None were objected to.
 | QA-26 | ☑️ | Tests on the engine/timeline core, none on UI | N-5, M1 |
 | QA-27 | ☑️ | No VST hosting or plugin export, ever | D-18 |
 | QA-28 | ☑️ | Dark palette with purple accent, exact hexes proposed | [04-ui-spec.md](04-ui-spec.md) |
+
+> **QA-26 partly superseded, after this archive closed.** "None on UI" did not
+> survive contact with M0. There are UI tests today — the shell's structure,
+> the icon set, the palette's contrast ratios, the stylesheet parsing at all —
+> and `pytest-qt` is a declared dependency. They run headless under
+> `QT_QPA_PLATFORM=offscreen`, so N-5 is untouched: the claim that mattered
+> was that `core/` needs no display, not that nothing else may be tested.
+>
+> What QA-26 was really answering is still right, and is worth keeping in
+> those words: no test drives a widget to check that a drag *feels* right.
+> The UI tests assert structure and rules the specification states — that a
+> disabled action explains itself, that redo is `Ctrl+Shift+Z` — which are
+> exactly the claims a document can make and a human reviewer will not
+> re-check every release. Recorded here rather than left as drift, per
+> [doc-system.md](doc-system.md) §3.
 
 ---
 

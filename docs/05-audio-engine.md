@@ -235,6 +235,57 @@ the bypass feature when it is really a property of splitting a source across
 two paths. If it proves annoying, the fix is a per-channel delay in samples,
 which is a small addition — not a redesign.
 
+## The master bus
+
+Everything — convolved sources after the inverse FFT, bypassed channels summed
+in beside them — lands on one stereo bus, which applies master gain and then
+the limiter.
+
+### The limiter
+
+One fixed design, not a configurable one (D-54). `master.limiter_on` stays a
+boolean, and there are no controls to set:
+
+| | |
+|---|---|
+| Type | brickwall peak limiter |
+| Ceiling | −0.3 dBFS |
+| Lookahead | 1.5 ms (72 samples at 48 kHz), **internally compensated** |
+| Attack | the lookahead |
+| Release | 50 ms, smoothed |
+| Knee | 2 dB soft |
+
+This is not a mastering tool, and a limiter with six controls is six more
+things to get wrong in a mix whose point is somewhere else entirely. The
+ceiling sits below 0 dBFS because an inter-sample peak in a 24-bit file that
+measures exactly 0 will still clip somebody's converter.
+
+⚠️ **The lookahead is compensated inside the limiter**, and that is
+load-bearing rather than tidy. Lookahead is what separates a limiter from a
+clipper — it needs to see the peak before deciding — but it delays whatever
+passes through it. Stems skip the limiter (D-41), so an *uncompensated*
+lookahead would leave the master 72 samples later than the stems that are
+supposed to sum to it, and M7's exactness test would fail against a constant
+offset nobody had written down. Compensating it also keeps preview and render
+time-aligned, which is the property the whole offline-reuses-`process` design
+exists for.
+
+Nothing in it is stochastic, so F-36's determinism survives it. It is the only
+nonlinear block in the graph, which makes it the one place where "deterministic
+per machine and build" (D-40) is worth re-checking after a numpy upgrade.
+
+### Metering
+
+The bus also publishes a peak per channel pair, with a decay, for the master
+meter (F-54). It is read by the UI at frame rate and written by the audio
+thread as two floats — no history, no allocation, no lock: a stale read is one
+frame of a meter, which nobody can see.
+
+Per-channel meters are deliberately absent (D-55). What the master meter is
+*for* is the thing that is genuinely hard to predict here: 32 sources summing
+in the frequency domain, each already scaled by a distance attenuation that
+moves while it plays. A fader position does not tell you what reaches the bus.
+
 ## Parameter smoothing
 
 Positions are evaluated once per block, so without care every parameter in the
@@ -259,8 +310,36 @@ switch, 94 times per second.
 It is not a corner case. A source orbiting once per second moves about 4° per
 block, which is roughly a one-sample ITD step per block on the far ear. On
 transient material you may not notice; on sustained material — pads, strings, a
-held tone — it is a clearly audible buzz at the block rate. A threshold on
+held tone — it is an audible buzz at the block rate. A threshold on
 "large angular jumps" does not catch it, because no individual step is large.
+
+⚠️ **How audible depends on how fast the source moves, and S0 measured it.**
+"Clearly audible" was this paragraph's original wording and it is too strong at
+the bottom of the range. Block-rate sidebands on an orbiting 440 Hz sawtooth,
+crossfaded versus not:
+
+| orbit | ° per block | crossfaded | none | what the crossfade buys |
+|---|---|---|---|---|
+| 1 rev/s | 3.8 | −69.6 dB | −35.9 dB | 33.7 dB |
+| 2 rev/s | 7.7 | −62.1 dB | −31.3 dB | 30.8 dB |
+| 4 rev/s | 15.4 | −46.6 dB | −29.0 dB | 17.5 dB |
+| 8 rev/s | 30.7 | −39.0 dB | −30.4 dB | 8.6 dB |
+
+At 1 rev/s the uncrossfaded artefact sits at −35.9 dB and a listener described
+that render as realistic, with no buzz — it took an A/B to hear a difference at
+all. At 4 rev/s the same listener called the uncrossfaded file *"horrible, like
+a dial-up tone under the sound"*, unprompted. So the buzz is real and the
+crossfade is necessary; it simply does not announce itself until the source
+moves at a fair pace.
+
+Two consequences, both recorded as D-70. The crossfade's *benefit* shrinks as
+the source speeds up — the uncrossfaded artefact barely moves while the
+crossfaded render degrades, because a linear blend approximates a smooth
+trajectory badly once the step is large — so very fast motion keeps some
+artefact whatever the crossfade does, and the fix if it ever matters is
+sub-block filter updates rather than a longer fade. And the *unconditional*
+rule below is vindicated rather than softened: the quiet end of the range is
+precisely where a "large jump" threshold would decline to fire.
 
 So the crossfade is **unconditional: every block, every source** (D-37).
 
@@ -315,6 +394,29 @@ explicit fade replaces it rather than adding to it. See the Rules in
 Seeking resets cursors, zeroes the overlap-add tails, and sets
 `H_prev = H_cur`.
 
+## The output stream
+
+The stream is always opened at **48 kHz** (D-11, D-63). There is no output
+resampler: putting a second rate converter inside the callback to paper over a
+device mismatch costs latency and quality to hide something that is better
+reported.
+
+If a backend refuses 48 kHz, that is a reported failure (F-56), not a silent
+fallback, and the device list marks which devices will accept it. In practice
+the shared-mode backends — WASAPI, CoreAudio, PipeWire — accept 48 kHz and
+convert behind their own mixer, so this bites mainly on exclusive-mode and
+fixed-rate hardware, which is exactly where the user wants to know.
+
+Device and block size are selectable (F-55). The preferences UI for them is
+M8, and the first audio is M2, so in between they are command-line flags —
+`--device` and `--block` — rather than five milestones in which a wrong
+default device makes the application look broken with no way out.
+
+A device that disappears mid-session (headphones unplugged, an interface
+powered off) stops the stream. The playhead holds position, the failure is
+reported, and reopening is a user action — silently migrating a mix to the
+laptop speakers mid-audition is a worse outcome than stopping.
+
 ## Offline render
 
 `render.py` runs the **same** `Engine.process` in a loop with no device, which
@@ -338,11 +440,29 @@ Stems are therefore unlimited. The master render applies the limiter; the stem
 render skips it. The exactness property is preserved against a pre-limiter
 master, and that is what the M7 test asserts.
 
+### Dither
+
+The bus is float32 and the file is 24-bit fixed, so the conversion truncates
+unless something is done about it. **TPDF dither at 1 LSB, from a generator
+seeded with a constant** (D-56).
+
+At 24 bits the difference is inaudible either way, so dither is not really the
+question — determinism is. Truncation correlates the error with the signal,
+which is the textbook reason to dither at all; dithering from an unseeded
+generator would make two renders of the same project differ in the last bit
+and turn F-36 into a test that fails mysteriously. Seeding it makes the noise
+part of the deterministic output, which is the only version of "dithered and
+bit-identical" that is true.
+
+Stems are dithered on the same terms, from the same seed.
+
+### Determinism
+
 Determinism (F-36) comes from: fixed rate and block, no wall-clock anywhere in
-the graph, no threads inside `process`, and float32 ops in a fixed order. That
-guarantees bit-identical output **across runs on one machine and build** — not
-across platforms, where FFT library versions and SIMD dispatch legitimately
-differ in the last bits.
+the graph, no threads inside `process`, a seeded dither generator, and float32
+ops in a fixed order. That guarantees bit-identical output **across runs on one
+machine and build** — not across platforms, where FFT library versions and SIMD
+dispatch legitimately differ in the last bits.
 
 ## Realtime safety checklist
 
