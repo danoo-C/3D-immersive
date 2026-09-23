@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from immersive import __version__
-from immersive.ui import icons, theme, theme_io
+from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
 from immersive.ui.theme_menu import ThemeMenu
@@ -124,6 +124,9 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self.setCentralWidget(self._build_layout())
         self._build_statusbar()
+        # Last, because it may report - and the notice centre it reports to
+        # is built by _build_statusbar.
+        self.restore_theme()
 
     # ----------------------------------------------------------------- menus
 
@@ -390,17 +393,59 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------- theming
 
-    def choose_theme(self, path: Path | None) -> None:
+    def restore_theme(self) -> None:
+        """Re-apply whatever the last session chose (D-83).
+
+        Quiet when it works: a notice saying "Theme: VS Code Dark" on every
+        launch is the kind of report that teaches people to stop reading
+        them. A theme that has *gone* is the opposite - somebody deleted the
+        file they were using, and an application that silently looks
+        different is one they conclude is broken.
+        """
+        remembered = theme_menu.remembered()
+        if remembered is None:
+            self._theme_menu.set_current(None)
+            self.apply_theme(theme_io.builtin())
+            return
+
+        if not remembered.is_file():
+            # Apply it, do not merely record it. "Falls back to the built-in"
+            # is a statement about what the window is painted in, and a
+            # branch that only ticked the menu entry would leave whatever was
+            # active on screen while claiming to have fallen back.
+            self._theme_menu.set_current(None)
+            self.apply_theme(theme_io.builtin())
+            self._notices.add(
+                Severity.WARN,
+                f"{remembered.name} is no longer there — using the built-in theme",
+                [str(remembered)],
+            )
+            return
+
+        self._theme_menu.set_current(remembered)
+        self.choose_theme(remembered, announce=False, remember=False)
+
+    def choose_theme(
+        self, path: Path | None, *, announce: bool = True, remember: bool = True
+    ) -> None:
         """Load and apply the theme at `path`. `None` is the bundled one.
 
         Nothing here can fail in a way the user has to care about, which is
         F-47: a theme file that is missing, malformed or full of unknown keys
         still yields a usable `Theme`, and everything wrong with it goes to
         the notice centre instead of a dialog.
+
+        `announce` and `remember` are both off when restoring a previous
+        session's choice: it is not news, and writing back what was just read
+        is a good way to turn a read bug into a stored one.
         """
+        if remember:
+            theme_menu.remember(path)
+
         if path is None:
             self.apply_theme(theme_io.builtin())
-            self._notices.add(Severity.INFO, f"Theme: {theme_io.builtin().name}")
+            if announce:
+                self._notices.add(Severity.INFO, f"Theme: {theme_io.builtin().name}")
             return
 
         report = theme_io.load(path)
@@ -418,9 +463,10 @@ class MainWindow(QMainWindow):
             headline = f"{headline} — {len(report.problems)} problem" + (
                 "s" if len(report.problems) != 1 else ""
             )
-        self._notices.add(
-            severity, headline, [str(problem) for problem in report.problems]
-        )
+        if announce or report.problems:
+            self._notices.add(
+                severity, headline, [str(problem) for problem in report.problems]
+            )
 
     def apply_theme(self, chosen: theme.Theme) -> None:
         """Repaint the running application in `chosen` (D-82).

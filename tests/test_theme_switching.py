@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from immersive.app import build_application
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.main_window import MainWindow
+from immersive.ui.notices import Severity
 from immersive.ui.widgets.placeholder import Placeholder
 
 pytestmark = pytest.mark.gui
@@ -218,3 +219,97 @@ def test_the_menu_is_exclusive(window: MainWindow) -> None:
     current = window._theme_menu.current()
     assert current is not None
     assert current.stem == "one"
+
+
+# --------------------------------------------------------------------------- #
+# what survives a restart (D-83)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_chosen_theme_survives_a_new_window() -> None:
+    """ "Across a restart" is a new MainWindow: QSettings outlives both."""
+    directory = theme_menu.user_theme_directory()
+    path = written(
+        directory / f"red{theme_io.SUFFIX}", name="Red", tokens={"accent": "#FF0000"}
+    )
+
+    first = MainWindow()
+    first.choose_theme(path)
+    first.deleteLater()
+
+    theme.use(theme_io.builtin())
+    second = MainWindow()
+
+    assert theme.active().name == "Red"
+    assert second._theme_menu.current() == path
+    second.deleteLater()
+
+
+def test_the_built_in_survives_a_new_window() -> None:
+    directory = theme_menu.user_theme_directory()
+    path = written(directory / f"red{theme_io.SUFFIX}", tokens={"accent": "#FF0000"})
+
+    first = MainWindow()
+    first.choose_theme(path)
+    first.choose_theme(None)
+    first.deleteLater()
+
+    second = MainWindow()
+
+    assert theme.active() == theme_io.builtin()
+    assert second._theme_menu.current() is None
+    second.deleteLater()
+
+
+def test_a_theme_that_has_gone_falls_back_and_says_so() -> None:
+    """D-83's whole reason: silence here reads as a broken application."""
+    directory = theme_menu.user_theme_directory()
+    path = written(directory / f"doomed{theme_io.SUFFIX}", tokens={"accent": "#FF0000"})
+
+    first = MainWindow()
+    first.choose_theme(path)
+    first.deleteLater()
+    path.unlink()
+
+    second = MainWindow()
+
+    assert theme.active() == theme_io.builtin()
+    assert second._theme_menu.current() is None
+    reported = second.notices().newest_first()
+    assert len(reported) == 1
+    assert "no longer there" in reported[0].message
+    assert reported[0].severity is Severity.WARN
+    second.deleteLater()
+
+
+def test_restoring_a_theme_is_quiet_when_it_works() -> None:
+    """A notice on every launch is how people learn to stop reading them."""
+    directory = theme_menu.user_theme_directory()
+    path = written(directory / f"quiet{theme_io.SUFFIX}", tokens={"accent": "#FF0000"})
+
+    first = MainWindow()
+    first.choose_theme(path)
+    first.deleteLater()
+
+    second = MainWindow()
+
+    assert second.notices().newest_first() == []
+    second.deleteLater()
+
+
+def test_restoring_a_broken_theme_still_reports() -> None:
+    """Quiet when it works is not quiet when it does not."""
+    directory = theme_menu.user_theme_directory()
+    path = directory / f"broken{theme_io.SUFFIX}"
+    written(path, tokens={"nope": "#FF0000"})
+
+    first = MainWindow()
+    first.choose_theme(path)
+    first.deleteLater()
+
+    second = MainWindow()
+
+    reported = second.notices().newest_first()
+    assert len(reported) == 1
+    assert reported[0].severity is Severity.WARN
+    second.deleteLater()
