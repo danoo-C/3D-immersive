@@ -11,7 +11,7 @@ roadmap's preamble says why.
 |---|---|
 | [1 — Tokens and groups](phase_1_tokens_and_groups.md) | ✅ |
 | [2 — The `.3dimtheme` file](phase_2_file_format.md) | ✅ |
-| [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | not started |
+| [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | in progress |
 | [4 — Discovery and switching](phase_4_discovery_and_switching.md) | not started |
 
 The order is deliberate and each phase is useless before the one above it:

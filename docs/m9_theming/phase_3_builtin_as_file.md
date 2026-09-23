@@ -1,7 +1,7 @@
 # M9 · Phase 3 — The built-in theme becomes a file
 
-**Status:** not started · **Plan:** not written yet —
-`plans/phase_3_builtin_as_file.md`
+**Status:** in progress · **Plan:**
+[plans/phase_3_builtin_as_file.md](plans/phase_3_builtin_as_file.md)
 
 ## Goal
 
