@@ -1,6 +1,6 @@
 # Plan — M9 · Phase 3 — The built-in theme becomes a file
 
-**Written:** 2026-09-23 · **Status:** in progress
+**Written:** 2026-09-23 · **Status:** ✅ complete
 
 ## Approach
 
@@ -246,4 +246,74 @@ step 4, so the answer should be no — but "should be" is what phase 1's
 
 ## Outcome
 
-Filled in at the end.
+Four steps, in the order planned, all six acceptance boxes ticked. Fifteen
+mutations; four survived a first run and three of those were real.
+
+### What the plan got right
+
+**The two-step migration.** Proving the file equal to `BUILTIN` while
+`BUILTIN` still existed is the whole of the phase's risk, and it cost one
+extra commit. There is no way to make that assertion afterwards.
+
+**The claim that nothing extra had to be built to validate the built-in.**
+The plan listed `Theme.problems()`, `stylesheet()` and `contrast_problems()`
+as already sufficient, and the mutation sweep bears it out: deleting a token
+and deleting a group key from the bundled file are both caught, the second
+only because `Template.substitute` refuses a placeholder with no value.
+
+**Naming the golden fixture as the proof.** It was not touched in any step,
+which is the thing to check if this phase ever looks too easy.
+
+### What the plan did not see
+
+**That D-30 was asserted for one module and not the other.** The plan has a
+whole risk row about `importlib.resources` being swapped for `__file__` and
+a mutation to match, and it never occurred to it that the *existing* test
+covered only `theme.py` while the phase was busy making `theme_io.py` read a
+resource for the first time. The mutation survived the entire suite. The
+lesson generalises past this phase: **a rule that holds for one module is
+not a rule until the test names the set of modules it holds for.** The test
+is now parametrized over a named list, so the next module that reads a
+resource is a one-line change rather than a rediscovery.
+
+**That D-80's own rationale was untestable as stated.** The decision says
+the default is read on demand rather than at import. Nothing observed it,
+because the merge target resolves to the same theme either way — the
+difference is only that a broken installation raises at import instead of at
+startup. A fresh interpreter asserting the cache was never missed is the test
+that was missing, and it took a mutation to notice that a written-down
+rationale had nothing holding it up.
+
+**Two bugs in the shape guards, both in code the plan described in one
+line.** `channels` defaulted to a tuple rather than a list, so a malformed
+`tokens` map was reported as a malformed `channels` array; and the checks ran
+out of document order, so a file with two problems named the wrong one first.
+Both were caught by the tests written for them in the same step, which is the
+argument for writing the unhappy cases first rather than the case for the
+guards being unnecessary.
+
+### One mutation that should not have been on the list
+
+M14 weakens a *test* — checking the palette table against the bundled theme
+as a set of colours rather than as a mapping — and it survived. That is not a
+missing test. Mutating a test only ever asks whether some *other* test
+overlaps it, and here nothing does, which is correct: a second assertion on
+the same fact is the second home this project spends its effort avoiding.
+Recorded rather than quietly dropped, because the mutation-testing discipline
+says a survivor is either a missing test or an equivalent mutation, and this
+is a third thing: a mutation aimed at the wrong target.
+
+### An aside worth keeping
+
+`ruff` rejected a multiline f-string replacement field, which is Python 3.12
+syntax. The venv here is 3.13, so the tests passed and would have gone on
+passing until CI ran the 3.11 leg. `target-version` in `pyproject.toml` is
+doing real work, and it is the only thing in the local loop that knows this
+project supports a Python the developer is not running.
+
+### What phase 4 starts from
+
+Two themes it can switch between, both of its loader modes, and a report with
+severities that has nowhere to appear yet. The traps are already written
+down: `icons.icon()` and `builtin()` are both memoised, and `Severity` is
+expected to move to `ui/widgets/notices.py`, which `02` already names.

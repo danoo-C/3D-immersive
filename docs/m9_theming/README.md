@@ -11,7 +11,7 @@ roadmap's preamble says why.
 |---|---|
 | [1 — Tokens and groups](phase_1_tokens_and_groups.md) | ✅ |
 | [2 — The `.3dimtheme` file](phase_2_file_format.md) | ✅ |
-| [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | in progress |
+| [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | ✅ |
 | [4 — Discovery and switching](phase_4_discovery_and_switching.md) | not started |
 
 The order is deliberate and each phase is useless before the one above it:
@@ -83,3 +83,20 @@ now builds a stylesheet from every theme it produces.
 Phase 3 starts from a reader whose merge target is already a parameter, and
 from the one thing that is still unsolved: when the built-in *is* the file,
 there is nothing to merge it over.
+
+**Phase 3.** The palette is `assets/themes/vscode_dark.3dimtheme` and
+`theme.py` holds no colour at all — it holds the code that reads them. The
+bootstrap phase 2 handed over dissolved: nothing can validate the built-in
+against an external vocabulary, and nothing needed to, because `Theme`,
+`stylesheet()` and `contrast_problems()` already cover it between them. Two
+decisions: no fallback palette (D-79) and a cached `builtin()` reached
+through a deferred import, because `theme_io` already imports `theme` (D-80).
+
+The migration was deliberately two steps, so the file could be proved equal
+to the constants while the constants still existed. The proof that no pixel
+moved was phase 1's golden stylesheet fixture, untouched and still matching.
+
+Of fifteen mutations, four survived a first run and three were real: D-30 was
+asserted for `theme.py` and not for `theme_io.py`, the bundled theme's
+encoding was explicit but untested, and D-80's second half had no test at
+all.

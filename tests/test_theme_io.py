@@ -865,3 +865,47 @@ def test_importing_the_module_does_not_read_the_bundled_theme() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "0", "the bundled theme was read at import"
+
+
+def test_the_bundled_theme_goes_through_this_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"Not a shortcut past it" - the phase's own acceptance, asserted.
+
+    The concern behind that line is that the default gets built by some
+    private route the format never has to express, at which point the format
+    stops being tested by the thing that matters most. So: `builtin()` is
+    watched calling `strict()`, and `strict()` is what parses `.3dimtheme`.
+    """
+    seen: list[str] = []
+    original = theme_io.strict
+
+    def watched(text: str, **kwargs: object) -> theme.Theme:
+        seen.append(text)
+        return original(text, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(theme_io, "strict", watched)
+    theme_io.builtin.cache_clear()
+
+    built = theme_io.builtin()
+
+    assert seen == [bundled()], "builtin() did not read the file through strict()"
+    assert built.name == "VS Code Dark"
+
+
+def test_the_active_theme_defaults_through_this_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`theme.active()` with nothing set reaches `builtin()` (D-80).
+
+    The deferred import is what makes that possible and it is easy to break
+    into a second source of the default - a module constant, a literal, a
+    copy. This asserts the route rather than the answer.
+    """
+    sentinel = theme.Theme(
+        name="Sentinel", tokens={"accent": "#010203"}, channels=("#010203",)
+    )
+    monkeypatch.setattr(theme_io, "builtin", lambda: sentinel)
+    monkeypatch.setattr(theme, "_active", None)
+
+    assert theme.active() is sentinel
