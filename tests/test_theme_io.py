@@ -215,3 +215,93 @@ def test_a_token_value_that_is_not_a_colour_falls_back(value: object) -> None:
 
     assert report.theme.token("accent") == theme.BUILTIN.token("accent")
     assert [problem.where for problem in report.problems] == ["tokens.accent"]
+
+
+# --------------------------------------------------------------------------- #
+# the writer
+# --------------------------------------------------------------------------- #
+
+
+def test_a_theme_round_trips() -> None:
+    report = theme_io.loads(theme_io.dumps(theme.BUILTIN))
+
+    assert report.problems == []
+    assert report.theme == theme.BUILTIN
+
+
+def test_the_written_file_is_the_shape_04_describes() -> None:
+    """Asserted over the text, not over a round trip.
+
+    M1 phase 5 spent three of its four surviving mutations on this one
+    lesson: a round trip proves the reader and the writer *agree*, not that
+    either is right. Both can be wrong in the same direction and the trip
+    still closes. So this reads the file.
+    """
+    document = json.loads(theme_io.dumps(theme.BUILTIN))
+
+    assert set(document) == {
+        "schema_version",
+        "name",
+        "author",
+        "tokens",
+        "channels",
+        "groups",
+    }
+    assert document["schema_version"] == theme_io.SCHEMA_VERSION
+    assert document["name"] == "VS Code Dark"
+    assert document["tokens"] == dict(theme.BUILTIN.tokens)
+    assert document["channels"] == list(theme.BUILTIN.channels)
+    assert document["groups"]["button"] == dict(theme.BUILTIN.groups["button"])
+
+
+def test_the_written_file_sorts_its_keys() -> None:
+    """D-13: a format meant to live in git does not churn its own diff."""
+    text = theme_io.dumps(theme.BUILTIN)
+
+    assert text == json.dumps(json.loads(text), indent=2, sort_keys=True) + "\n"
+    assert text.endswith("\n")
+
+
+def test_writing_what_was_read_reproduces_the_file() -> None:
+    """The assertion a round trip cannot make on its own.
+
+    Equality of objects survives a reader and a writer that drop the same key.
+    Equality of *text* does not.
+    """
+    text = theme_io.dumps(theme.BUILTIN)
+
+    assert theme_io.dumps(theme_io.loads(text).theme) == text
+
+
+def test_the_written_file_is_readable_by_a_person() -> None:
+    """Indented, one key a line: it is a file somebody is expected to edit."""
+    text = theme_io.dumps(theme.BUILTIN)
+
+    assert '\n  "tokens": {\n' in text
+    assert f'    "accent": "{theme.BUILTIN.token("accent")}"' in text
+
+
+def test_save_then_load(tmp_path: Path) -> None:
+    path = tmp_path / "builtin.3dimtheme"
+    theme_io.save(theme.BUILTIN, path)
+
+    report = theme_io.load(path)
+
+    assert report.problems == []
+    assert report.theme == theme.BUILTIN
+    assert path.read_text(encoding="utf-8") == theme_io.dumps(theme.BUILTIN)
+
+
+def test_a_theme_that_is_not_the_builtin_round_trips() -> None:
+    """The round trip must not be a property of BUILTIN in particular."""
+    original = theme_io.loads(
+        written(
+            name="Ocean",
+            author="somebody",
+            tokens={"accent": "#0088FF"},
+            channels=["#0088FF", "#00CCAA"],
+            groups={"focus": {"ring": "#00FF00"}},
+        )
+    ).theme
+
+    assert theme_io.loads(theme_io.dumps(original)).theme == original

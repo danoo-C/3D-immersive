@@ -364,6 +364,54 @@ def _groups(
 
 
 # --------------------------------------------------------------------------- #
+# writing
+# --------------------------------------------------------------------------- #
+
+
+def dumps(theme: Theme) -> str:
+    """`theme` as the text of a `.3dimtheme` file.
+
+    Keys are sorted and the file ends in a newline, which is `project_io`'s
+    discipline and D-13's reason: a file whose key order depends on the order
+    a dictionary happened to be built in produces a diff every time it is
+    written, and a format meant to live in git should not.
+
+    The cost is real and is paid here rather than hidden: sorting puts
+    `surface.hover` above `surface.window`, so the written palette no longer
+    reads deepest-to-lightest the way the table in docs/04-ui-spec.md does.
+    The document keeps the human ordering; the file keeps the deterministic
+    one.
+
+    Every key is written, including an `author` nobody set. A writer that
+    omitted empty values would make what comes out depend on what went in,
+    and the first thing anyone does with this function is compare two of its
+    results.
+    """
+    document = {
+        "schema_version": SCHEMA_VERSION,
+        "name": theme.name,
+        "author": theme.author,
+        "tokens": dict(theme.tokens),
+        "channels": list(theme.channels),
+        "groups": {name: dict(values) for name, values in theme.groups.items()},
+    }
+    return json.dumps(document, indent=2, sort_keys=True) + "\n"
+
+
+def save(theme: Theme, path: str | os.PathLike[str]) -> None:
+    """Write `theme` to `path` as a `.3dimtheme`.
+
+    A plain write, where `project_io.save` goes through a temporary file. The
+    asymmetry is deliberate: that one is protecting a project, where an
+    interrupted save truncates work that cannot be retyped, and this one
+    writes a cosmetic file the application never overwrites on a user's
+    behalf. If M8 ever grows a theme editor that saves over somebody's file,
+    it inherits the temporary-file rule along with the feature.
+    """
+    Path(path).write_text(dumps(theme), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
 # reading
 # --------------------------------------------------------------------------- #
 
