@@ -468,6 +468,14 @@ def loads(
         channels=_channels(reading, migrated.get("channels"), over),
         groups=_groups(reading, migrated.get("groups"), over, tokens),
     )
+
+    # Advisory, and only ever advisory. 04-ui-spec.md, *Contrast is checked,
+    # not enforced*: enforcing the rule would mean refusing somebody's own
+    # theme on their own machine, which is not a call this application gets
+    # to make. The built-in is the other audience and is held to it by test.
+    for failing in theme.contrast_problems():
+        reading.warn("contrast", failing)
+
     return ThemeReport(theme, source, reading.problems)
 
 

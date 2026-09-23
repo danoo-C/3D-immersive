@@ -7,6 +7,7 @@ Qt: `theme_io` reads JSON and builds a `Theme`, and both are headless.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -544,3 +545,95 @@ def test_channel_is_kept_where_the_default_paints_per_channel() -> None:
     assert [problem.where for problem in moved.problems] == [
         "groups.clip.selected.border"
     ]
+
+
+# --------------------------------------------------------------------------- #
+# contrast, reported and never enforced
+# --------------------------------------------------------------------------- #
+
+
+def test_a_theme_with_poor_contrast_loads_anyway() -> None:
+    """04: *Contrast is checked, not enforced*.
+
+    Refusing somebody's own theme on their own machine is not a call this
+    application gets to make. So the theme applies, and the report says so.
+    """
+    report = theme_io.loads(written(tokens={"text.primary": "#202020"}))
+
+    assert report.applied
+    assert report.theme.token("text.primary") == "#202020"
+    assert all(
+        problem.severity is theme_io.Severity.WARN for problem in report.problems
+    )
+
+
+def test_every_failing_contrast_pair_is_reported_not_just_the_first() -> None:
+    """An author fixing a palette wants the list, not one item a run."""
+    report = theme_io.loads(written(tokens={"text.primary": "#202020"}))
+
+    contrast = [p for p in report.problems if p.where == "contrast"]
+    assert len(contrast) == len(theme.SURFACE_TOKENS)
+    for surface in theme.SURFACE_TOKENS:
+        assert any(f"on {surface}" in p.message for p in contrast), surface
+
+
+def test_a_theme_with_good_contrast_reports_none() -> None:
+    """The built-in merged over itself must be silent, or the report is noise."""
+    assert theme_io.loads(theme_io.dumps(theme.BUILTIN)).problems == []
+
+
+# --------------------------------------------------------------------------- #
+# 04's own worked example
+# --------------------------------------------------------------------------- #
+
+SPEC = Path(__file__).resolve().parent.parent / "docs" / "04-ui-spec.md"
+
+
+def spec_example() -> str:
+    """The `.3dimtheme` listing from the *Theming* section of 04.
+
+    Lifted out of the document rather than copied into this file, for the
+    reason M1 phase 5 added the same test for `03`: that block is the first
+    thing anybody implementing against this format reads, and nothing had
+    ever opened it. `03`'s turned out not to load.
+    """
+    text = SPEC.read_text(encoding="utf-8")
+    section = re.search(r"### The file\n(.*?)\n### ", text, re.S)
+    assert section, "04-ui-spec.md no longer has a *The file* section"
+    block = re.search(r"```json\n(.*?)```", section.group(1), re.S)
+    assert block, "04-ui-spec.md's *The file* section has no JSON listing"
+    return block.group(1)
+
+
+def test_the_specifications_own_example_is_a_file_this_module_opens() -> None:
+    report = theme_io.loads(spec_example())
+
+    assert report.applied
+    assert report.theme.name == "VS Code Dark"
+
+
+def test_the_specifications_own_example_is_the_built_in_theme() -> None:
+    """The example is not merely loadable, it is *the default*.
+
+    Its tokens, its channels and its `button` group are the built-in's, key
+    for key - so merging it over the built-in has to come back to exactly the
+    built-in. A colour edited in the document and not in `theme.py` fails
+    here, which is the drift this kind of test exists to catch.
+    """
+    assert theme_io.loads(spec_example()).theme == theme.BUILTIN
+
+
+def test_the_example_only_reports_groups_no_milestone_has_built_yet() -> None:
+    """The example is forward-looking, and that is allowed - but say which.
+
+    `timeline` and `clip` belong to M3 by 04's own ownership table. If a
+    *third* group shows up here, either the example grew a group nobody owns
+    or M9 dropped one it was supposed to build.
+    """
+    problems = theme_io.loads(spec_example()).problems
+
+    assert [problem.where for problem in problems] == [
+        "groups.timeline",
+        "groups.clip",
+    ]
+    assert all(p.severity is theme_io.Severity.WARN for p in problems)
