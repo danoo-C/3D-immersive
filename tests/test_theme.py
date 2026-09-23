@@ -573,20 +573,31 @@ def test_no_hex_appears_in_the_theme_module_at_all() -> None:
     )
 
 
-def test_the_theme_module_does_no_file_path_walking() -> None:
+#: Every module that reaches a bundled resource. `theme.py` reads `app.qss`
+#: and `theme_io.py` reads the built-in `.3dimtheme`; both are inside the
+#: package and both are subject to D-30.
+RESOURCE_READERS = (theme, theme_io)
+
+
+@pytest.mark.parametrize("module", RESOURCE_READERS, ids=lambda m: m.__name__)
+def test_no_module_reaches_a_resource_by_file_path_walking(module: object) -> None:
     """D-30: bundled resources come through `importlib.resources`.
 
     `__file__` path-walking works from a source tree and breaks under
     PyInstaller and zipimport, which is exactly where it is hardest to debug
-    — free to avoid now, expensive at M8. The module reads two bundled things
-    and must reach neither by walking up from itself.
+    — free to avoid now, expensive at M8.
 
-    Asserted over the parsed module rather than over its text: this file
+    Both modules, because a mutation sweep found this asserted for one of
+    them. `theme.py` read `app.qss` from M9 phase 1 and was covered;
+    `theme_io.py` started reading the bundled theme in phase 3 and was not,
+    so the rule held by accident rather than by test.
+
+    Asserted over the parsed module rather than over its text: `theme.py`
     says the words "walking up from `__file__`" in a comment warning against
     it, and a test that cannot tell a warning from the thing it warns about
-    is a test that will be deleted the first time it is wrong.
+    is a test that gets deleted the first time it is wrong.
     """
-    source = Path(theme.__file__).read_text(encoding="utf-8")
+    source = Path(module.__file__).read_text(encoding="utf-8")  # type: ignore[attr-defined]
     walking = [
         node
         for node in ast.walk(ast.parse(source))
@@ -594,10 +605,39 @@ def test_the_theme_module_does_no_file_path_walking() -> None:
     ]
 
     assert not walking, (
-        f"theme.py reaches a resource by __file__ on lines "
+        f"{module.__name__} reaches a resource by __file__ on lines "  # type: ignore[attr-defined]
         f"{[node.lineno for node in walking]}"
     )
     assert "resources.files" in source, "and it still reads its resources"
+
+
+@pytest.mark.parametrize("module", RESOURCE_READERS, ids=lambda m: m.__name__)
+def test_every_resource_is_read_with_an_explicit_encoding(module: object) -> None:
+    """A bundled file is UTF-8 wherever it is read from.
+
+    `read_text()` with no encoding uses the platform default, which is UTF-8
+    on the Linux leg of CI and need not be on a user's Windows machine. The
+    bundled theme is ASCII today, so the bug is latent rather than live — and
+    latent is exactly how M1 phase 5 described the class: a cross-platform
+    behaviour asserted only end to end is asserted on one platform.
+
+    Found by a mutation that survived, which is the honest reason it is here.
+    """
+    source = Path(module.__file__).read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    bare = [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "read_text"
+        and not node.args
+        and not any(keyword.arg == "encoding" for keyword in node.keywords)
+    ]
+
+    assert not bare, (
+        f"{module.__name__} reads a resource with the platform encoding "  # type: ignore[attr-defined]
+        f"on lines {bare}"
+    )
 
 
 @pytest.mark.gui

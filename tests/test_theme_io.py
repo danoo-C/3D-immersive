@@ -838,3 +838,30 @@ def test_the_deferred_import_holds_in_either_order(first: str) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == theme_io.builtin().name
+
+
+def test_importing_the_module_does_not_read_the_bundled_theme() -> None:
+    """D-80: the default is read when it is asked for, not when imported.
+
+    A default argument holding `builtin()` would be evaluated at `def` time,
+    so importing this module would do file I/O to answer a question nobody
+    asked - and would *raise at import* on a broken installation, burying a
+    packaging fault in an ImportError instead of a startup message naming the
+    file. That is the whole of D-80's second half, and nothing else observes
+    it: the merge target resolves to the same theme either way.
+
+    A fresh interpreter, because this one imported the module long ago.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from immersive.ui import theme_io\n"
+            "print(theme_io.builtin.cache_info().misses)\n",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0", "the bundled theme was read at import"
