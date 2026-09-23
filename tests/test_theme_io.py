@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 from collections.abc import Iterator
 from importlib import resources
 from pathlib import Path
@@ -46,14 +48,12 @@ def test_a_partial_theme_merges() -> None:
     assert report.theme.token("accent") == "#FF0000"
     untouched = {
         name: value
-        for name, value in theme.BUILTIN.tokens.items()
+        for name, value in theme_io.builtin().tokens.items()
         if name != "accent"
     }
-    assert {
-        name: report.theme.token(name) for name in untouched
-    } == untouched
-    assert report.theme.channels == theme.BUILTIN.channels
-    assert report.theme.groups == theme.BUILTIN.groups
+    assert {name: report.theme.token(name) for name in untouched} == untouched
+    assert report.theme.channels == theme_io.builtin().channels
+    assert report.theme.groups == theme_io.builtin().groups
 
 
 def test_a_group_value_resolves_against_a_token_only_the_default_defines() -> None:
@@ -66,7 +66,7 @@ def test_a_group_value_resolves_against_a_token_only_the_default_defines() -> No
     report = theme_io.loads(written(groups={"focus": {"ring": "surface.hover"}}))
 
     assert report.problems == []
-    assert report.theme.value("focus", "ring") == theme.BUILTIN.token(
+    assert report.theme.value("focus", "ring") == theme_io.builtin().token(
         "surface.hover"
     )
 
@@ -75,11 +75,13 @@ def test_one_group_key_leaves_the_rest_of_the_group_alone() -> None:
     """Merged a level below the group, or a partial theme is not partial."""
     report = theme_io.loads(written(groups={"button": {"background": "error"}}))
 
-    assert report.theme.value("button", "background") == theme.BUILTIN.token("error")
-    for key in theme.BUILTIN.groups["button"]:
+    assert report.theme.value("button", "background") == theme_io.builtin().token(
+        "error"
+    )
+    for key in theme_io.builtin().groups["button"]:
         if key == "background":
             continue
-        assert report.theme.value("button", key) == theme.BUILTIN.value(
+        assert report.theme.value("button", key) == theme_io.builtin().value(
             "button", key
         )
 
@@ -160,7 +162,9 @@ def test_a_token_a_theme_invented_is_reported_twice_and_the_first_explains() -> 
         "groups.focus.ring",
     ]
     assert "cannot add one" in report.problems[0].message
-    assert report.theme.value("focus", "ring") == theme.BUILTIN.value("focus", "ring")
+    assert report.theme.value("focus", "ring") == theme_io.builtin().value(
+        "focus", "ring"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -199,9 +203,7 @@ def test_author_survives_the_read() -> None:
 
 def test_load_reads_a_file_from_disk(tmp_path: Path) -> None:
     path = tmp_path / "red.3dimtheme"
-    path.write_text(
-        written(name="Red", tokens={"accent": "#FF0000"}), encoding="utf-8"
-    )
+    path.write_text(written(name="Red", tokens={"accent": "#FF0000"}), encoding="utf-8")
 
     report = theme_io.load(path)
 
@@ -216,7 +218,7 @@ def test_load_reads_a_file_from_disk(tmp_path: Path) -> None:
 def test_a_token_value_that_is_not_a_colour_falls_back(value: object) -> None:
     report = theme_io.loads(written(tokens={"accent": value}))
 
-    assert report.theme.token("accent") == theme.BUILTIN.token("accent")
+    assert report.theme.token("accent") == theme_io.builtin().token("accent")
     assert [problem.where for problem in report.problems] == ["tokens.accent"]
 
 
@@ -226,10 +228,10 @@ def test_a_token_value_that_is_not_a_colour_falls_back(value: object) -> None:
 
 
 def test_a_theme_round_trips() -> None:
-    report = theme_io.loads(theme_io.dumps(theme.BUILTIN))
+    report = theme_io.loads(theme_io.dumps(theme_io.builtin()))
 
     assert report.problems == []
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
 
 
 def test_the_written_file_is_the_shape_04_describes() -> None:
@@ -240,7 +242,7 @@ def test_the_written_file_is_the_shape_04_describes() -> None:
     either is right. Both can be wrong in the same direction and the trip
     still closes. So this reads the file.
     """
-    document = json.loads(theme_io.dumps(theme.BUILTIN))
+    document = json.loads(theme_io.dumps(theme_io.builtin()))
 
     assert set(document) == {
         "schema_version",
@@ -252,14 +254,14 @@ def test_the_written_file_is_the_shape_04_describes() -> None:
     }
     assert document["schema_version"] == theme_io.SCHEMA_VERSION
     assert document["name"] == "VS Code Dark"
-    assert document["tokens"] == dict(theme.BUILTIN.tokens)
-    assert document["channels"] == list(theme.BUILTIN.channels)
-    assert document["groups"]["button"] == dict(theme.BUILTIN.groups["button"])
+    assert document["tokens"] == dict(theme_io.builtin().tokens)
+    assert document["channels"] == list(theme_io.builtin().channels)
+    assert document["groups"]["button"] == dict(theme_io.builtin().groups["button"])
 
 
 def test_the_written_file_sorts_its_keys() -> None:
     """D-13: a format meant to live in git does not churn its own diff."""
-    text = theme_io.dumps(theme.BUILTIN)
+    text = theme_io.dumps(theme_io.builtin())
 
     assert text == json.dumps(json.loads(text), indent=2, sort_keys=True) + "\n"
     assert text.endswith("\n")
@@ -271,28 +273,28 @@ def test_writing_what_was_read_reproduces_the_file() -> None:
     Equality of objects survives a reader and a writer that drop the same key.
     Equality of *text* does not.
     """
-    text = theme_io.dumps(theme.BUILTIN)
+    text = theme_io.dumps(theme_io.builtin())
 
     assert theme_io.dumps(theme_io.loads(text).theme) == text
 
 
 def test_the_written_file_is_readable_by_a_person() -> None:
     """Indented, one key a line: it is a file somebody is expected to edit."""
-    text = theme_io.dumps(theme.BUILTIN)
+    text = theme_io.dumps(theme_io.builtin())
 
     assert '\n  "tokens": {\n' in text
-    assert f'    "accent": "{theme.BUILTIN.token("accent")}"' in text
+    assert f'    "accent": "{theme_io.builtin().token("accent")}"' in text
 
 
 def test_save_then_load(tmp_path: Path) -> None:
     path = tmp_path / "builtin.3dimtheme"
-    theme_io.save(theme.BUILTIN, path)
+    theme_io.save(theme_io.builtin(), path)
 
     report = theme_io.load(path)
 
     assert report.problems == []
-    assert report.theme == theme.BUILTIN
-    assert path.read_text(encoding="utf-8") == theme_io.dumps(theme.BUILTIN)
+    assert report.theme == theme_io.builtin()
+    assert path.read_text(encoding="utf-8") == theme_io.dumps(theme_io.builtin())
 
 
 def test_a_theme_that_is_not_the_builtin_round_trips() -> None:
@@ -323,7 +325,7 @@ def test_a_theme_that_is_not_the_builtin_round_trips() -> None:
 def test_a_missing_file_is_reported(tmp_path: Path) -> None:
     report = theme_io.load(tmp_path / "nothing.3dimtheme")
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
     assert report.problems[0].severity is theme_io.Severity.ERROR
 
@@ -335,7 +337,7 @@ def test_a_file_that_cannot_be_read_is_reported(tmp_path: Path) -> None:
 
     report = theme_io.load(directory)
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
 
 
@@ -345,7 +347,7 @@ def test_a_file_that_is_not_utf8_is_reported(tmp_path: Path) -> None:
 
     report = theme_io.load(path)
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
     assert "UTF-8" in report.problems[0].message
 
@@ -353,7 +355,7 @@ def test_a_file_that_is_not_utf8_is_reported(tmp_path: Path) -> None:
 def test_malformed_json_is_reported_with_the_parse_error() -> None:
     report = theme_io.loads('{"schema_version": 1, "tokens": {')
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
     # 04: "reported with the parse error" - so the line and column are in it.
     assert "line" in report.problems[0].where
@@ -364,7 +366,7 @@ def test_malformed_json_is_reported_with_the_parse_error() -> None:
 def test_valid_json_that_is_not_an_object_is_reported(text: str) -> None:
     report = theme_io.loads(text)
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
 
 
@@ -386,14 +388,16 @@ def test_an_unknown_key_inside_a_known_group_is_ignored_and_reported() -> None:
 def test_a_group_value_naming_nothing_falls_back_and_is_reported() -> None:
     report = theme_io.loads(written(groups={"focus": {"ring": "nonsense"}}))
 
-    assert report.theme.value("focus", "ring") == theme.BUILTIN.value("focus", "ring")
+    assert report.theme.value("focus", "ring") == theme_io.builtin().value(
+        "focus", "ring"
+    )
     assert [problem.where for problem in report.problems] == ["groups.focus.ring"]
 
 
 def test_a_missing_schema_version_is_reported() -> None:
     report = theme_io.loads(json.dumps({"tokens": {"accent": "#FF0000"}}))
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
     assert report.problems[0].where == "schema_version"
 
@@ -405,7 +409,7 @@ def test_a_schema_version_that_is_not_a_whole_number_is_reported(
     """`True` is in that list deliberately: in Python it is an `int`."""
     report = theme_io.loads(json.dumps({"schema_version": version}))
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
 
 
@@ -436,7 +440,7 @@ def test_a_schema_too_old_to_migrate_is_reported() -> None:
     """MIGRATIONS is empty, so schema 0 has no route forward. It says so."""
     report = theme_io.loads(json.dumps({"schema_version": 0}))
 
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
     assert not report.applied
     assert "migration" in report.problems[0].message
 
@@ -508,14 +512,12 @@ def test_channel_is_refused_where_nothing_is_painted_per_channel() -> None:
     down - which is the one thing F-47 says a cosmetic file must never do.
     Nothing in the built-in paints per channel yet; M3 draws the first.
     """
-    report = theme_io.loads(
-        written(groups={"button": {"background": theme.CHANNEL}})
-    )
+    report = theme_io.loads(written(groups={"button": {"background": theme.CHANNEL}}))
 
     assert [problem.where for problem in report.problems] == [
         "groups.button.background"
     ]
-    assert report.theme.value("button", "background") == theme.BUILTIN.value(
+    assert report.theme.value("button", "background") == theme_io.builtin().value(
         "button", "background"
     )
     assert theme.stylesheet(report.theme), "and startup survives"
@@ -535,9 +537,7 @@ def test_channel_is_kept_where_the_default_paints_per_channel() -> None:
         groups={"clip": {"body": theme.CHANNEL, "selected.border": "accent"}},
     )
 
-    kept = theme_io.loads(
-        written(groups={"clip": {"body": theme.CHANNEL}}), over=over
-    )
+    kept = theme_io.loads(written(groups={"clip": {"body": theme.CHANNEL}}), over=over)
     assert kept.problems == []
     assert kept.theme.groups["clip"]["body"] == theme.CHANNEL
 
@@ -581,7 +581,7 @@ def test_every_failing_contrast_pair_is_reported_not_just_the_first() -> None:
 
 def test_a_theme_with_good_contrast_reports_none() -> None:
     """The built-in merged over itself must be silent, or the report is noise."""
-    assert theme_io.loads(theme_io.dumps(theme.BUILTIN)).problems == []
+    assert theme_io.loads(theme_io.dumps(theme_io.builtin())).problems == []
 
 
 # --------------------------------------------------------------------------- #
@@ -622,7 +622,7 @@ def test_the_specifications_own_example_is_the_built_in_theme() -> None:
     built-in. A colour edited in the document and not in `theme.py` fails
     here, which is the drift this kind of test exists to catch.
     """
-    assert theme_io.loads(spec_example()).theme == theme.BUILTIN
+    assert theme_io.loads(spec_example()).theme == theme_io.builtin()
 
 
 def test_the_example_only_reports_groups_no_milestone_has_built_yet() -> None:
@@ -669,10 +669,10 @@ def test_the_bundled_file_is_the_built_in_theme() -> None:
     equals sign, so the migration is two steps and this assertion is the
     reason.
     """
-    report = theme_io.loads(bundled(), over=theme.BUILTIN)
+    report = theme_io.loads(bundled(), over=theme_io.builtin())
 
     assert report.problems == []
-    assert report.theme == theme.BUILTIN
+    assert report.theme == theme_io.builtin()
 
 
 def test_the_bundled_file_is_exactly_what_the_writer_produces() -> None:
@@ -682,7 +682,7 @@ def test_the_bundled_file_is_exactly_what_the_writer_produces() -> None:
     file and `dumps()` disagree, and the next regeneration would produce a
     diff nobody asked for.
     """
-    assert bundled() == theme_io.dumps(theme.BUILTIN)
+    assert bundled() == theme_io.dumps(theme_io.builtin())
 
 
 # --------------------------------------------------------------------------- #
@@ -701,7 +701,7 @@ def _clear_builtin_cache() -> Iterator[None]:
 
 
 def test_builtin_reads_the_bundled_file() -> None:
-    assert theme_io.builtin() == theme.BUILTIN
+    assert theme_io.builtin() == theme_io.builtin()
 
 
 def test_builtin_reads_once_per_process() -> None:
@@ -728,14 +728,26 @@ def test_the_built_in_theme_holds_the_contrast_line() -> None:
 @pytest.mark.parametrize(
     ("document", "expected"),
     [
-        ('{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": ["#FF0000"],'
-         ' "name": "x", "groups": {"g": {"k": "nope"}}}', "names no token"),
-        ('{"schema_version": 1, "tokens": {"a": "red"}, "channels": ["#FF0000"],'
-         ' "name": "x"}', "not a #RRGGBB"),
-        ('{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": [],'
-         ' "name": "x"}', "at least one channel"),
-        ('{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": ["#FF0000"]}',
-         "called something"),
+        (
+            '{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": ["#FF0000"],'
+            ' "name": "x", "groups": {"g": {"k": "nope"}}}',
+            "names no token",
+        ),
+        (
+            '{"schema_version": 1, "tokens": {"a": "red"}, "channels": ["#FF0000"],'
+            ' "name": "x"}',
+            "not a #RRGGBB",
+        ),
+        (
+            '{"schema_version": 1, "tokens": {"a": "#FF0000"}, "channels": [],'
+            ' "name": "x"}',
+            "at least one channel",
+        ),
+        (
+            '{"schema_version": 1, "tokens": {"a": "#FF0000"},'
+            ' "channels": ["#FF0000"]}',
+            "called something",
+        ),
     ],
 )
 def test_strict_raises_and_names_what_is_wrong(document: str, expected: str) -> None:
@@ -762,9 +774,7 @@ def test_strict_raises_and_names_what_is_wrong(document: str, expected: str) -> 
         ('{"schema_version": 1, "groups": {"g": {"k": 7}}}', "can use"),
     ],
 )
-def test_strict_refuses_a_document_it_cannot_read(
-    document: str, expected: str
-) -> None:
+def test_strict_refuses_a_document_it_cannot_read(document: str, expected: str) -> None:
     """Shape guards, so `Theme` is never handed something it would trip over.
 
     Without them a token whose value is a number reaches a regular
@@ -803,3 +813,28 @@ def test_a_missing_bundled_theme_names_the_resource(
 
     with pytest.raises(theme.ThemeError, match="missing from this installation"):
         theme_io.builtin()
+
+
+@pytest.mark.parametrize("first", ["immersive.ui.theme", "immersive.ui.theme_io"])
+def test_the_deferred_import_holds_in_either_order(first: str) -> None:
+    """D-80: `theme_io` imports `theme`, and `theme` reaches back at call time.
+
+    A module-level import in `theme.py` would be a cycle, and a cycle fails
+    in only one of the two import orders - so both are run, each in a fresh
+    interpreter, because this process imported both long ago and would prove
+    nothing.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import {first}\n"
+            "from immersive.ui import theme\n"
+            "print(theme.active().name)\n",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == theme_io.builtin().name

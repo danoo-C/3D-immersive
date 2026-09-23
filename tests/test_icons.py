@@ -9,7 +9,7 @@ import pytest
 from PySide6.QtGui import QIcon
 
 from immersive.app import build_application
-from immersive.ui import icons, theme
+from immersive.ui import icons, theme, theme_io
 
 pytestmark = pytest.mark.gui
 
@@ -112,9 +112,9 @@ def test_icons_follow_a_theme_change(app: object) -> None:
         theme.use(
             theme.Theme(
                 name="Green",
-                tokens={**theme.BUILTIN.tokens, "text.primary": "#00FF00"},
-                channels=theme.BUILTIN.channels,
-                groups=theme.BUILTIN.groups,
+                tokens={**theme_io.builtin().tokens, "text.primary": "#00FF00"},
+                channels=theme_io.builtin().channels,
+                groups=theme_io.builtin().groups,
             )
         )
         assert icons.icon("stop").pixmap(16, 16).toImage() == before, (

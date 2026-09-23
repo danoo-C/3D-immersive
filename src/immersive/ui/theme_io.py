@@ -46,7 +46,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Final
 
-from immersive.ui.theme import BUILTIN, CHANNEL, Theme, ThemeError, is_colour
+from immersive.ui.theme import CHANNEL, Theme, ThemeError, is_colour
 
 #: The on-disk schema this build writes, and what drives forward migration on
 #: load. Same discipline as `.3dim` - see docs/03-data-model.md.
@@ -591,15 +591,21 @@ def save(theme: Theme, path: str | os.PathLike[str]) -> None:
 
 
 def loads(
-    text: str, *, source: Path | None = None, over: Theme = BUILTIN
+    text: str, *, source: Path | None = None, over: Theme | None = None
 ) -> ThemeReport:
     """Parse `text` as a `.3dimtheme` and merge it over `over`.
 
-    `over` is a parameter rather than `BUILTIN` written into six places
-    because M9 phase 3 turns the built-in theme into a file loaded through
-    this same path (D-47), and a reader that can only merge over the one
-    theme it imports has nothing to load the built-in *as*.
+    `over` defaults to the built-in theme and is a parameter rather than a
+    constant written into six places, because the built-in is itself a file
+    read through this module (D-47) and a reader that could only merge over
+    the one theme it imported would have nothing to load the built-in *as*.
+
+    Resolved at call time rather than as a default argument holding a
+    `Theme`, which would read the bundled file when this module is first
+    imported and hold that answer for the life of the process - D-76's
+    distinction, and the reason it is written down.
     """
+    over = over if over is not None else builtin()
     reading = _Reading()
 
     try:
@@ -637,7 +643,9 @@ def loads(
     return ThemeReport(theme, source, reading.problems)
 
 
-def load(path: str | os.PathLike[str], *, over: Theme = BUILTIN) -> ThemeReport:
+def load(
+    path: str | os.PathLike[str], *, over: Theme | None = None
+) -> ThemeReport:
     """Read a `.3dimtheme` from disk and merge it over `over`.
 
     A file that cannot be read is a reported problem rather than the
@@ -646,6 +654,7 @@ def load(path: str | os.PathLike[str], *, over: Theme = BUILTIN) -> ThemeReport:
     could not is a dead end they have to hear about, and a theme that is not
     there is a grey window and a line in the notice list.
     """
+    over = over if over is not None else builtin()
     source = Path(path)
     reading = _Reading()
     try:

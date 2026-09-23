@@ -294,137 +294,6 @@ class Theme:
 
 
 # --------------------------------------------------------------------------- #
-# the built-in theme
-# --------------------------------------------------------------------------- #
-
-#: The default, and — from the phase that bundles it as a file — the thing
-#: every user theme is merged over (D-45). Every colour is the one the
-#: *Colour palette* table in docs/04-ui-spec.md gives, and a test parses that
-#: table and asserts so, because a palette with two homes has two values the
-#: first time somebody edits one of them.
-BUILTIN: Final = Theme(
-    name="VS Code Dark",
-    author="3d immersive",
-    tokens={
-        # Surfaces are VS Code's dark greys (D-44), and monotonic:
-        # surface.window is deepest and each step is lighter. Widgets rely on
-        # that ordering rather than on the values, because a theme may
-        # replace them.
-        "surface.window": "#181818",
-        "surface.panel": "#1F1F1F",
-        "surface.raised": "#252526",
-        "surface.hover": "#2D2D2D",
-        "border": "#3C3C3C",
-        "text.primary": "#CCCCCC",
-        "text.secondary": "#9D9D9D",
-        # Disabled text, and the one text colour exempt from the 4.5:1 rule.
-        "text.disabled": "#6E6E6E",
-        # The accent stays purple against the neutral greys. `accent` is a
-        # fill and stroke colour — playhead, focus ring, active toggle — and
-        # is 4.17:1 on surface.panel, which clears the 3:1 WCAG asks of a UI
-        # component but not the 4.5:1 04-ui-spec.md promises text. Purple
-        # that carries text uses accent.text.
-        "accent": "#A855F7",
-        "accent.pressed": "#7E3FF2",
-        "accent.text": "#C77DFF",
-        # Nothing styles these yet: clipping and missing media belong to
-        # widgets M2 and M3 build, and load failures to the notice centre
-        # this milestone's last phase builds. They are in the vocabulary
-        # because a token is a colour a theme may set, not a colour something
-        # currently paints.
-        "warn": "#F59E0B",
-        "error": "#F88A8A",
-    },
-    #: Assigned round-robin as channels are created; user-overridable. Chosen
-    #: to stay legible on surface.panel and distinguishable from each other
-    #: and from accent.
-    channels=(
-        "#A855F7",  # purple
-        "#22D3EE",  # cyan
-        "#F59E0B",  # amber
-        "#34D399",  # emerald
-        "#F472B6",  # pink
-        "#60A5FA",  # blue
-        "#FB923C",  # orange
-        "#A3E635",  # lime
-    ),
-    #: Per-widget roles (D-46). One group per widget the application draws
-    #: today, named from the ownership table in the *Theming* section of
-    #: docs/04-ui-spec.md rather than from the stylesheet's selectors — a key
-    #: called `toolbutton_pressed_background` would be a QSS selector with an
-    #: underscore in it, not a role anybody would think to theme.
-    #:
-    #: Every milestone from here adds its own groups as it builds the widgets
-    #: that need them, and adds them to `04` at the same time. That obligation
-    #: is the whole reason this system is built third rather than last.
-    groups={
-        "window": {"background": "surface.window"},
-        "panel": {"background": "surface.panel", "text": "text.primary"},
-        "menu": {
-            "bar.background": "surface.raised",
-            "bar.border": "border",
-            "bar.selected.background": "surface.hover",
-            "background": "surface.raised",
-            "border": "border",
-            "selected.background": "accent.pressed",
-            "selected.text": "text.primary",
-            "disabled.text": "text.disabled",
-            "separator": "border",
-        },
-        "toolbar": {
-            "background": "surface.raised",
-            "border": "border",
-            "separator": "border",
-        },
-        "button": {
-            "background": "surface.hover",
-            "border": "border",
-            "text": "text.primary",
-            "hover.border": "accent.text",
-            "pressed.background": "accent.pressed",
-            "checked.background": "accent.pressed",
-            "checked.border": "accent",
-            "disabled.text": "text.disabled",
-            "disabled.border": "surface.hover",
-        },
-        "tab": {
-            "pane.background": "surface.panel",
-            "bar.background": "surface.window",
-            "background": "surface.window",
-            "text": "text.secondary",
-            "hover.background": "surface.raised",
-            "hover.text": "text.primary",
-            "selected.background": "surface.panel",
-            "selected.text": "text.primary",
-            "selected.marker": "accent",
-        },
-        # The focus ring is its own group rather than a key on each widget:
-        # 04-ui-spec.md asks for one indicator, consistent across the
-        # application and visible — "no information by colour alone" cuts both
-        # ways, and a focus indicator nobody can see fails keyboard users
-        # first. One group is how it stays one colour.
-        "focus": {"ring": "accent", "menu.background": "surface.hover"},
-        "splitter": {"handle": "border", "hover.handle": "accent"},
-        "statusbar": {
-            "background": "surface.raised",
-            "border": "border",
-            "text": "text.secondary",
-        },
-        "scrollbar": {
-            "background": "surface.panel",
-            "handle": "surface.hover",
-            "hover.handle": "accent.pressed",
-        },
-        "tooltip": {
-            "background": "surface.raised",
-            "text": "text.primary",
-            "border": "accent.pressed",
-        },
-    },
-)
-
-
-# --------------------------------------------------------------------------- #
 # the active theme
 # --------------------------------------------------------------------------- #
 
@@ -433,12 +302,31 @@ BUILTIN: Final = Theme(
 #: exactly one by construction — the theme picker switches the application,
 #: not a panel — so the parameter would carry the same value everywhere it
 #: went.
-_active: Theme = BUILTIN
+#:
+#: `None` until something sets one, rather than the built-in: the default now
+#: comes off disk (D-80) and reading it at import would do file I/O to answer
+#: a question nobody has asked yet.
+_active: Theme | None = None
+
+
+def _default() -> Theme:
+    """The built-in theme, read from its bundled file.
+
+    The import is deferred because `theme_io` imports *this* module, so a
+    module-level import would be a cycle (D-80). The alternative was moving
+    the `.3dimtheme` format's constants in here, which would split the format
+    across two modules — the thing D-77 put it in one place to avoid. A
+    function-level absolute import is still greppable, which is what D-28
+    cares about.
+    """
+    from immersive.ui.theme_io import builtin
+
+    return builtin()
 
 
 def active() -> Theme:
     """The theme the application is currently drawn in."""
-    return _active
+    return _active if _active is not None else _default()
 
 
 def use(theme: Theme) -> None:
@@ -465,17 +353,17 @@ def color(name: str, theme: Theme | None = None) -> str:
     `theme` is here so a test can ask a specific one without touching the
     global.
     """
-    return (theme or _active).token(name)
+    return (theme or active()).token(name)
 
 
 def group_color(group: str, key: str, theme: Theme | None = None) -> str:
     """The colour for one role of one widget, in the active theme."""
-    return (theme or _active).value(group, key)
+    return (theme or active()).value(group, key)
 
 
 def channel_color(index: int, theme: Theme | None = None) -> str:
     """Colour for the channel at `index`, wrapping round the palette."""
-    return (theme or _active).channel(index)
+    return (theme or active()).channel(index)
 
 
 # --------------------------------------------------------------------------- #
@@ -514,7 +402,7 @@ def stylesheet(theme: Theme | None = None) -> str:
     without making it active first. Defaults to the active theme, which is
     what `app.py` wants.
     """
-    built = theme or _active
+    built = theme or active()
     return _template().substitute(
         {
             f"{group}.{key}".replace(".", "_"): built.value(group, key)
