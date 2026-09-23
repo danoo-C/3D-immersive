@@ -83,7 +83,7 @@ The practice this breaks is the project's most consistent testing habit, used
 in every plan since M1 phase 2, and it has been available to every sweep since.
 The mutations most likely to trigger it are value-for-value swaps, which are
 also the most common kind. Every sweep in the project was re-run with
-`PYTHONDONTWRITEBYTECODE=1` against a purged cache: all sixty-seven mutations
+`PYTHONDONTWRITEBYTECODE=1` against a purged cache: all sixty-eight mutations
 across M1 phase 5 and M9 phase 1 hold, so nothing previously recorded was
 wrong. The practice and the trap are now in
 [09-workflow.md](../09-workflow.md), which documented neither.

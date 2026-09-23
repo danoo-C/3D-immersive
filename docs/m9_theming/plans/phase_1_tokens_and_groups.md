@@ -372,7 +372,7 @@ exact problem D-76 exists to prevent, one layer up. Phase 4 has to call
 
 ### Which mutations survived the first suite
 
-Twenty-nine named across the phase. Three survived a first run:
+Thirty named across the phase. Three survived a first run:
 
 | Survivor | What it was |
 |---|---|
@@ -398,7 +398,7 @@ This is a flaw in the *practice*, not in this phase, and it has been available
 to every sweep since M1 phase 2. Most mutations change length enough to be
 safe; the ones that do not are exactly the value-for-value swaps, which are
 the most common kind. Every sweep in the project was re-run with
-`PYTHONDONTWRITEBYTECODE=1` and a purged cache, and all sixty-seven mutations
+`PYTHONDONTWRITEBYTECODE=1` and a purged cache, and all sixty-eight mutations
 across M1 phase 5 and M9 phase 1 hold — so nothing previously recorded was
 wrong. The practice and the trap are now written into
 [09-workflow.md](../../09-workflow.md), which owned neither.
