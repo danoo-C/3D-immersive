@@ -485,6 +485,40 @@ def strict(text: str, *, source: str = "the theme") -> Theme:
     )
 
 
+#: What a theme file is called. One place, because discovery matches on it
+#: and the menu shows it stripped off.
+SUFFIX: Final = ".3dimtheme"
+
+
+def discover(directory: str | os.PathLike[str]) -> list[Path]:
+    """Every `.3dimtheme` in `directory`, sorted by path.
+
+    Sorted so the menu has a stable order that does not depend on the
+    filesystem's iteration order, which differs between platforms and between
+    two runs on the same one.
+
+    **A directory that is not there is an empty result, not an error.** On a
+    first run nothing has created it yet, and a missing theme directory means
+    "no user themes" rather than anything somebody needs to hear about. The
+    same goes for one that cannot be read: a themes folder with the wrong
+    permissions is not a reason to refuse to start.
+
+    Takes a directory rather than finding one, so this module stays free of
+    Qt (D-81 makes the same argument one module over). Where the directory
+    *is* is a question only `QStandardPaths` can answer, and that lives in
+    `ui/theme_menu.py`.
+    """
+    try:
+        found = [
+            path
+            for path in Path(directory).iterdir()
+            if path.is_file() and path.suffix == SUFFIX
+        ]
+    except OSError:
+        return []
+    return sorted(found)
+
+
 @cache
 def builtin() -> Theme:
     """The default palette, read once per process from its bundled file.
