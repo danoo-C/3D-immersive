@@ -7,7 +7,7 @@ the autouse fixture in conftest.py, so nothing here touches a real config.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -149,6 +149,42 @@ def test_the_order_is_use_then_clear_then_sheet_then_walk(
     assert app.styleSheet() == theme.stylesheet(chosen)
 
 
+def test_the_order_itself_is_use_then_clear_then_sheet_then_walk(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-82 says the order is the decision, so the order is what is asserted.
+
+    The consequence test above cannot see every reordering. Moving `use()`
+    after the sheet is invisible today, because `stylesheet()` is handed the
+    theme and nothing between the cache clears and `use()` reads a colour -
+    and it stops being invisible the first time something does, which is the
+    moment nobody will think to look. The window icon's cache is the same:
+    nothing asserts on the window icon's pixels, so only the call shows it.
+    """
+    calls: list[str] = []
+
+    def recording(name: str, real: Callable[..., object]) -> Callable[..., object]:
+        def record(*args: object, **kwargs: object) -> object:
+            calls.append(name)
+            return real(*args, **kwargs)
+
+        return record
+
+    monkeypatch.setattr(theme, "use", recording("use", theme.use))
+    monkeypatch.setattr(
+        icons.icon, "cache_clear", recording("icons", icons.icon.cache_clear)
+    )
+    monkeypatch.setattr(
+        icons.app_icon, "cache_clear", recording("app icon", icons.app_icon.cache_clear)
+    )
+    monkeypatch.setattr(theme, "stylesheet", recording("sheet", theme.stylesheet))
+    monkeypatch.setattr(MainWindow, "retheme", recording("walk", MainWindow.retheme))
+
+    window.apply_theme(loud())
+
+    assert calls == ["use", "icons", "app icon", "sheet", "walk"]
+
+
 # --------------------------------------------------------------------------- #
 # the menu
 # --------------------------------------------------------------------------- #
@@ -169,6 +205,21 @@ def test_a_theme_dropped_in_appears_without_a_restart(window: MainWindow) -> Non
     written(directory / f"ocean{theme_io.SUFFIX}", tokens={"accent": "#FF0000"})
 
     window._theme_menu.repopulate()
+
+    assert "ocean" in [action.text() for action in window._theme_menu.actions()]
+
+
+def test_opening_the_menu_is_what_rescans(window: MainWindow) -> None:
+    """F-48 needs the rescan tied to opening the menu, not to a caller.
+
+    Every other test here calls `repopulate()` itself, so none of them would
+    notice the connection to `aboutToShow` going - and then a file dropped in
+    needs a restart again.
+    """
+    directory = theme_menu.user_theme_directory()
+    written(directory / f"ocean{theme_io.SUFFIX}", tokens={"accent": "#FF0000"})
+
+    window._theme_menu.aboutToShow.emit()
 
     assert "ocean" in [action.text() for action in window._theme_menu.actions()]
 

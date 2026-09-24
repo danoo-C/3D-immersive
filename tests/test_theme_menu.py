@@ -12,6 +12,8 @@ asserts both, because nothing else would notice either going.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -91,6 +93,42 @@ def test_the_directory_can_be_asked_for_without_being_created() -> None:
     directory = theme_menu.user_theme_directory(create=False)
 
     assert not directory.exists()
+
+
+def test_listing_the_themes_makes_no_directory() -> None:
+    """Step 4's bug: the menu listed themes, and listing created the folder.
+
+    Building a window was enough to put a directory in the developer's real
+    config. Listing a directory is not a reason to make one.
+    """
+    assert theme_menu.user_themes() == []
+    assert not theme_menu.user_theme_directory(create=False).exists()
+
+
+def test_importing_the_ui_makes_no_directory(tmp_path: Path) -> None:
+    """Created on use, never at import - asserted where import happens.
+
+    Test modules are imported during collection, before any fixture has
+    redirected anything, so a directory made at import lands in the real
+    home of whoever runs the suite and no fixture can stop it. A fresh
+    interpreter with its own empty home is the only place this is visible.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-c", "import immersive.ui.main_window"],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(home / ".config"),
+            "APPDATA": str(home / "AppData"),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not list(home.rglob("*")), "importing made something in the home"
 
 
 def test_user_themes_reads_the_directory() -> None:
