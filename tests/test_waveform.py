@@ -88,6 +88,19 @@ def test_silence_inks_only_the_centre_row() -> None:
     assert rows_inked(image) == {HEIGHT // 2}
 
 
+def test_the_zero_line_is_drawn_where_the_sound_never_crosses_it() -> None:
+    """The centre line is the reference, not a side effect of silence.
+
+    Found by the sweep: silence inks its centre row with or without the line,
+    because a stroke of no length is still a point. A sample offset from
+    zero never reaches the centre, and without the line nothing shows where
+    zero is.
+    """
+    image = drawn(build(np.full((48_000, 1), 0.5, dtype=np.float32)))
+
+    assert colour("centre") in row_colours(image, HEIGHT // 2)
+
+
 def test_stereo_draws_a_lane_per_channel() -> None:
     audio = np.zeros((48_000, 2), dtype=np.float32)
     audio[:, 0] = sine(48_000)[:, 0]

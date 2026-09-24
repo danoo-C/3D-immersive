@@ -91,13 +91,21 @@ class Waveform(QWidget):
 
     def _paint(self, painter: QPainter, area: QRect) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.fillRect(area, QColor(theme.group_color("waveform", "background")))
+        ground = QColor(theme.group_color("waveform", "background"))
+        painter.fillRect(area, ground)
 
         if self._missing:
             warn = QColor(theme.group_color("waveform", "missing"))
             row = area.top() + area.height() // 2
             painter.setPen(QPen(warn, 1, Qt.PenStyle.DashLine))
             painter.drawLine(area.left(), row, area.right(), row)
+            # The words sit on a patch of background, not across the line:
+            # they are what makes this readable without colour, so the line
+            # must not run through them.
+            words = painter.boundingRect(
+                area, Qt.AlignmentFlag.AlignCenter, MISSING_TEXT
+            ).adjusted(-4, 0, 4, 0)
+            painter.fillRect(words, ground)
             painter.setPen(warn)
             painter.drawText(area, Qt.AlignmentFlag.AlignCenter, MISSING_TEXT)
             return
