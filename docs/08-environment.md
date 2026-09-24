@@ -44,6 +44,13 @@ through the current working directory. See *Imports and packaging* in
 
 On Windows the interpreter is `.venv\Scripts\python.exe`.
 
+**On Linux, install PortAudio as well:** `sudo apt install libportaudio2` (or
+your distribution's equivalent). `sounddevice`'s Windows and macOS wheels
+bundle it; the Linux wheel does not, and without it `import sounddevice`
+raises. The application still starts without it — audio output is simply
+unavailable, and the window says so and names this package (M2 phase 7) —
+but nothing can be heard. WSL counts as Linux here.
+
 ### Checks
 
 ```bash

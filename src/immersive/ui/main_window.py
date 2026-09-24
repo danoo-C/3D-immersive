@@ -12,7 +12,7 @@ from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from immersive import __version__
+from immersive.audio.audition import Audition
 from immersive.core.document import Document
 from immersive.core.edits import AddMedia
 from immersive.core.io import project_io
@@ -134,11 +135,23 @@ def _menu_is_open(bar: QMenuBar) -> bool:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    #: A problem reported from PortAudio's thread, posted on the UI thread.
+    #: Emitting a signal is the one thing that thread may do here.
+    _audio_problem = Signal(str)
+
+    def __init__(self, audition: Audition | None = None, unavailable: str = "") -> None:
         super().__init__()
+        #: How samples are heard (F-8), or `None` with the reason in
+        #: `unavailable`. A window built by a test has neither, and hears
+        #: nothing: only a real launch goes looking for a sound card.
+        self._audition = audition
+        self._unavailable = unavailable
         #: Everything this session has reported (F-56, D-65). Built before
         #: the status bar, which draws it.
         self._notices = NoticeLog()
+        self._audio_problem.connect(self._report_audio_problem)
+        if audition is not None:
+            audition.report = self._audio_problem.emit
         #: The project that is open (D-85). Every edit goes through it, and
         #: the window reads its state back after each one rather than keeping
         #: a second copy that could disagree.
@@ -397,7 +410,12 @@ class MainWindow(QMainWindow):
     def _build_layout(self) -> QWidget:
         # Left column: media pool over the context-sensitive params pane.
         left = QSplitter(Qt.Orientation.Vertical)
-        self._pool = MediaPool(self._document, self._store)
+        self._pool = MediaPool(self._document, self._store, self.audition_media)
+        self._pool.set_hearing(
+            "Double-click to hear it"
+            if self._audition is not None
+            else f"Cannot be heard: {self._unavailable or 'no audio output'}"
+        )
         left.addWidget(self._pool)
         left.addWidget(Placeholder("Parameters", "follows the current selection"))
         left.setSizes([_POOL_H, _PARAMS_H])
@@ -545,6 +563,17 @@ class MainWindow(QMainWindow):
         target = chosen
         return self._written(target, lambda: self._document.save_as(target))
 
+    def audition_media(self, media_id: str) -> bool:
+        """Play a sample straight to the output, replacing any other (F-8)."""
+        audio = self._store.audio(media_id)
+        if self._audition is None or audio is None:
+            return False
+        self._audition.play(audio.audio)
+        return True
+
+    def _report_audio_problem(self, message: str) -> None:
+        self._notices.add(Severity.WARN, message)
+
     def pool(self) -> MediaPool:
         return self._pool
 
@@ -682,6 +711,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         """Quit asks, like New and Open, and Cancel keeps the window."""
         if self._may_discard():
+            if self._audition is not None:
+                self._audition.close()
             event.accept()
         else:
             event.ignore()

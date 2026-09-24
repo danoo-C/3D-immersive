@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path, PurePath
 
 from PySide6.QtCore import (
@@ -128,11 +129,19 @@ class MediaPool(Panel):
     """04's media pool, over a document and the session's store."""
 
     def __init__(
-        self, document: Document, store: MediaStore, parent: QWidget | None = None
+        self,
+        document: Document,
+        store: MediaStore,
+        hear: Callable[[str], object] | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__("Media Pool", parent)
         self._document = document
         self.store = store
+        self._hear = hear
+        #: The line every row's tooltip ends with: how to hear it, or why it
+        #: cannot be heard (F-8, and 04's rule that nothing is silently dead).
+        self._hearing = ""
 
         self.filter = QLineEdit()
         self.filter.setObjectName("PoolFilter")
@@ -168,6 +177,8 @@ class MediaPool(Panel):
         header.resizeSection(WAVEFORM, THUMBNAIL_WIDTH)
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+        self.tree.doubleClicked.connect(self._double_clicked)
+
         self.body().addWidget(self.filter)
         self.body().addWidget(self.tree, 1)
 
@@ -182,6 +193,15 @@ class MediaPool(Panel):
             if media.id == media_id:
                 return media
         return None
+
+    def set_hearing(self, line: str) -> None:
+        self._hearing = line
+        self.rebuild()
+
+    def _double_clicked(self, index: QModelIndex) -> None:
+        media_id = index.data(ID_ROLE)
+        if isinstance(media_id, str) and self._hear is not None:
+            self._hear(media_id)
 
     # --------------------------------------------------------------- building
 
@@ -220,7 +240,9 @@ class MediaPool(Panel):
 
     def _row(self, media: MediaFile) -> list[QStandardItem]:
         name = QStandardItem((MISSING_MARK if media.missing else "") + media.name)
-        name.setToolTip(media.path)
+        name.setToolTip(
+            f"{media.path}\n{self._hearing}" if self._hearing else media.path
+        )
         if media.missing:
             name.setForeground(QBrush(QColor(theme.color("warn"))))
         length = QStandardItem(duration(media.frames))
