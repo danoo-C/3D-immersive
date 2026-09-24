@@ -132,6 +132,32 @@ def _nothing_waits_for_a_person() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_window_outlives_its_test() -> Iterator[None]:
+    """Every parentless widget a test made is gone before the next test.
+
+    `deleteLater()` only deletes when the event loop next turns, and nothing
+    in a test turns it, so windows piled up for the whole session. That is
+    not only memory: building a window applies the theme, and applying the
+    theme re-polishes every widget in every window still alive - so each
+    window cost more than the one before. Found when M2 phase 1 added twenty
+    window tests and the suite went from seventy seconds to over three
+    minutes; a probe had eight windows alive after eight were released.
+
+    Posted deletions are delivered by hand, the way pytest-qt does it.
+    """
+    yield
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    if QApplication.instance() is None:
+        return
+    for widget in QApplication.topLevelWidgets():
+        if widget.parent() is None:
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
 def _empty_config() -> Iterator[None]:
     """Every test starts with nothing remembered and no themes installed.
 
