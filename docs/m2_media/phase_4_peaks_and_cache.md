@@ -1,6 +1,7 @@
 # M2 · Phase 4 — Peaks and the cache
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_4_peaks_and_cache.md](plans/phase_4_peaks_and_cache.md)
 
 ## Goal
 
