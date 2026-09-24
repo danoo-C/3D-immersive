@@ -11,7 +11,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [1 — The project in the window](phase_1_project_in_the_window.md) | ✅ |
 | [2 — Decode and resample](phase_2_decode_and_resample.md) | ✅ |
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | ✅ |
-| [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | in progress |
+| [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | ✅ |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | not started |
 | [6 — The media pool](phase_6_media_pool.md) | not started |
 | [7 — Audition](phase_7_audition.md) | not started |
@@ -70,11 +70,9 @@ phase's first decision.
   the count in the reason (D-87, phase 2).
 - ~~**What is hashed, and with what?**~~ SHA-256 of the bytes, streamed
   (D-88, phase 3).
-- **Where exactly is the cache, and who resolves it?** `03` gives literal
-  paths per platform (`~/.cache/3dimmersive`); Qt's cache location for this
-  application is a different path; and `peaks.py` lives in `core/`, which
-  N-5 keeps free of Qt. Phase 4 — and the test isolation M9 built does not
-  yet redirect the cache directory.
+- ~~**Where exactly is the cache, and who resolves it?**~~ `03`'s paths,
+  worked out by `core` from the environment, and redirected by the suite
+  (D-91, phase 4).
 - **PortAudio is not installed here, and not on CI's Linux runner.**
   `import sounddevice` fails on this WSL venv with *PortAudio library not
   found*: on Linux the wheel does not bundle it. Phase 7 has to decide what
@@ -115,3 +113,11 @@ left alone rather than silently edited on open (D-89). The test that shows
 the trade — the same audio under two titles hashes differently — is the
 phase's most useful. The sweep found one command promise that could only be
 seen from outside its one caller.
+
+**Phase 4.** A min/max pyramid per channel, cached by content hash in the
+one user-level directory, read ever after. `core` works out the cache path
+from the environment rather than asking Qt (D-91), which makes the suite's
+isolation checkable on every platform. Measuring for N-4 found the build
+slower than decoding because of how memory was walked; after fixing that it
+takes 0.06 s for five minutes of stereo, and a hundred samples' peaks load
+warm in under a fifth of a second.

@@ -1,6 +1,6 @@
 # Plan — M2 · Phase 4 — Peaks and the cache
 
-**Written:** 2026-09-24 · **Status:** in progress
+**Written:** 2026-09-24 · **Status:** ✅ complete
 
 ## Approach
 
@@ -124,4 +124,34 @@ tests/conftest.py                  amended — the cache redirect
 
 ## Outcome
 
-Filled in at the end.
+Two steps in the planned order, all nine acceptance boxes ticked, eleven
+mutations and no survivor. 951 tests.
+
+### What the plan got right
+
+**An oracle that shares nothing with the build.** It is why rewriting the
+reduction for speed was safe to do in the same step that measured it.
+
+**Every damaged entry as a miss.** Five kinds of damage, one rule, and the
+rule never needed an exception.
+
+**Resolving the path in `core`.** The isolation test it made possible is the
+one M9 could not write.
+
+### What the plan did not see
+
+**That the build would cost more than the decode.** The plan's numbers were
+sizes, not times. Measuring for N-4 was what found a reduction running across
+strided memory, and fixing it took the build from 0.79 s to 0.06 s for five
+minutes of stereo.
+
+**That one named mutation belonged to a caller.** "Keyed by path" cannot
+happen inside a function that is only ever handed a key.
+
+### What phase 5 needs to know
+
+A `Pyramid` is finest-first; `Level.bucket` is the frames each bucket covers
+and `low`/`high` are `(buckets, channels)`. To draw *w* pixels over *n*
+frames, the coarsest level whose bucket is still at most *n / w* gives at
+least one bucket per pixel. Every level's arrays are float32 and may exceed
+±1 for float sources.
