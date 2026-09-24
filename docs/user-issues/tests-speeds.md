@@ -1,7 +1,20 @@
 # Test speed — plan
 
-**Status:** proposed · **Written:** 2026-09-24 · **Measured at:** `d005e34`
-on `m2-media`, WSL2, 12 logical CPUs, Python 3.13
+**Status:** steps 1–2 done, 3–6 proposed · **Written:** 2026-09-24 ·
+**Measured at:** `d005e34` on `m2-media`, WSL2, 12 logical CPUs, Python 3.13
+
+## Progress
+
+| | Serial | Parallel (8, `worksteal`) |
+|---|---|---|
+| Before | 15.5 s | — |
+| ~~Step 1~~ landed | **11.3 s** | — |
+| ~~Step 2~~ landed | 11.3 s | **5.3 s** |
+
+Both measured after landing, three parallel runs in a row, all green. The
+commands now live in [08-environment.md](../08-environment.md)'s *Checks*
+and the sweep practice in [09-workflow.md](../09-workflow.md); this document
+keeps only the argument and the remaining steps.
 
 This document owns one thing: the plan for making the test suite faster, and
 the measurements it is argued from. It is not part of the numbered canon. What
@@ -67,9 +80,10 @@ Six steps, ordered by payoff over risk. Every number marked *measured* was
 produced before this plan was written, by applying the change temporarily
 and running the whole suite; nothing in the repository has been changed yet.
 
-### 1. Stop re-painting a window in the colours it already has
+### ~~1. Stop re-painting a window in the colours it already has~~ — done
 
-**Measured: window construction 64 → 32 ms; serial suite 15.5 → 12.0 s.**
+**Measured: window construction 64 → 32 ms; serial suite 15.5 → 12.0 s**
+before landing, **11.3 s** after.
 
 `MainWindow.apply_theme()` returns early when the theme it is asked to apply
 is already active *and* the application's stylesheet is already that theme's.
@@ -80,19 +94,23 @@ comparison of about 6 KB, against 23 ms of re-polishing.
 It helps real launches as much as tests: the application currently paints
 its first window twice.
 
-- [ ] `apply_theme` skips a theme that is already applied.
-- [ ] A test asserts that the skip happens — the stylesheet is not set again
+- [x] `apply_theme` skips a theme that is already applied.
+- [x] A test asserts that the skip happens — the stylesheet is not set again
       for the same theme — and that switching to a *different* theme still
       runs D-82's full order. The order test in `test_theme_switching.py` must
       pass unchanged.
-- [ ] A named mutation: removing the skip is caught by the first test, and
+- [x] A named mutation: removing the skip is caught by the first test, and
       skipping a genuinely different theme is caught by the existing ones.
-- [ ] Measured again after landing, with the result recorded here.
+      *Landed as two mutations: the skip removed, and skipping on the theme
+      alone without comparing sheets. Each is killed by the test written for
+      it; the second needed its own test, which puts the application in the
+      active theme but another theme's sheet.*
+- [x] Measured again after landing, with the result recorded here: 11.3 s.
 
 All 1078 tests passed with the change applied temporarily, so nothing relies
 on the redundant repaint.
 
-### 2. Run the suite in parallel
+### ~~2. Run the suite in parallel~~ — done, CI's runs still to watch
 
 **Measured, all green three runs in a row:**
 
@@ -117,14 +135,15 @@ settings, cache directory and dialog guard are all session fixtures, and each
 worker gets its own session. Three consecutive green runs are evidence that
 no test depends on another's leftovers.
 
-- [ ] `pytest-xdist` added to the `dev` extra in `pyproject.toml`, and
-      `uv.lock` updated.
-- [ ] **Not in `addopts`.** A plain `pytest` stays serial, so running one test
+- [x] `pytest-xdist` added to the `dev` extra in `pyproject.toml`, and
+      `uv.lock` updated. *The lock gained `pytest-xdist` 3.8.0 and `execnet`
+      2.1.2 and nothing else moved.*
+- [x] **Not in `addopts`.** A plain `pytest` stays serial, so running one test
       under a debugger stays simple. `08`'s *Checks* gains
       `pytest -n 8 --dist worksteal` as the way to run everything.
-- [ ] CI runs with `-n auto --dist worksteal`. Its runners have two to four
+- [x] CI runs with `-n auto --dist worksteal`. Its runners have two to four
       cores, so expect a smaller gain there, measured on the first run.
-- [ ] The mutation sweeps described in [09-workflow.md](../09-workflow.md)
+- [x] The mutation sweeps described in [09-workflow.md](../09-workflow.md)
       run the whole suite per mutation in parallel. A sweep of eighteen
       mutations drops from about four minutes to under two.
 - [ ] Three consecutive green parallel runs on each CI platform before this
@@ -190,8 +209,8 @@ spent tidying things they never touch.
 
 | | Serial | Parallel (8, `worksteal`) | Fast lane |
 |---|---|---|---|
-| Today | 15.5 s | 5.9 s *(measured, not yet adopted)* | 4.1 s |
-| After step 1 | **12.0 s** *(measured)* | ~5.9 s *(measured: no change)* | 4.1 s |
+| Before this plan | 15.5 s | — | 4.1 s |
+| After steps 1–2 | **11.3 s** *(measured)* | **5.3 s** *(measured)* | 4.1 s |
 | After steps 1–6 | ~10.5 s *(estimated)* | ~5 s *(estimated)* | ~3 s *(estimated)* |
 
 The largest single saving is already known: step 2 plus step 1 take the full

@@ -57,8 +57,14 @@ but nothing can be heard. WSL counts as Linux here.
 .venv/bin/ruff check .           # lint, including the no-relative-imports rule
 .venv/bin/ruff format --check .  # formatting
 .venv/bin/mypy                   # types
-QT_QPA_PLATFORM=offscreen .venv/bin/pytest
+QT_QPA_PLATFORM=offscreen .venv/bin/pytest -n 8 --dist worksteal   # everything, in parallel
 ```
+
+**Run the whole suite in parallel.** Eight workers with work-stealing took
+it from 11.3 s to under 6 s where it was measured. More workers than that was
+slower, because each pays about two seconds to start. A plain `pytest` still
+runs serially — deliberately not in `addopts` — so a single test under a
+debugger behaves as it always has. CI runs `-n auto`, sized to the runner.
 
 `QT_QPA_PLATFORM=offscreen` is set automatically by `tests/conftest.py`; it is
 shown here because you will want it for any ad-hoc Qt script on a headless

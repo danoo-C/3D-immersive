@@ -60,8 +60,10 @@ jobs:
       - name: Type check
         run: mypy
 
+      # In parallel: work-stealing measured fastest here. A runner's core count
+      # decides how many workers `auto` starts (docs/user-issues/tests-speeds.md).
       - name: Test
-        run: pytest
+        run: pytest -n auto --dist worksteal
 
   # D-27's whole rationale is that packaging mistakes surface now rather than
   # at release. `pip install -e .` does not exercise the wheel, so on its own
