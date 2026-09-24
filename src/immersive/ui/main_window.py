@@ -39,6 +39,7 @@ from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, fi
 from immersive.core.model import MediaFile, Project
 from immersive.core.relink import relink
 from immersive.ui import icons, theme, theme_io, theme_menu
+from immersive.ui.explorer.media_pool import MediaPool
 from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
@@ -390,7 +391,8 @@ class MainWindow(QMainWindow):
     def _build_layout(self) -> QWidget:
         # Left column: media pool over the context-sensitive params pane.
         left = QSplitter(Qt.Orientation.Vertical)
-        left.addWidget(Placeholder("Media Pool", "imported audio, drag to timeline"))
+        self._pool = MediaPool(self._document, self._store)
+        left.addWidget(self._pool)
         left.addWidget(Placeholder("Parameters", "follows the current selection"))
         left.setSizes([_POOL_H, _PARAMS_H])
 
@@ -531,6 +533,9 @@ class MainWindow(QMainWindow):
             chosen = chosen.with_suffix(project_io.SUFFIX)
         target = chosen
         return self._written(target, lambda: self._document.save_as(target))
+
+    def pool(self) -> MediaPool:
+        return self._pool
 
     def store(self) -> MediaStore:
         """The session's decoded audio and peaks, by media id."""

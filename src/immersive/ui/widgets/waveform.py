@@ -85,52 +85,59 @@ class Waveform(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
-            self._paint(painter, self.rect())
+            paint_peaks(painter, self.rect(), self._pyramid, missing=self._missing)
         finally:
             painter.end()
 
-    def _paint(self, painter: QPainter, area: QRect) -> None:
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        ground = QColor(theme.group_color("waveform", "background"))
-        painter.fillRect(area, ground)
 
-        if self._missing:
-            warn = QColor(theme.group_color("waveform", "missing"))
-            row = area.top() + area.height() // 2
-            painter.setPen(QPen(warn, 1, Qt.PenStyle.DashLine))
-            painter.drawLine(area.left(), row, area.right(), row)
-            # The words sit on a patch of background, not across the line:
-            # they are what makes this readable without colour, so the line
-            # must not run through them.
-            words = painter.boundingRect(
-                area, Qt.AlignmentFlag.AlignCenter, MISSING_TEXT
-            ).adjusted(-4, 0, 4, 0)
-            painter.fillRect(words, ground)
-            painter.setPen(warn)
-            painter.drawText(area, Qt.AlignmentFlag.AlignCenter, MISSING_TEXT)
-            return
+def paint_peaks(
+    painter: QPainter, area: QRect, pyramid: Pyramid | None, *, missing: bool = False
+) -> None:
+    """Draw `pyramid` into `area`, or the reason there is none.
 
-        pyramid = self._pyramid
-        if pyramid is None or area.width() <= 0:
-            return
+    A function rather than only a method, so the media pool's thumbnail
+    column paints with exactly this and not a copy of it.
+    """
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+    ground = QColor(theme.group_color("waveform", "background"))
+    painter.fillRect(area, ground)
 
-        lows, highs = envelope(pyramid, area.width())
-        lane_height = area.height() / pyramid.channels
-        centre = QColor(theme.group_color("waveform", "centre"))
-        fill = QColor(theme.group_color("waveform", "fill"))
-        for channel in range(pyramid.channels):
-            top = area.top() + round(channel * lane_height)
-            bottom = area.top() + round((channel + 1) * lane_height) - 1
-            middle = (top + bottom) / 2
-            half = (bottom - top) / 2
-            painter.setPen(centre)
-            painter.drawLine(area.left(), round(middle), area.right(), round(middle))
-            painter.setPen(fill)
-            # Overs are drawn to the lane's edge and no further: a float
-            # sample above full scale must not paint into the next channel.
-            high = np.clip(highs[:, channel], -1.0, 1.0)
-            low = np.clip(lows[:, channel], -1.0, 1.0)
-            for x in range(area.width()):
-                y_high = round(middle - high[x] * half)
-                y_low = round(middle - low[x] * half)
-                painter.drawLine(area.left() + x, y_high, area.left() + x, y_low)
+    if missing:
+        warn = QColor(theme.group_color("waveform", "missing"))
+        row = area.top() + area.height() // 2
+        painter.setPen(QPen(warn, 1, Qt.PenStyle.DashLine))
+        painter.drawLine(area.left(), row, area.right(), row)
+        # The words sit on a patch of background, not across the line:
+        # they are what makes this readable without colour, so the line
+        # must not run through them.
+        words = painter.boundingRect(
+            area, Qt.AlignmentFlag.AlignCenter, MISSING_TEXT
+        ).adjusted(-4, 0, 4, 0)
+        painter.fillRect(words, ground)
+        painter.setPen(warn)
+        painter.drawText(area, Qt.AlignmentFlag.AlignCenter, MISSING_TEXT)
+        return
+
+    if pyramid is None or area.width() <= 0:
+        return
+
+    lows, highs = envelope(pyramid, area.width())
+    lane_height = area.height() / pyramid.channels
+    centre = QColor(theme.group_color("waveform", "centre"))
+    fill = QColor(theme.group_color("waveform", "fill"))
+    for channel in range(pyramid.channels):
+        top = area.top() + round(channel * lane_height)
+        bottom = area.top() + round((channel + 1) * lane_height) - 1
+        middle = (top + bottom) / 2
+        half = (bottom - top) / 2
+        painter.setPen(centre)
+        painter.drawLine(area.left(), round(middle), area.right(), round(middle))
+        painter.setPen(fill)
+        # Overs are drawn to the lane's edge and no further: a float
+        # sample above full scale must not paint into the next channel.
+        high = np.clip(highs[:, channel], -1.0, 1.0)
+        low = np.clip(lows[:, channel], -1.0, 1.0)
+        for x in range(area.width()):
+            y_high = round(middle - high[x] * half)
+            y_low = round(middle - low[x] * half)
+            painter.drawLine(area.left() + x, y_high, area.left() + x, y_low)

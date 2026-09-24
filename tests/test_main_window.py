@@ -55,10 +55,10 @@ def test_layout_is_splitters_not_docks(app: object) -> None:
 
 
 def test_every_region_is_present(app: object) -> None:
-    from immersive.ui.widgets.placeholder import Placeholder
+    from immersive.ui.widgets.placeholder import Panel
 
     window = MainWindow()
-    panels = window.findChildren(Placeholder)
+    panels = window.findChildren(Panel)
     assert len(panels) == 7  # pool, params, top, front, 3d, keyframes, timeline
 
 

@@ -411,6 +411,15 @@ thumbnail. Filter box at the top.
 - Drag onto empty timeline space to create a new channel holding it.
 - Missing files show in `warn` with a relink action.
 
+The folders mirror those beneath what was imported: the deepest folder every
+sample shares is the root, so importing one folder shows its subfolders and
+not the path to it. A missing row says so in words — `⚠` before its name — as
+well as in `warn`.
+
+A dragged row carries **`application/x-3dimmersive-media`**: a JSON list of
+the dragged samples' media ids, in the order they appear. This is the
+contract the timeline accepts at M3.
+
 ## Parameters pane (left, bottom)
 
 Context-sensitive on the current selection. Resizable; collapsible to a strip.

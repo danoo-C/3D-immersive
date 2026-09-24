@@ -75,7 +75,16 @@ in `04` so M3's timeline has a contract to accept rather than a guess.
    match; a missing row is `warn` and says so in text; a drag carries the
    named type and the ids; the pool follows Undo and Redo.
 
-4. **Its theme groups, and a fixture retired.** `tree`, `header` and
+4. **An opened project's samples load too.** *Added while building step 3.*
+   The store is filled only by imports, so a project opened from disk showed
+   blank thumbnails and — at phase 7 — would play nothing. Opening now
+   prepares the samples that are present on the same workers, into the store
+   and not the model: no edit, no dirty mark, no hash written (D-89).
+   *Test:* a saved project reopened shows thumbnails; opening marks nothing
+   unsaved; a sample that fails to load is reported once; missing samples
+   are not tried.
+
+5. **Its theme groups, and a fixture retired.** `tree`, `header` and
    `filter` in `app.qss`, the bundled theme and `04`'s ownership table. M9's
    golden stylesheet fixture retires here, as its docstring says it would the
    first time a milestone legitimately changed the sheet. A screenshot of a
