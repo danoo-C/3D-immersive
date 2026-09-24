@@ -84,6 +84,53 @@ def _nothing_writes_your_home(
                 os.environ[name] = value
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _nothing_waits_for_a_person() -> Iterator[None]:
+    """A modal dialog in an offscreen test fails the test instead of hanging it.
+
+    Offscreen, nobody can click, so a real `exec()` waits forever and the
+    suite stops with no failure and no name. Every place the application
+    waits for a person is a method a test replaces; this is what happens to a
+    test that forgot to.
+
+    ⚠️ It reaches what goes through Python: a dialog's `exec()` and
+    `QFileDialog`'s static choosers. It cannot reach `QMessageBox.question`
+    and its siblings, which run their loop in C++ - so the application never
+    calls them, and builds a box and calls `exec()` instead. Found by a probe
+    that hung while this was being written.
+
+    Patched and restored by hand, for the reason the fixture above gives.
+    """
+    from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
+
+    def refuse(*args: object, **kwargs: object) -> object:
+        raise AssertionError(
+            "a test reached a real modal dialog - replace the window method "
+            "that asks instead"
+        )
+
+    patched = [
+        (QDialog, "exec"),
+        (QMessageBox, "exec"),
+        (QFileDialog, "exec"),
+        (QFileDialog, "getOpenFileName"),
+        (QFileDialog, "getOpenFileNames"),
+        (QFileDialog, "getSaveFileName"),
+        (QFileDialog, "getExistingDirectory"),
+    ]
+    saved = [(owner, name, owner.__dict__.get(name)) for owner, name in patched]
+    for owner, name in patched:
+        setattr(owner, name, staticmethod(refuse))
+    try:
+        yield
+    finally:
+        for owner, name, original in saved:
+            if original is None:
+                delattr(owner, name)
+            else:
+                setattr(owner, name, original)
+
+
 @pytest.fixture(autouse=True)
 def _empty_config() -> Iterator[None]:
     """Every test starts with nothing remembered and no themes installed.

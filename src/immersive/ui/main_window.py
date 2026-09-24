@@ -8,16 +8,20 @@ deliberate: a fixed layout with draggable splitters, not dockable panels
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
-from PySide6.QtGui import QAction, QKeySequence, QMouseEvent
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QLabel,
     QMainWindow,
     QMenu,
     QMenuBar,
+    QMessageBox,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -28,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from immersive import __version__
 from immersive.core.document import Document
+from immersive.core.io import project_io
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
@@ -36,6 +41,18 @@ from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.placeholder import Placeholder
 
 WINDOW_TITLE = "3d immersive"
+
+#: What the Open and Save As dialogs show.
+PROJECT_FILTER = f"3d immersive project (*{project_io.SUFFIX})"
+
+
+class Unsaved(Enum):
+    """The three answers to "save changes first?" - 04's one confirmation."""
+
+    SAVE = "save"
+    DISCARD = "discard"
+    CANCEL = "cancel"
+
 
 # Initial splitter sizes, in pixels. Qt distributes any surplus proportionally,
 # so these set the relative weights as much as the literal widths.
@@ -50,7 +67,6 @@ _PARAMS_H = 220
 # milestone rather than a dozen scattered strings - and so that a grep for
 # "M3" finds everything the timeline milestone switches on. The milestones
 # themselves are defined in docs/06-roadmap.md.
-_M1 = "the project model and undo stack arrive at M1"
 _M2 = "the media pool arrives at M2"
 _M3 = "the timeline and transport arrive at M3"
 _M5 = "the spatial views arrive at M5"
@@ -144,11 +160,17 @@ class MainWindow(QMainWindow):
         bar.installEventFilter(self._menu_hover)
 
         file_menu = self._menu(bar, "&File")
-        self._add(file_menu, "&New Project", "Ctrl+N", arrives=_M1)
-        self._add(file_menu, "&Open Project…", "Ctrl+O", arrives=_M1)
+        self._add(file_menu, "&New Project", "Ctrl+N").triggered.connect(
+            self.new_project
+        )
+        self._add(file_menu, "&Open Project…", "Ctrl+O").triggered.connect(
+            lambda: self.open_project()
+        )
         file_menu.addSeparator()
-        self._add(file_menu, "&Save", "Ctrl+S", arrives=_M1)
-        self._add(file_menu, "Save &As…", "Ctrl+Shift+S", arrives=_M1)
+        self._add(file_menu, "&Save", "Ctrl+S").triggered.connect(self.save_project)
+        self._add(file_menu, "Save &As…", "Ctrl+Shift+S").triggered.connect(
+            self.save_project_as
+        )
         file_menu.addSeparator()
         self._add(file_menu, "&Import Audio…", "Ctrl+I", arrives=_M2)
         file_menu.addSeparator()
@@ -393,7 +415,6 @@ class MainWindow(QMainWindow):
 
     def _build_statusbar(self) -> None:
         bar = QStatusBar()
-        bar.showMessage("No project")
 
         self._xruns = QLabel("xruns 0")
         self._xruns.setStyleSheet(f"color: {theme.color('text.disabled')};")
@@ -417,6 +438,157 @@ class MainWindow(QMainWindow):
     def document(self) -> Document:
         """The open project. Edits go through it, never around it (D-85)."""
         return self._document
+
+    def new_project(self) -> bool:
+        """File > New. False when the person chose to keep what was open."""
+        if not self._may_discard():
+            return False
+        self._document.new()
+        return True
+
+    def open_project(self, path: Path | None = None) -> bool:
+        """File > Open. `path` skips the dialog, for a caller that has one.
+
+        A file that will not open is an `error` notice and nothing else: the
+        document leaves the open project exactly as it was (D-85). Media that
+        is not on this machine is one `warn` notice for the whole open, with a
+        line per file (F-3) - one open raising the count once per sample that
+        moved would be counting the wrong thing.
+        """
+        if not self._may_discard():
+            return False
+        chosen = path if path is not None else self._choose_open_path()
+        if chosen is None:
+            return False
+        try:
+            self._document.open(chosen)
+        except project_io.ProjectFileError as refused:
+            self._report_failure(
+                f"{chosen.name} could not be opened",
+                [str(problem) for problem in refused.problems],
+            )
+            return False
+        except OSError as unreadable:
+            self._report_failure(
+                f"{chosen.name} could not be opened", [_reason(unreadable)]
+            )
+            return False
+
+        missing = [
+            media for media in self._document.project.media_pool if media.missing
+        ]
+        if missing:
+            count = len(missing)
+            self._notices.add(
+                Severity.WARN,
+                f"{chosen.name} opened with {count} media "
+                f"file{'s' if count != 1 else ''} missing",
+                [media.path for media in missing],
+            )
+        return True
+
+    def save_project(self) -> bool:
+        """File > Save. An untitled project asks where, through Save As."""
+        path = self._document.path
+        if path is None:
+            return self.save_project_as()
+        return self._written(path, self._document.save)
+
+    def save_project_as(self) -> bool:
+        """File > Save As. A name typed without a suffix gets `.3dim`.
+
+        Otherwise a project saved as "mix" is written, and then hidden by the
+        Open dialog's own filter the next time anyone looks for it.
+        """
+        chosen = self._choose_save_path()
+        if chosen is None:
+            return False
+        if not chosen.suffix:
+            chosen = chosen.with_suffix(project_io.SUFFIX)
+        target = chosen
+        return self._written(target, lambda: self._document.save_as(target))
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Quit asks, like New and Open, and Cancel keeps the window."""
+        if self._may_discard():
+            event.accept()
+        else:
+            event.ignore()
+
+    def _written(self, path: Path, write: Callable[[], None]) -> bool:
+        """Run a save, and turn a failure into a notice rather than a crash."""
+        try:
+            write()
+        except project_io.ProjectFileError as refused:
+            self._report_failure(
+                f"{path.name} was not saved",
+                [str(problem) for problem in refused.problems],
+            )
+            return False
+        except OSError as failed:
+            self._report_failure(f"{path.name} was not saved", [_reason(failed)])
+            return False
+        return True
+
+    def _report_failure(self, message: str, detail: list[str]) -> None:
+        self._notices.add(Severity.ERROR, message, detail)
+
+    def _may_discard(self) -> bool:
+        """Whether the open project may be replaced or closed.
+
+        ⚠️ **Save goes ahead only if the save worked.** A Save As dialog that
+        was cancelled, or a write that failed, must not be followed by
+        throwing away the project somebody just asked to keep.
+        """
+        if not self._document.is_dirty:
+            return True
+        answer = self._ask_about_unsaved()
+        if answer is Unsaved.CANCEL:
+            return False
+        if answer is Unsaved.SAVE:
+            return self.save_project()
+        return True
+
+    # --- the three places this window waits for a person. Methods, so a
+    # --- test replaces them; conftest.py fails any test that reaches the
+    # --- real dialogs instead of hanging on them.
+
+    def _ask_about_unsaved(self) -> Unsaved:
+        """04's one confirmation. An instance and `exec()`, never the static
+        `QMessageBox.question`, which runs its loop where no test can reach."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(WINDOW_TITLE)
+        box.setText(f"Save changes to {self._document.title}?")
+        box.setInformativeText("Your changes will be lost if you don't save them.")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        box.setEscapeButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        return {
+            QMessageBox.StandardButton.Save: Unsaved.SAVE,
+            QMessageBox.StandardButton.Discard: Unsaved.DISCARD,
+        }.get(box.standardButton(box.clickedButton()), Unsaved.CANCEL)
+
+    def _choose_open_path(self) -> Path | None:
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", self._dialog_directory(), PROJECT_FILTER
+        )
+        return Path(chosen) if chosen else None
+
+    def _choose_save_path(self) -> Path | None:
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", self._dialog_directory(), PROJECT_FILTER
+        )
+        return Path(chosen) if chosen else None
+
+    def _dialog_directory(self) -> str:
+        path = self._document.path
+        return str(path.parent) if path is not None else ""
 
     def _document_changed(self) -> None:
         """Read the document back into everything that shows it.
@@ -567,3 +739,8 @@ class MainWindow(QMainWindow):
         if (latest := self._notices.latest()) is not None:
             self.statusBar().showMessage(latest.message)
         self._notice_count.refresh()
+
+
+def _reason(error: OSError) -> str:
+    """What the filesystem said, without Python's `[Errno 2]` wrapping."""
+    return error.strerror or str(error)

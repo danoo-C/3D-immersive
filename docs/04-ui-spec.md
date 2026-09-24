@@ -570,6 +570,29 @@ and Windows, so redo is written out rather than taken from it (D-68). Qt maps
 `Ctrl+` onto Command on macOS by itself, so one spelling is correct on all
 three platforms.
 
+## The open project
+
+There is always exactly one, held by the window and owned by a document that
+knows its file and its history (D-85). A new window holds an empty, untitled
+one.
+
+- The **title** names it — its file's stem, or *Untitled* — and marks unsaved
+  changes the platform's own way, through Qt's `[*]`: an asterisk on Windows
+  and Linux, a dot in the close button on macOS.
+- **New, Open and Quit over unsaved changes ask once**: *Save*, *Discard* or
+  *Cancel*. Nothing is asked when there is nothing unsaved. *Save* goes ahead
+  only if the save worked — a Save As dialog that was cancelled, or a write
+  that failed, must not be followed by throwing away the project somebody
+  just asked to keep. This is the one confirmation named under
+  *Accessibility and feel*.
+- A name typed into Save As without a suffix gets `.3dim`, or the Open dialog's
+  own filter hides the file the next time anyone looks for it.
+- **Success is quiet.** Opening and saving post nothing; the title's mark
+  clearing is the feedback. A project that will not open is an `error` notice
+  carrying the reasons, and the project that was open stays open, history and
+  unsaved changes included. One that opens with media missing is **one**
+  `warn` notice whose detail lines name each missing file (F-3).
+
 ## Notices — where "reported" goes
 
 Several requirements promise that something is *reported*: missing media
@@ -679,7 +702,8 @@ set on all of them.
   exemptions, both standard: `text.disabled`, which is disabled text, and `accent`,
   which is not a text colour — see the palette note above.
 - Every destructive action is undoable, so no confirmation dialogs except for
-  discarding an unsaved project.
+  discarding an unsaved project — *Save*, *Discard* or *Cancel*, as *The open
+  project* above describes.
 - The xrun counter sits in the status bar, quiet when zero, `error` when not.
   Beside it, left to right: the master meter, the notice count, the version.
 - **Keyboard focus is always visible**, as a 1 px `accent` ring. Left to the

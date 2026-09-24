@@ -60,6 +60,9 @@ from immersive.core.time import SAMPLE_RATE, Division
 #: wrote a file is recorded separately and drives nothing.
 SCHEMA_VERSION = 1
 
+#: What a project file is called. The format's, so it lives with the format.
+SUFFIX = ".3dim"
+
 #: How a document written by an older schema is brought up to the current one:
 #: `version -> a function returning the *next* version's document`, applied one
 #: step at a time.
