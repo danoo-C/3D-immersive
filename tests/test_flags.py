@@ -49,6 +49,29 @@ def test_the_flags_parse_and_leave_the_rest_for_qt() -> None:
     assert rest == ["-style", "fusion"]
 
 
+def test_main_hands_the_flags_to_the_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The seam between parsing and running, which the sweep found untested:
+    `parse` was tested and `app.run` was tested, and the call joining them
+    could drop both flags without either noticing."""
+    from immersive import __main__
+
+    received: dict[str, Any] = {}
+
+    def run(argv: list[str], **flags: str | None) -> int:
+        received.update(flags, argv=argv)
+        return 0
+
+    monkeypatch.setattr(app, "run", run)
+
+    assert (
+        __main__.main(["--device", "Headphones", "--block", "1024", "-style", "x"]) == 0
+    )
+    assert (received["device"], received["block"]) == ("Headphones", "1024")
+    assert received["argv"][1:] == ["-style", "x"]
+
+
 def test_no_flags_is_the_default_output() -> None:
     settled = settle(Backend(), None, None)
 
