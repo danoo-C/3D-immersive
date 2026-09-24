@@ -1,6 +1,7 @@
 # M2 · Phase 1 — The project in the window
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_1_project_in_the_window.md](plans/phase_1_project_in_the_window.md)
 
 ## Goal
 
