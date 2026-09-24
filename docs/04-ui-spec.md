@@ -380,6 +380,20 @@ who owns what. M9 is built *third*, before all of them:
 | curve, keyframe diamond, bezier handle, value axis | M6 |
 | dialog, progress bar, input field, spin box, check box, slider, combo box | M8 — the first milestone with dialogs and a preferences form |
 
+**Painted groups.** Some widgets draw with a painter rather than a
+stylesheet — the waveform is the first, and clips, the spatial views and the
+curves will follow. Their groups are named in `theme.PAINTED` (D-92), read by
+`group_color()` when the widget paints, and held by a test to having every
+key read by something, just as the stylesheet's groups are held to its
+placeholders. The waveform's, built at M2:
+
+| `waveform` key | Default | For |
+|---|---|---|
+| `background` | `surface.panel` | behind the lanes |
+| `centre` | `border` | the zero line — what silence looks like |
+| `fill` | `text.secondary` | the envelope, one lane per channel |
+| `missing` | `warn` | a sample whose file has gone, which also says so in text |
+
 The QSS today styles none of the input widgets in that last row, which is
 correct — nothing renders one yet. It is listed so that the milestone which
 first does knows the groups are its to add, rather than discovering a

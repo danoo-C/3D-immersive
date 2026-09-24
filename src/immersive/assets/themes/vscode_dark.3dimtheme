@@ -76,6 +76,12 @@
       "border": "accent.pressed",
       "text": "text.primary"
     },
+    "waveform": {
+      "background": "surface.panel",
+      "centre": "border",
+      "fill": "text.secondary",
+      "missing": "warn"
+    },
     "window": {
       "background": "surface.window"
     }

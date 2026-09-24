@@ -483,9 +483,54 @@ def test_every_group_key_fills_exactly_one_placeholder() -> None:
     keys = {
         f"{group}.{key}".replace(".", "_")
         for group, values in theme_io.builtin().groups.items()
+        if group not in theme.PAINTED
         for key in values
     }
     assert placeholders == keys
+
+
+def painted_reads() -> set[tuple[str, str]]:
+    """Every literal `group_color("group", "key")` under `ui/`."""
+    ui = Path(theme.__file__).parent
+    found: set[tuple[str, str]] = set()
+    for source in sorted(ui.rglob("*.py")):
+        text = source.read_text(encoding="utf-8")
+        found |= set(re.findall(r'group_color\(\s*"([a-z.]+)",\s*"([a-z.]+)"', text))
+    return found
+
+
+def test_every_painted_key_is_read_by_something_that_paints() -> None:
+    """D-92: the other half of the rule above, for groups no sheet draws.
+
+    A widget that paints itself reads its colours with `group_color()`, so
+    every key of a painted group has to appear in such a call - otherwise it
+    is a role that looks themeable and is not, the same silent failure the
+    placeholder test catches for the sheet.
+    """
+    reads = painted_reads()
+    declared = {
+        (group, key)
+        for group, values in theme_io.builtin().groups.items()
+        if group in theme.PAINTED
+        for key in values
+    }
+    assert declared, "no painted group in the built-in theme"
+    assert declared <= reads, f"read by nothing: {sorted(declared - reads)}"
+
+
+def test_every_painted_read_names_a_key_that_exists() -> None:
+    """And the reverse: a call naming a key the theme lacks raises at paint
+    time, in front of somebody, rather than here."""
+    groups = theme_io.builtin().groups
+    unknown = sorted(
+        (group, key)
+        for group, key in painted_reads()
+        if key not in groups.get(group, {})
+    )
+    assert not unknown, unknown
+    assert {group for group, _ in painted_reads()} <= theme.PAINTED, (
+        "a group read by painting is missing from theme.PAINTED"
+    )
 
 
 def test_the_stylesheet_names_no_colour() -> None:

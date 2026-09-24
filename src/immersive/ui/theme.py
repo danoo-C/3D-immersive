@@ -50,6 +50,15 @@ _NAME = re.compile(r"^[a-z]+(?:\.[a-z]+)*$")
 #: resolves it yet; M3 draws the first widget that needs it.
 CHANNEL: Final = "channel"
 
+#: Groups drawn by widgets that paint themselves, rather than through the
+#: stylesheet (D-92). Every other group's keys are placeholders in `app.qss`,
+#: and a test holds the sheet and those groups to each other; these are read
+#: by `group_color()` calls instead, and a test holds each key to at least one
+#: such call. Either way the rule is the same one: no group key that nothing
+#: reads, because a role that looks themeable and is not fails silently for
+#: whoever changes it.
+PAINTED: Final = frozenset({"waveform"})
+
 
 # --------------------------------------------------------------------------- #
 # contrast
