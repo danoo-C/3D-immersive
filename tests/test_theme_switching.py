@@ -186,6 +186,66 @@ def test_the_order_itself_is_use_then_clear_then_sheet_then_walk(
 
 
 # --------------------------------------------------------------------------- #
+# not repainting what is already painted
+# --------------------------------------------------------------------------- #
+
+
+def sheets_set(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every stylesheet given to the application from here on."""
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    real = app.setStyleSheet
+    calls: list[str] = []
+
+    def record(sheet: str) -> None:
+        calls.append(sheet)
+        real(sheet)
+
+    monkeypatch.setattr(app, "setStyleSheet", record)
+    return calls
+
+
+def test_a_new_window_does_not_repaint_the_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-applying the theme `build_application()` had just applied was half
+    of what building a window cost - Qt re-polishes every widget on every
+    `setStyleSheet`, identical or not. Found by the suite's speed plan."""
+    calls = sheets_set(monkeypatch)
+
+    made = MainWindow()
+
+    assert calls == []
+    made.deleteLater()
+
+
+def test_applying_the_theme_already_applied_does_nothing(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = sheets_set(monkeypatch)
+
+    window.apply_theme(theme.active())
+
+    assert calls == []
+
+
+def test_the_same_theme_over_another_sheet_is_still_painted(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both halves of the check: the active theme can be right while the
+    application still wears another theme's sheet, and then skipping would
+    leave it wrong on screen."""
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    app.setStyleSheet(theme.stylesheet(loud()))
+    calls = sheets_set(monkeypatch)
+
+    window.apply_theme(theme.active())
+
+    assert calls == [theme.stylesheet(theme.active())]
+
+
+# --------------------------------------------------------------------------- #
 # the menu
 # --------------------------------------------------------------------------- #
 

@@ -911,12 +911,29 @@ class MainWindow(QMainWindow):
         because every widget in that walk re-reads its colours through the
         accessor, and one that runs before `use()` has landed gets the colour
         it already had.
+
+        **A theme that is already applied is not applied again.** Qt re-polishes
+        every widget on every `setStyleSheet`, identical sheet or not, and a
+        fresh window's `restore_theme()` asks for exactly the theme
+        `build_application()` has just applied - which was half the cost of
+        building a window, for nothing that changes on screen. Both halves of
+        the check are needed: the active theme can be right while the
+        application still wears another's sheet, and then it has to be
+        painted. The sheet is compared only once the theme matches, so a real
+        switch does exactly the work, in exactly the order, described above.
         """
+        app = QApplication.instance()
+        if (
+            chosen == theme.active()
+            and isinstance(app, QApplication)
+            and app.styleSheet() == theme.stylesheet(chosen)
+        ):
+            return
+
         theme.use(chosen)
         icons.icon.cache_clear()
         icons.app_icon.cache_clear()
 
-        app = QApplication.instance()
         if isinstance(app, QApplication):
             app.setStyleSheet(theme.stylesheet(chosen))
 
