@@ -14,7 +14,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | ✅ |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | ✅ |
 | [6 — The media pool](phase_6_media_pool.md) | ✅ |
-| [7 — Audition](phase_7_audition.md) | not started |
+| [7 — Audition](phase_7_audition.md) | in progress |
 
 The order is dependency order. Everything after phase 1 edits a project the
 window has to be holding; peaks need decoded audio and a hash to be keyed by;

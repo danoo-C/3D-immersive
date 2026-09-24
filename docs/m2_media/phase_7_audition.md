@@ -1,6 +1,7 @@
 # M2 · Phase 7 — Audition
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_7_audition.md](plans/phase_7_audition.md)
 
 ## Goal
 
