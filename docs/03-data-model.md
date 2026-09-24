@@ -374,6 +374,10 @@ committed and never beside the project (D-59):
 | macOS | `~/Library/Caches/3dimmersive` |
 | Windows | `%LOCALAPPDATA%\3dImmersive\Cache` |
 
+`core` works this out itself from those variables rather than asking Qt
+(D-91), which is also what lets the test suite point it somewhere harmless on
+every platform.
+
 - Peak pyramids per media file, keyed by content hash.
 - Decoded + resampled audio, if we later decide re-decoding on load is too slow.
 - Prepared HRTF banks (ITD + minimum-phase + FFT), keyed by SOFA hash and

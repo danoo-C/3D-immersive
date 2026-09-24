@@ -61,6 +61,11 @@ def _nothing_writes_your_home(
         "HOME": str(home),
         "XDG_CONFIG_HOME": str(home / ".config"),
         "APPDATA": str(home / "AppData"),
+        # The peak cache (M2 phase 4). Resolved by `core` from exactly these,
+        # not by Qt, so on every platform this is the whole of the redirect.
+        "XDG_CACHE_HOME": str(home / ".cache"),
+        "LOCALAPPDATA": str(home / "AppData" / "Local"),
+        "USERPROFILE": str(home),
     }
     before = {name: os.environ.get(name) for name in redirected}
     os.environ.update(redirected)
