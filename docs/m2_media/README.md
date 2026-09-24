@@ -9,7 +9,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | Phase | Status |
 |---|---|
 | [1 — The project in the window](phase_1_project_in_the_window.md) | ✅ |
-| [2 — Decode and resample](phase_2_decode_and_resample.md) | in progress |
+| [2 — Decode and resample](phase_2_decode_and_resample.md) | ✅ |
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | not started |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | not started |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | not started |
@@ -64,11 +64,10 @@ roadmap is corrected.
 Found while writing the phase docs, and left open on purpose — each is its
 phase's first decision.
 
-- **Is F-5's "fallback decoder" still needed?** The installed `soundfile`
-  (libsndfile 1.2.2) decodes MP3 itself. Phase 2 confirms that on all three
-  platforms' wheels before deciding a second decoder is dead weight.
-- **What does a file with more than two channels become?** `03` says a
-  `MediaFile` has one or two. Refused and reported, or downmixed on decode.
+- ~~**Is F-5's "fallback decoder" still needed?**~~ No — every platform's
+  wheel carries libsndfile 1.2.2 with MP3 (D-86, phase 2).
+- ~~**What does a file with more than two channels become?**~~ Refused, with
+  the count in the reason (D-87, phase 2).
 - **What is hashed, and with what?** The bytes on disk or the decoded audio,
   and how long a two-gigabyte WAV may take. Phase 3.
 - **Where exactly is the cache, and who resolves it?** `03` gives literal
@@ -99,3 +98,12 @@ next slower to build; freeing them took the suite from three minutes to
 eight seconds. A guard now fails any test that reaches a real modal dialog
 rather than letting it hang — except `QMessageBox.question`, which runs its
 loop out of reach and so is never used. Eighteen mutations, none surviving.
+
+**Phase 2.** `core/io/media.py` decodes every format F-5 names to float32 at
+48 kHz, or refuses with a reason, and never raises on input. Two decisions:
+libsndfile alone, with no fallback decoder, backed by inspecting the bundled
+library in every platform's wheel (D-86); and more than two channels refused
+rather than guessed at (D-87). Float files keep their overs. The sweep
+disproved the plan's most confident claim — `soxr` at equal rates is exact,
+so skipping it at 48 kHz is a saving rather than a safeguard — and one of the
+questions in this README is answered: the fallback decoder is not needed.

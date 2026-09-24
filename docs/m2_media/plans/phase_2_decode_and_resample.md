@@ -1,6 +1,6 @@
 # Plan — M2 · Phase 2 — Decode and resample
 
-**Written:** 2026-09-24 · **Status:** in progress
+**Written:** 2026-09-24 · **Status:** ✅ complete
 
 ## Approach
 
@@ -148,4 +148,43 @@ tests/test_media.py                new — headless, fixtures generated
 
 ## Outcome
 
-Filled in at the end.
+Two steps, committed together because neither meant much alone; all seven
+acceptance boxes ticked, one on the reading this plan gave in advance.
+Thirteen mutations, one survivor on the first run, and that survivor
+disproved a claim this plan made. 895 tests.
+
+### What the plan got right
+
+**Measuring before planning.** Every open question the phase doc left was
+answered by a probe before a line of the plan was written, and none of the
+answers changed afterwards. The one claim the plan made *without* measuring —
+that a no-op resample moves samples — is the one that turned out false.
+
+**Refusing rather than raising.** The hostile-input battery found nothing to
+fix, because the design never gave an exception a way out.
+
+### What the plan did not see
+
+**That `soxr` is exact at equal rates.** The mutation table says resampling a
+48 kHz file anyway is "a no-op pass that still changes samples"; it changes
+nothing. The check survives as a saving of one whole-file copy, now asserted
+as such.
+
+**That the evidence for other platforms could be had today.** The plan said
+CI would supply it. Downloading the three wheels and reading their bundled
+libraries was quicker than waiting, and more direct.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| Two commits, one per step | one — the reader without the resampler would have returned audio at the wrong rate under a type that promised 48 kHz |
+| The platform evidence from CI | from the wheels themselves, with CI's test kept as the standing check |
+
+### What phase 3 needs to know
+
+`Decoded.media_file(id, path)` fills every field except `hash`, which is
+phase 3's. `03`'s own example writes a hash as `sha256:…`, which is a lead
+rather than a decision. A refusal is a `Refused` with a reason and no
+severity; whoever reports it decides how serious it is. And the audio is
+read-only, so a hash computed over it can never be invalidated by a clip.
