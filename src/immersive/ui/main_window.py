@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from immersive import __version__
+from immersive.core.document import Document
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
@@ -111,6 +112,10 @@ class MainWindow(QMainWindow):
         #: Everything this session has reported (F-56, D-65). Built before
         #: the status bar, which draws it.
         self._notices = NoticeLog()
+        #: The project that is open (D-85). Every edit goes through it, and
+        #: the window reads its state back after each one rather than keeping
+        #: a second copy that could disagree.
+        self._document = Document()
         #: Widgets that paint themselves from a token, and the token they use.
         #: Kept so a theme change can ask for the colour again (D-82).
         self._chips: list[tuple[QLabel, str]] = []
@@ -124,6 +129,8 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self.setCentralWidget(self._build_layout())
         self._build_statusbar()
+        self._document.observe(self._document_changed)
+        self._document_changed()
         # Last, because it may report - and the notice centre it reports to
         # is built by _build_statusbar.
         self.restore_theme()
@@ -153,8 +160,10 @@ class MainWindow(QMainWindow):
         # and Windows StandardKey.Redo resolves to Ctrl+Y, and 04-ui-spec.md's
         # keyboard table promises Ctrl+Shift+Z. Qt maps "Ctrl+" onto Command on
         # macOS by itself, so writing it this way stays correct there too.
-        self._add(edit_menu, "&Undo", "Ctrl+Z", arrives=_M1)
-        self._add(edit_menu, "&Redo", "Ctrl+Shift+Z", arrives=_M1)
+        self._undo = self._history_action(edit_menu, "undo", "&Undo", "Ctrl+Z")
+        self._redo = self._history_action(edit_menu, "redo", "&Redo", "Ctrl+Shift+Z")
+        self._undo.triggered.connect(self._document.undo)
+        self._redo.triggered.connect(self._document.redo)
         edit_menu.addSeparator()
         self._add(edit_menu, "&Copy", "Ctrl+C", arrives=_M3)
         self._add(edit_menu, "&Paste", "Ctrl+V", arrives=_M3)
@@ -192,6 +201,21 @@ class MainWindow(QMainWindow):
         help_menu = self._menu(bar, "&Help")
         self._add(help_menu, "&Documentation", arrives=_M8)
         self._add(help_menu, f"&About {WINDOW_TITLE}", arrives=_M8)
+
+    def _history_action(
+        self, menu: QMenu, icon: str, text: str, shortcut: str
+    ) -> QAction:
+        """Undo or Redo: one action, shown in the menu and on the toolbar.
+
+        One object rather than two kept in step, so the menu and the toolbar
+        cannot disagree about whether there is anything to undo. The icon is
+        for the toolbar; menus in this application carry none.
+        """
+        action = self._add(menu, text, shortcut)
+        action.setIcon(icons.icon(icon))
+        action.setIconVisibleInMenu(False)
+        self._icon_actions.append((action, icon))
+        return action
 
     def _menu(self, bar: QMenuBar, title: str) -> QMenu:
         """A menu whose action tooltips are actually shown.
@@ -271,11 +295,8 @@ class MainWindow(QMainWindow):
         bar.addWidget(self._chip("Snap 1/16"))
         bar.addSeparator()
 
-        for name, text, shortcut in (
-            ("undo", "Undo", "Ctrl+Z"),
-            ("redo", "Redo", "Ctrl+Shift+Z"),
-        ):
-            bar.addAction(self._tool_action(name, text, shortcut, _M1))
+        bar.addAction(self._undo)
+        bar.addAction(self._redo)
 
         bar.addSeparator()
 
@@ -390,6 +411,33 @@ class MainWindow(QMainWindow):
         bar.addPermanentWidget(self._version)
 
         self.setStatusBar(bar)
+
+    # ---------------------------------------------------------- document
+
+    def document(self) -> Document:
+        """The open project. Edits go through it, never around it (D-85)."""
+        return self._document
+
+    def _document_changed(self) -> None:
+        """Read the document back into everything that shows it.
+
+        The title uses Qt's `[*]` placeholder, so unsaved changes are marked
+        the way each platform marks them - an asterisk on Windows and Linux, a
+        dot in the close button on macOS - rather than one glyph imposed on
+        all three.
+        """
+        document = self._document
+        self.setWindowTitle(f"{document.title}[*] — {WINDOW_TITLE}")
+        self.setWindowModified(document.is_dirty)
+        for action, able, nothing in (
+            (self._undo, document.can_undo, "Nothing to undo."),
+            (self._redo, document.can_redo, "Nothing to redo."),
+        ):
+            action.setEnabled(able)
+            # 04, Craft: a disabled control says why. "Not built yet" is one
+            # reason; having nothing to undo is the other.
+            summary = action.toolTip().partition("\n")[0]
+            action.setToolTip(summary if able else f"{summary}\n{nothing}")
 
     # ----------------------------------------------------------- theming
 

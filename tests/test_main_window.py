@@ -27,7 +27,7 @@ def app() -> object:
 
 def test_window_constructs(app: object) -> None:
     window = MainWindow()
-    assert window.windowTitle() == "3d immersive"
+    assert window.windowTitle() == "Untitled[*] — 3d immersive"
     assert window.centralWidget() is not None
 
 
@@ -119,6 +119,10 @@ def test_disabled_actions_explain_themselves(app: object) -> None:
     why in its tooltip. This walked only the toolbar for a while, which is
     exactly where the rule already held - all nineteen disabled *menu*
     actions were bare, and the rule was tested where it could not fail.
+
+    "Not built yet" is one reason; since M2, having nothing to undo is the
+    other. What is asserted is that there *is* a reason, on the line after
+    the action's name.
     """
     window = MainWindow()
     toolbar = window.findChildren(QToolBar)[0]
@@ -134,7 +138,7 @@ def test_disabled_actions_explain_themselves(app: object) -> None:
         label = action.text().replace("&", "")
         assert action.toolTip(), label
         if not action.isEnabled():
-            assert "Not built yet" in action.toolTip(), label
+            assert action.toolTip().partition("\n")[2], label
 
 
 def test_menus_actually_show_their_tooltips(app: object) -> None:
