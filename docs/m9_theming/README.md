@@ -10,9 +10,9 @@ roadmap's preamble says why.
 | Phase | Status |
 |---|---|
 | [1 — Tokens and groups](phase_1_tokens_and_groups.md) | ✅ |
-| [2 — The `.3dimtheme` file](phase_2_file_format.md) | not started |
-| [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | not started |
-| [4 — Discovery and switching](phase_4_discovery_and_switching.md) | not started |
+| [2 — The `.3dimtheme` file](phase_2_file_format.md) | ✅ |
+| [3 — The built-in theme becomes a file](phase_3_builtin_as_file.md) | ✅ |
+| [4 — Discovery and switching](phase_4_discovery_and_switching.md) | ✅ |
 
 The order is deliberate and each phase is useless before the one above it:
 you cannot load a theme file into constants (1 before 2), you cannot prove the
@@ -66,3 +66,79 @@ Still unmade, and phase 2's first decision: [02](../02-architecture.md) names
 no module for theme file I/O, and it cannot go in `core/io/` beside
 `project_io.py`, because a theme is a UI concern and N-5 keeps `core/` to the
 model.
+
+**Phase 2.** `theme_io.py` reads a `.3dimtheme`, merges it over a target
+theme and reports what it dropped, and nothing in it raises. Two decisions:
+the module's home (D-77) and a report whose entries carry a severity taken
+from `04`'s *Notices* vocabulary (D-78). `04` gained three things it was
+missing — the closed token vocabulary, the wholesale channel merge, and two
+rows in its failure table.
+
+The phase found that a five-line theme file could stop the application
+starting: `"channel"` is a value `04` documents, `Theme` accepts it, and
+`stylesheet()` then raises on it. A theme can be well-formed and still be one
+the application cannot paint with. The battery that asserts nothing raises
+now builds a stylesheet from every theme it produces.
+
+Phase 3 starts from a reader whose merge target is already a parameter, and
+from the one thing that is still unsolved: when the built-in *is* the file,
+there is nothing to merge it over.
+
+**Phase 3.** The palette is `assets/themes/vscode_dark.3dimtheme` and
+`theme.py` holds no colour at all — it holds the code that reads them. The
+bootstrap phase 2 handed over dissolved: nothing can validate the built-in
+against an external vocabulary, and nothing needed to, because `Theme`,
+`stylesheet()` and `contrast_problems()` already cover it between them. Two
+decisions: no fallback palette (D-79) and a cached `builtin()` reached
+through a deferred import, because `theme_io` already imports `theme` (D-80).
+
+The migration was deliberately two steps, so the file could be proved equal
+to the constants while the constants still existed. The proof that no pixel
+moved was phase 1's golden stylesheet fixture, untouched and still matching.
+
+Of fifteen mutations, four survived a first run and three were real: D-30 was
+asserted for `theme.py` and not for `theme_io.py`, the bundled theme's
+encoding was explicit but untested, and D-80's second half had no test at
+all.
+
+**Phase 4.** Themes in the user's theme directory are listed in
+`View > Theme`, rescanned each time it opens, applied without a restart and
+remembered across one. The notice centre it needed was built first, and a
+broken theme now reports through it — status line, a `warn` count, a list
+with each problem on its own line — while the application paints on what it
+could salvage. Three decisions: a Qt-free notice model so the format stays
+testable headless (D-81), a repaint that walks the widget tree by capability
+(D-82), and the choice remembered by path (D-83).
+
+The walk caught everything the plan listed. What it could not catch, a
+screenshot did: a hidden status-bar widget that moved every panel in the
+window the first time anything was reported, and wrapped notice rows that cut
+off the problem lines. Neither is a colour. For M3–M6 the finding is that the
+walk reaches only `QWidget`s — M3's timeline items will have to be rethemed
+by the view that owns them, or read their colours at paint time.
+
+Keeping the suite out of the developer's home took three attempts, and the
+last found that the redirect had only ever reached `QSettings` on Linux.
+Twenty mutations, five survivors of the plan's seventeen, four real.
+
+**M9 is complete.** The application's entire palette lives in a bundled
+`.3dimtheme`, a user theme that changes only the accent changes every rule
+that resolves to it and no other byte of the stylesheet, and a deliberately
+broken theme file reports itself through the UI without stopping anything.
+That is the milestone's acceptance, and it is one test per clause.
+
+What the four phases found, one line each, with the detail in each phase's
+Notes:
+
+| Phase | What it turned up |
+|---|---|
+| 1 — Tokens and groups | `04` carried two token vocabularies for the same thirteen colours, and its ownership table was missing the two groups the stylesheet had styled since M0 |
+| 2 — The file format | a five-line, well-formed theme could stop the application starting — valid to `Theme`, fatal to `stylesheet()` |
+| 3 — The built-in as a file | nothing could validate the built-in against a vocabulary, and nothing needed to; and D-30 had been asserted for one module and not its neighbour |
+| 4 — Discovery and switching | the most useful check was the screenshot, and both of its findings were layout rather than colour |
+
+What every milestone from here inherits: **a widget that paints colour either
+implements `retheme()` or reads through `theme.color()` at paint time**, and
+the milestone that builds it adds its groups to `04`'s ownership table. M3
+also inherits the playhead half of phase 4's accent line, along with the
+playhead.

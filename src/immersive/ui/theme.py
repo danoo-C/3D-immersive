@@ -51,6 +51,67 @@ _NAME = re.compile(r"^[a-z]+(?:\.[a-z]+)*$")
 CHANNEL: Final = "channel"
 
 
+# --------------------------------------------------------------------------- #
+# contrast
+# --------------------------------------------------------------------------- #
+
+#: The surfaces text is checked against. Their *ordering* - deepest first,
+#: each step lighter - is a property of a theme's values and is asserted by
+#: test; the rule below needs only the set.
+SURFACE_TOKENS: Final = (
+    "surface.window",
+    "surface.panel",
+    "surface.raised",
+    "surface.hover",
+)
+
+#: The tokens that carry text, and so are held to 4.5:1 on every surface.
+#: docs/04-ui-spec.md names two exemptions and they are expressed here by
+#: absence: `text.disabled` is disabled text, and `accent` is a fill and
+#: stroke colour that never carries any. `accent.text` is the text-safe
+#: purple D-44 exists to provide, and is held to the rule.
+#:
+#: The exemptions have to live with the rule rather than with the test that
+#: used to own it. A check that rediscovered them as failures would fire on
+#: every load of every theme including the built-in, which is the fastest
+#: way to teach somebody to ignore a report.
+TEXT_TOKENS: Final = (
+    "text.primary",
+    "text.secondary",
+    "accent.text",
+    "warn",
+    "error",
+)
+
+#: docs/04-ui-spec.md, *Accessibility and feel*.
+TEXT_CONTRAST: Final = 4.5
+
+
+def luminance(hex_colour: str) -> float:
+    """WCAG relative luminance of a `#RRGGBB` colour."""
+    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [
+        c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast(a: str, b: str) -> float:
+    """WCAG contrast ratio between two hex colours."""
+    la, lb = luminance(a), luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def is_colour(value: str) -> bool:
+    """True when `value` is a `#RRGGBB` literal.
+
+    Public because `theme_io` has to ask the same question of every value in
+    a user's file, and a second regex in a second module is a second home for
+    one fact about the format.
+    """
+    return bool(_HEX.match(value))
+
+
 class ThemeError(Exception):
     """A theme that cannot be used, and every reason it cannot.
 
@@ -91,6 +152,11 @@ class Theme:
     tokens: Mapping[str, str]
     channels: tuple[str, ...]
     groups: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    #: Last because the fields above have no defaults, not because it matters
+    #: least. 04-ui-spec.md's file example carries an `author`, so the object
+    #: has to hold one - otherwise loading the specification's own example
+    #: would report a key the format documents.
+    author: str = ""
 
     def __post_init__(self) -> None:
         problems = self.problems()
@@ -147,6 +213,44 @@ class Theme:
                     found.append(f"{where}: names no token {raw!r}")
         return found
 
+    def contrast_problems(self) -> list[str]:
+        """Every text token that falls below 4.5:1 on a surface.
+
+        One rule, two audiences - the same split `problems()` makes, and the
+        reason this is a method rather than something either caller owns. The
+        built-in theme is *held* to it: `tests/test_theme.py` asserts this
+        list is empty, and a built-in that failed would be a bug shipped to
+        everybody. A user's theme is merely *told*: the loader reports every
+        pair and loads the theme anyway, because refusing somebody's own
+        theme on their own machine is not a call this application gets to
+        make. docs/04-ui-spec.md argues both halves under *Contrast is
+        checked, not enforced*.
+
+        All of them rather than the first, for the reason `problems()`
+        returns a list: an author fixing a palette wants to know everything
+        that is wrong with it, not one item per attempt.
+
+        A token this theme does not define is skipped rather than reported.
+        Completeness is the merge's job - a loaded theme is merged over the
+        built-in and therefore has every token - and a contrast check that
+        also complained about absence would be answering a question nobody
+        asked it.
+        """
+        found: list[str] = []
+        for token in TEXT_TOKENS:
+            if token not in self.tokens:
+                continue
+            for surface in SURFACE_TOKENS:
+                if surface not in self.tokens:
+                    continue
+                ratio = contrast(self.tokens[token], self.tokens[surface])
+                if ratio < TEXT_CONTRAST:
+                    found.append(
+                        f"{token} on {surface} is {ratio:.2f}:1, "
+                        f"below {TEXT_CONTRAST}:1"
+                    )
+        return found
+
     # ----------------------------------------------------------- resolution
 
     def token(self, name: str) -> str:
@@ -190,136 +294,6 @@ class Theme:
 
 
 # --------------------------------------------------------------------------- #
-# the built-in theme
-# --------------------------------------------------------------------------- #
-
-#: The default, and — from the phase that bundles it as a file — the thing
-#: every user theme is merged over (D-45). Every colour is the one the
-#: *Colour palette* table in docs/04-ui-spec.md gives, and a test parses that
-#: table and asserts so, because a palette with two homes has two values the
-#: first time somebody edits one of them.
-BUILTIN: Final = Theme(
-    name="VS Code Dark",
-    tokens={
-        # Surfaces are VS Code's dark greys (D-44), and monotonic:
-        # surface.window is deepest and each step is lighter. Widgets rely on
-        # that ordering rather than on the values, because a theme may
-        # replace them.
-        "surface.window": "#181818",
-        "surface.panel": "#1F1F1F",
-        "surface.raised": "#252526",
-        "surface.hover": "#2D2D2D",
-        "border": "#3C3C3C",
-        "text.primary": "#CCCCCC",
-        "text.secondary": "#9D9D9D",
-        # Disabled text, and the one text colour exempt from the 4.5:1 rule.
-        "text.disabled": "#6E6E6E",
-        # The accent stays purple against the neutral greys. `accent` is a
-        # fill and stroke colour — playhead, focus ring, active toggle — and
-        # is 4.17:1 on surface.panel, which clears the 3:1 WCAG asks of a UI
-        # component but not the 4.5:1 04-ui-spec.md promises text. Purple
-        # that carries text uses accent.text.
-        "accent": "#A855F7",
-        "accent.pressed": "#7E3FF2",
-        "accent.text": "#C77DFF",
-        # Nothing styles these yet: clipping and missing media belong to
-        # widgets M2 and M3 build, and load failures to the notice centre
-        # this milestone's last phase builds. They are in the vocabulary
-        # because a token is a colour a theme may set, not a colour something
-        # currently paints.
-        "warn": "#F59E0B",
-        "error": "#F88A8A",
-    },
-    #: Assigned round-robin as channels are created; user-overridable. Chosen
-    #: to stay legible on surface.panel and distinguishable from each other
-    #: and from accent.
-    channels=(
-        "#A855F7",  # purple
-        "#22D3EE",  # cyan
-        "#F59E0B",  # amber
-        "#34D399",  # emerald
-        "#F472B6",  # pink
-        "#60A5FA",  # blue
-        "#FB923C",  # orange
-        "#A3E635",  # lime
-    ),
-    #: Per-widget roles (D-46). One group per widget the application draws
-    #: today, named from the ownership table in the *Theming* section of
-    #: docs/04-ui-spec.md rather than from the stylesheet's selectors — a key
-    #: called `toolbutton_pressed_background` would be a QSS selector with an
-    #: underscore in it, not a role anybody would think to theme.
-    #:
-    #: Every milestone from here adds its own groups as it builds the widgets
-    #: that need them, and adds them to `04` at the same time. That obligation
-    #: is the whole reason this system is built third rather than last.
-    groups={
-        "window": {"background": "surface.window"},
-        "panel": {"background": "surface.panel", "text": "text.primary"},
-        "menu": {
-            "bar.background": "surface.raised",
-            "bar.border": "border",
-            "bar.selected.background": "surface.hover",
-            "background": "surface.raised",
-            "border": "border",
-            "selected.background": "accent.pressed",
-            "selected.text": "text.primary",
-            "disabled.text": "text.disabled",
-            "separator": "border",
-        },
-        "toolbar": {
-            "background": "surface.raised",
-            "border": "border",
-            "separator": "border",
-        },
-        "button": {
-            "background": "surface.hover",
-            "border": "border",
-            "text": "text.primary",
-            "hover.border": "accent.text",
-            "pressed.background": "accent.pressed",
-            "checked.background": "accent.pressed",
-            "checked.border": "accent",
-            "disabled.text": "text.disabled",
-            "disabled.border": "surface.hover",
-        },
-        "tab": {
-            "pane.background": "surface.panel",
-            "bar.background": "surface.window",
-            "background": "surface.window",
-            "text": "text.secondary",
-            "hover.background": "surface.raised",
-            "hover.text": "text.primary",
-            "selected.background": "surface.panel",
-            "selected.text": "text.primary",
-            "selected.marker": "accent",
-        },
-        # The focus ring is its own group rather than a key on each widget:
-        # 04-ui-spec.md asks for one indicator, consistent across the
-        # application and visible — "no information by colour alone" cuts both
-        # ways, and a focus indicator nobody can see fails keyboard users
-        # first. One group is how it stays one colour.
-        "focus": {"ring": "accent", "menu.background": "surface.hover"},
-        "splitter": {"handle": "border", "hover.handle": "accent"},
-        "statusbar": {
-            "background": "surface.raised",
-            "border": "border",
-            "text": "text.secondary",
-        },
-        "scrollbar": {
-            "background": "surface.panel",
-            "handle": "surface.hover",
-            "hover.handle": "accent.pressed",
-        },
-        "tooltip": {
-            "background": "surface.raised",
-            "text": "text.primary",
-            "border": "accent.pressed",
-        },
-    },
-)
-
-
-# --------------------------------------------------------------------------- #
 # the active theme
 # --------------------------------------------------------------------------- #
 
@@ -328,12 +302,31 @@ BUILTIN: Final = Theme(
 #: exactly one by construction — the theme picker switches the application,
 #: not a panel — so the parameter would carry the same value everywhere it
 #: went.
-_active: Theme = BUILTIN
+#:
+#: `None` until something sets one, rather than the built-in: the default now
+#: comes off disk (D-80) and reading it at import would do file I/O to answer
+#: a question nobody has asked yet.
+_active: Theme | None = None
+
+
+def _default() -> Theme:
+    """The built-in theme, read from its bundled file.
+
+    The import is deferred because `theme_io` imports *this* module, so a
+    module-level import would be a cycle (D-80). The alternative was moving
+    the `.3dimtheme` format's constants in here, which would split the format
+    across two modules — the thing D-77 put it in one place to avoid. A
+    function-level absolute import is still greppable, which is what D-28
+    cares about.
+    """
+    from immersive.ui.theme_io import builtin
+
+    return builtin()
 
 
 def active() -> Theme:
     """The theme the application is currently drawn in."""
-    return _active
+    return _active if _active is not None else _default()
 
 
 def use(theme: Theme) -> None:
@@ -360,17 +353,17 @@ def color(name: str, theme: Theme | None = None) -> str:
     `theme` is here so a test can ask a specific one without touching the
     global.
     """
-    return (theme or _active).token(name)
+    return (theme or active()).token(name)
 
 
 def group_color(group: str, key: str, theme: Theme | None = None) -> str:
     """The colour for one role of one widget, in the active theme."""
-    return (theme or _active).value(group, key)
+    return (theme or active()).value(group, key)
 
 
 def channel_color(index: int, theme: Theme | None = None) -> str:
     """Colour for the channel at `index`, wrapping round the palette."""
-    return (theme or _active).channel(index)
+    return (theme or active()).channel(index)
 
 
 # --------------------------------------------------------------------------- #
@@ -409,7 +402,7 @@ def stylesheet(theme: Theme | None = None) -> str:
     without making it active first. Defaults to the active theme, which is
     what `app.py` wants.
     """
-    built = theme or _active
+    built = theme or active()
     return _template().substitute(
         {
             f"{group}.{key}".replace(".", "_"): built.value(group, key)

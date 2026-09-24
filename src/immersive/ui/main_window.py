@@ -8,9 +8,12 @@ deliberate: a fixed layout with draggable splitters, not dockable panels
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
 from PySide6.QtGui import QAction, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QLabel,
     QMainWindow,
     QMenu,
@@ -24,7 +27,11 @@ from PySide6.QtWidgets import (
 )
 
 from immersive import __version__
-from immersive.ui import icons, theme
+from immersive.ui import icons, theme, theme_io, theme_menu
+from immersive.ui.notices import NoticeLog, Severity
+from immersive.ui.notices import worst as notices_worst
+from immersive.ui.theme_menu import ThemeMenu
+from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.placeholder import Placeholder
 
 WINDOW_TITLE = "3d immersive"
@@ -101,6 +108,13 @@ def _menu_is_open(bar: QMenuBar) -> bool:
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        #: Everything this session has reported (F-56, D-65). Built before
+        #: the status bar, which draws it.
+        self._notices = NoticeLog()
+        #: Widgets that paint themselves from a token, and the token they use.
+        #: Kept so a theme change can ask for the colour again (D-82).
+        self._chips: list[tuple[QLabel, str]] = []
+        self._icon_actions: list[tuple[QAction, str]] = []
         self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(icons.app_icon())
         self.resize(1500, 950)
@@ -110,6 +124,9 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self.setCentralWidget(self._build_layout())
         self._build_statusbar()
+        # Last, because it may report - and the notice centre it reports to
+        # is built by _build_statusbar.
+        self.restore_theme()
 
     # ----------------------------------------------------------------- menus
 
@@ -152,6 +169,13 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         self._add(view_menu, "Ruler: &Bars / Beats", arrives=_M3)
         self._add(view_menu, "Ruler: &Minutes / Seconds", arrives=_M3)
+        view_menu.addSeparator()
+        # M8 promotes this into Preferences; the menu is what M9 ships
+        # (F-48). It lives under View because it changes how things look,
+        # not what they are.
+        self._theme_menu = ThemeMenu("&Theme", self, self.choose_theme)
+        self._theme_menu.setToolTipsVisible(True)
+        view_menu.addMenu(self._theme_menu)
 
         transport_menu = self._menu(bar, "&Transport")
         self._add(transport_menu, "&Play / Pause", "Space", arrives=_M3)
@@ -276,12 +300,22 @@ class MainWindow(QMainWindow):
         action = QAction(icons.icon(name), text, self)
         action.setToolTip(f"{text}  ({shortcut})\nNot built yet — {arrives}.")
         action.setEnabled(False)
+        # icons.icon() memoises the rendered QIcon, so a theme change needs
+        # the action's icon set again rather than merely invalidated - phase
+        # 1's Outcome flagged this and D-82 is where it gets paid for.
+        self._icon_actions.append((action, name))
         return action
 
     def _chip(self, text: str, *, primary: bool = False) -> QLabel:
+        """A toolbar readout, remembered by the token it is drawn in.
+
+        The token rather than the colour, because D-82's walk has to be able
+        to ask for it again under a different theme.
+        """
         label = QLabel(text)
-        colour = theme.color("text.primary" if primary else "text.secondary")
-        label.setStyleSheet(f"color: {colour}; padding: 0 8px;")
+        token = "text.primary" if primary else "text.secondary"
+        self._chips.append((label, token))
+        label.setStyleSheet(f"color: {theme.color(token)}; padding: 0 8px;")
         return label
 
     # ---------------------------------------------------------------- layout
@@ -345,8 +379,143 @@ class MainWindow(QMainWindow):
         self._xruns.setToolTip("Audio dropouts since the stream started")
         bar.addPermanentWidget(self._xruns)
 
-        version = QLabel(f"v{__version__}")
-        version.setStyleSheet(f"color: {theme.color('text.disabled')};")
-        bar.addPermanentWidget(version)
+        # 04-ui-spec.md, *Accessibility and feel*: left to right, the master
+        # meter (M3), the notice count, the version.
+        self._notice_count = NoticeCount(self._notices)
+        bar.addPermanentWidget(self._notice_count)
+        self._notices.observe(self._notices_changed)
+
+        self._version = QLabel(f"v{__version__}")
+        self._version.setStyleSheet(f"color: {theme.color('text.disabled')};")
+        bar.addPermanentWidget(self._version)
 
         self.setStatusBar(bar)
+
+    # ----------------------------------------------------------- theming
+
+    def restore_theme(self) -> None:
+        """Re-apply whatever the last session chose (D-83).
+
+        Quiet when it works: a notice saying "Theme: VS Code Dark" on every
+        launch is the kind of report that teaches people to stop reading
+        them. A theme that has *gone* is the opposite - somebody deleted the
+        file they were using, and an application that silently looks
+        different is one they conclude is broken.
+        """
+        remembered = theme_menu.remembered()
+        if remembered is None:
+            self._theme_menu.set_current(None)
+            self.apply_theme(theme_io.builtin())
+            return
+
+        if not remembered.is_file():
+            # Apply it, do not merely record it. "Falls back to the built-in"
+            # is a statement about what the window is painted in, and a
+            # branch that only ticked the menu entry would leave whatever was
+            # active on screen while claiming to have fallen back.
+            self._theme_menu.set_current(None)
+            self.apply_theme(theme_io.builtin())
+            self._notices.add(
+                Severity.WARN,
+                f"{remembered.name} is no longer there — using the built-in theme",
+                [str(remembered)],
+            )
+            return
+
+        self._theme_menu.set_current(remembered)
+        self.choose_theme(remembered, announce=False, remember=False)
+
+    def choose_theme(
+        self, path: Path | None, *, announce: bool = True, remember: bool = True
+    ) -> None:
+        """Load and apply the theme at `path`. `None` is the bundled one.
+
+        Nothing here can fail in a way the user has to care about, which is
+        F-47: a theme file that is missing, malformed or full of unknown keys
+        still yields a usable `Theme`, and everything wrong with it goes to
+        the notice centre instead of a dialog.
+
+        `announce` and `remember` are both off when restoring a previous
+        session's choice: it is not news, and writing back what was just read
+        is a good way to turn a read bug into a stored one.
+        """
+        if remember:
+            theme_menu.remember(path)
+
+        if path is None:
+            self.apply_theme(theme_io.builtin())
+            if announce:
+                self._notices.add(Severity.INFO, f"Theme: {theme_io.builtin().name}")
+            return
+
+        report = theme_io.load(path)
+        self.apply_theme(report.theme)
+        severity = (
+            notices_worst(problem.severity for problem in report.problems)
+            or Severity.INFO
+        )
+        headline = (
+            f"Theme: {report.theme.name}"
+            if report.applied
+            else f"{path.name} could not be used"
+        )
+        if report.problems:
+            headline = f"{headline} — {len(report.problems)} problem" + (
+                "s" if len(report.problems) != 1 else ""
+            )
+        if announce or report.problems:
+            self._notices.add(
+                severity, headline, [str(problem) for problem in report.problems]
+            )
+
+    def apply_theme(self, chosen: theme.Theme) -> None:
+        """Repaint the running application in `chosen` (D-82).
+
+        ⚠️ **The order is the decision, not an implementation detail.** The
+        active theme has to land first, then the icon caches have to be
+        dropped, then the application stylesheet, and only then the walk -
+        because every widget in that walk re-reads its colours through the
+        accessor, and one that runs before `use()` has landed gets the colour
+        it already had.
+        """
+        theme.use(chosen)
+        icons.icon.cache_clear()
+        icons.app_icon.cache_clear()
+
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.setStyleSheet(theme.stylesheet(chosen))
+
+        for widget in [self, *self.findChildren(QWidget)]:
+            repaint = getattr(widget, "retheme", None)
+            if callable(repaint):
+                repaint()
+
+    def retheme(self) -> None:
+        """Re-read everything this window paints itself with.
+
+        The window's own share of the walk: the chips and status labels hold
+        inline stylesheets, and the icons are memoised renderings that have
+        to be asked for again rather than merely invalidated.
+        """
+        self.setWindowIcon(icons.app_icon())
+        for action, name in self._icon_actions:
+            action.setIcon(icons.icon(name))
+        self._arm.setIcon(icons.icon("arm"))
+        for label, token in self._chips:
+            label.setStyleSheet(f"color: {theme.color(token)}; padding: 0 8px;")
+        for label in (self._xruns, self._version):
+            label.setStyleSheet(f"color: {theme.color('text.disabled')};")
+
+    def notices(self) -> NoticeLog:
+        """This session's notice log, for anything that needs to report.
+
+        M2's missing media is the next caller after the theme picker (F-3).
+        """
+        return self._notices
+
+    def _notices_changed(self) -> None:
+        """The status line carries the newest; the count carries the rest."""
+        if (latest := self._notices.latest()) is not None:
+            self.statusBar().showMessage(latest.message)
+        self._notice_count.refresh()

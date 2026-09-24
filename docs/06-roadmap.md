@@ -200,8 +200,10 @@ four now caught.
 
 ---
 
-## M9 — Theming
+## M9 — Theming ✅ *complete*
 *Built after M1. Numbered last, built third — see the note at the top.*
+
+Phases: [`docs/m9_theming/`](m9_theming/README.md)
 
 Colour is currently thirteen constants in `theme.py` and a QSS template. That
 is enough for a shell and not enough for an application: it cannot be changed
@@ -247,6 +249,32 @@ system is a widget quietly hardcoding a colour two milestones later.
 **Done when:** the application's entire palette lives in a bundled
 `.3dimtheme`, a user theme file that changes only the accent visibly works,
 and a deliberately broken theme file is reported without preventing startup.
+
+**Delivered, and each clause of the acceptance is a test.** `theme.py` holds
+no colour: the palette is `assets/themes/vscode_dark.3dimtheme`, read through
+the same loader as a user's and held to the 4.5:1 contrast rule off disk.
+`theme_io.py` reads, merges and writes the format and never raises on input;
+`View > Theme` lists the user's themes, rescans on opening, switches without a
+restart and remembers the choice by path. A theme that changes only the accent
+changes every stylesheet rule that resolves to it and no other byte, and the
+new colour is found in rendered pixels. A deliberately broken theme is listed,
+selectable, reported through the notice centre — status line, count, one line
+per problem — and leaves the application painting on what it could salvage.
+
+Ten decisions, D-74 to D-83: one token vocabulary rather than the two `04`
+carried, channels as their own list, one active theme read at call time, the
+format's module and its report's severities, no fallback palette, a cached
+built-in reached through a deferred import, a Qt-free notice model, a repaint
+that walks the widget tree, and the choice stored as a path. The notice centre moved here from M8 before the milestone started
+(D-65), and M2's missing media is its next caller.
+
+**The most useful check was a screenshot**, and both of its findings were
+layout rather than colour — a hidden status-bar widget that moved every panel
+the first time anything was reported, and wrapped notice rows that cut off the
+problem lines. Two things pass forward. The repaint walk reaches only
+`QWidget`s, so M3's timeline items must be rethemed by their view or read
+their colours at paint time. And the playhead half of phase 4's accent line
+arrives with the playhead, at M3.
 
 ---
 

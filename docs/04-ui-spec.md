@@ -64,6 +64,14 @@ rather than on the literal values, because a theme may replace them
 ([theming](#theming)). The names are the ones a `.3dimtheme` uses (D-74);
 there is deliberately only one set.
 
+**This table is the specification; its implementation is a file.** The values
+below ship as `src/immersive/assets/themes/vscode_dark.3dimtheme`, read at
+startup through the same module that reads anybody else's theme (D-47). They
+were thirteen constants in `theme.py` until M9 phase 3, and that module now
+holds no colour at all — a test asserts it. A value edited here and not there
+fails a test too: the built-in theme is loaded and compared against this
+table on every run.
+
 | Token | Hex | Use |
 |---|---|---|
 | `surface.window` | `#181818` | application background, deepest |
@@ -248,7 +256,12 @@ edit by hand. Both layers earn their place.
 
 `"channel"` is the one reserved value: it means *this channel's own colour*,
 resolved per channel at paint time. It is what keeps the colour thread from
-the Channel palette section intact under any theme.
+the Channel palette section intact under any theme. A theme file may use it
+**only for a key the built-in theme already paints per channel** — `clip.body`
+and its like, once M3 draws them. Anywhere else it is ignored and reported:
+there is no channel for it to resolve against, so a five-line theme file would
+otherwise be able to stop the application painting, which is the one thing
+F-47 says a theme must never do.
 
 `schema_version` carries the same migration discipline as `.3dim` — see
 [03-data-model.md](03-data-model.md).
@@ -266,6 +279,28 @@ matters — it is *still* valid after a later milestone adds tokens for widgets
 that did not exist when it was written. A theme that replaced the palette
 wholesale would break on every release that added a colour.
 
+**The vocabulary is closed**, which is the other half of that rule and is easy
+to miss. A theme file can give a new value to a token the built-in already
+defines; it cannot introduce one. A `tokens` entry the built-in does not know
+is an unknown key, and the table below says unknown keys are ignored and
+reported. That is what makes merging safe in both directions — a name that
+means nothing today cannot quietly come to mean something else in the release
+that adds it.
+
+`tokens` and `groups` merge key by key; **`channels` is replaced wholesale.**
+A file that gives a channel palette gives all of it. The list is an ordered
+sequence indexed by position rather than a set of keys (D-75), so merging it
+per index would treat those indices as keys — and it would make the palette's
+*length* unthemeable, so a four-colour theme could not exist.
+
+It has one consequence worth stating plainly, because it produces **two
+reports for one mistake**. A file that defines `"my.purple"` and then writes
+`"playhead": "my.purple"` in a group has its token dropped as unknown; the
+group value then names a token that does not exist, so that key falls back to
+the default and is reported a second time. Both messages are true and each
+names what it saw. The first one says the vocabulary is fixed, which is the
+sentence that explains the second.
+
 ### When a theme is wrong
 
 Never fatally (F-47, D-48). A theme file is cosmetic, and a typo in one must
@@ -275,8 +310,10 @@ not stand between someone and their project.
 |---|---|
 | File missing or unreadable | Default theme, reported |
 | Malformed JSON | Default theme, reported with the parse error |
+| Valid JSON, but not an object | Default theme, reported |
 | Unknown token or group key | Ignored, reported — it is probably a newer theme |
 | Invalid colour value | That key falls back to the default, reported |
+| `schema_version` absent, or not a whole number | Default theme, reported. The version is read before anything else, so there is nothing to read it as |
 | `schema_version` newer than we know | Load what we recognise, report the rest |
 
 "Reported" means visible in the UI, not a line on stderr nobody reads.
@@ -296,6 +333,31 @@ and any failure is reported to its author — but it still loads. Enforcing the
 rule would mean refusing somebody's own theme on their own machine, which is
 not a call this application gets to make. The **default** theme is a different
 matter: it is held to the rule by `tests/test_theme.py`.
+
+### Choosing a theme
+
+Themes live in a `themes` folder inside the application's config directory —
+`~/.config/3d immersive/3d immersive/themes` on Linux, where Qt nests the
+organisation name and the application name and the two happen to be the same,
+and the platform's equivalent elsewhere, resolved by Qt rather than assembled
+per platform. A real launch creates it, so there is somewhere to drop a file;
+nothing else does, and an empty or missing one simply means there are no user
+themes.
+
+`View > Theme` lists the bundled theme first, by its name, then every
+`.3dimtheme` in that folder, by file name. It is **rescanned each time the
+menu opens**, so a file dropped in appears without a restart (F-48); there is
+no file watcher, and a theme edited on disk is re-read when it is next chosen.
+With none installed, a disabled entry says so and its tooltip names the
+folder. Every file found is listed and selectable, including a broken one —
+choosing it is how its author finds out what is wrong with it.
+
+Choosing a theme repaints the running application and is remembered by
+**path** (D-83). At the next launch it is restored **quietly**: replaying a
+previous session's choice is not news, and a notice on every launch is how
+people learn to stop reading them. Quiet when it works is not quiet when it
+does not — a restored theme with problems reports them, and one whose file has
+gone falls back to the built-in and says so.
 
 ### The vocabulary grows
 
@@ -531,14 +593,21 @@ exists to prevent in the other direction.
 ```
 
 - The **status bar** carries the most recent notice as one line, and a count
-  of unread ones beside the xrun counter. The count is `warn` for warnings,
-  `error` for errors, and invisible at zero — the same rule the xrun counter
-  already follows.
+  of unread ones beside the xrun counter. The count is coloured by the
+  **worst** unread notice rather than the newest — an error followed by a
+  warning is still an error waiting to be read — and is invisible at zero, the
+  same rule the xrun counter already follows. Its severity is a glyph as well
+  as a colour (✕ ⚠ •), because nothing here is carried by colour alone.
+- **One notice per thing that happened.** A theme file with three problems is
+  one notice whose detail lines are its three problems, not three notices: the
+  count moves once, and the status line names the file rather than whichever
+  problem was found last.
 - Clicking the count opens the **notice list**: a popover of everything
   reported this session, newest first, each with its severity, its time, its
-  message and, where there is one, an action — *Relink…* for missing media,
-  *Reveal* for a theme file, *Choose device…* for a stream that would not
-  open.
+  message, its detail lines and, where there is one, an action — *Relink…* for
+  missing media, *Reveal* for a theme file, *Choose device…* for a stream that
+  would not open. Opening the list marks everything in it read, which is what
+  makes the count go away.
 - Notices persist for the session and are cleared explicitly. A message you
   can only read in the second it appears has not been reported to anybody.
 

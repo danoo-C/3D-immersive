@@ -78,6 +78,9 @@ src/immersive/
   ui/
     main_window.py       menus, toolbar, splitter layout
     theme.py             palette + qss
+    theme_io.py          .3dimtheme parse, merge, report (D-77, M9)
+    theme_menu.py        theme directory, View > Theme, persistence (M9)
+    notices.py           the notice model - no Qt, so theme_io may use it (D-81)
     explorer/            media pool tree (top) + params pane (bottom)
     timeline/            ruler, channel headers, clip lanes, playhead
     spatial/             ortho_view.py (top & front), view3d.py (read-only)

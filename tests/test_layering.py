@@ -91,3 +91,44 @@ def test_the_detector_actually_detects(tmp_path: Path) -> None:
     # A sibling core import and a stdlib import must not be flagged.
     assert not any(f.endswith(": immersive.core.model") for f in found)
     assert not any(f.endswith(": os") for f in found)
+
+
+def test_the_notice_model_imports_no_qt() -> None:
+    """D-81: `theme_io` reports a `Severity` on every problem it finds.
+
+    So the module that defines one is upstream of the whole `.3dimtheme`
+    format, and through `theme_io` it reaches `theme.py` — which keeps itself
+    importable without a `QApplication` so the palette and the stylesheet
+    stay testable headless. A Qt import here would cost that quietly: the
+    tests would still pass, on a machine that happens to have a display.
+
+    The widget that draws notices is `ui/widgets/notices.py` and may import
+    whatever it likes. This is the model.
+    """
+    model = PACKAGE_ROOT / "ui" / "notices.py"
+    assert model.is_file(), "ui/notices.py is missing"
+
+    tree = ast.parse(model.read_text(encoding="utf-8"), filename=str(model))
+    qt = [name for name in imported_names(tree) if name.startswith("PySide6")]
+
+    assert not qt, f"ui/notices.py must stay Qt-free (D-81): {qt}"
+
+
+def test_the_theme_modules_import_no_qt() -> None:
+    """The property D-81 is protecting, asserted where it actually matters.
+
+    `theme.py` says it in its first docstring and nothing checked it, which
+    is how M9 phase 3 found D-30 asserted for one module and not its
+    neighbour. Named as a set so the next theme module is one line.
+    """
+    found = []
+    for name in ("theme.py", "theme_io.py", "notices.py"):
+        path = PACKAGE_ROOT / "ui" / name
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found += [
+            f"ui/{name}: {imported}"
+            for imported in imported_names(tree)
+            if imported.startswith("PySide6")
+        ]
+
+    assert not found, "the theme system must stay headless:\n" + "\n".join(found)

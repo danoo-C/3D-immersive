@@ -1,0 +1,100 @@
+{
+  "author": "3d immersive",
+  "channels": [
+    "#A855F7",
+    "#22D3EE",
+    "#F59E0B",
+    "#34D399",
+    "#F472B6",
+    "#60A5FA",
+    "#FB923C",
+    "#A3E635"
+  ],
+  "groups": {
+    "button": {
+      "background": "surface.hover",
+      "border": "border",
+      "checked.background": "accent.pressed",
+      "checked.border": "accent",
+      "disabled.border": "surface.hover",
+      "disabled.text": "text.disabled",
+      "hover.border": "accent.text",
+      "pressed.background": "accent.pressed",
+      "text": "text.primary"
+    },
+    "focus": {
+      "menu.background": "surface.hover",
+      "ring": "accent"
+    },
+    "menu": {
+      "background": "surface.raised",
+      "bar.background": "surface.raised",
+      "bar.border": "border",
+      "bar.selected.background": "surface.hover",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "selected.background": "accent.pressed",
+      "selected.text": "text.primary",
+      "separator": "border"
+    },
+    "panel": {
+      "background": "surface.panel",
+      "text": "text.primary"
+    },
+    "scrollbar": {
+      "background": "surface.panel",
+      "handle": "surface.hover",
+      "hover.handle": "accent.pressed"
+    },
+    "splitter": {
+      "handle": "border",
+      "hover.handle": "accent"
+    },
+    "statusbar": {
+      "background": "surface.raised",
+      "border": "border",
+      "text": "text.secondary"
+    },
+    "tab": {
+      "background": "surface.window",
+      "bar.background": "surface.window",
+      "hover.background": "surface.raised",
+      "hover.text": "text.primary",
+      "pane.background": "surface.panel",
+      "selected.background": "surface.panel",
+      "selected.marker": "accent",
+      "selected.text": "text.primary",
+      "text": "text.secondary"
+    },
+    "toolbar": {
+      "background": "surface.raised",
+      "border": "border",
+      "separator": "border"
+    },
+    "tooltip": {
+      "background": "surface.raised",
+      "border": "accent.pressed",
+      "text": "text.primary"
+    },
+    "window": {
+      "background": "surface.window"
+    }
+  },
+  "name": "VS Code Dark",
+  "schema_version": 1,
+  "tokens": {
+    "accent": "#A855F7",
+    "accent.pressed": "#7E3FF2",
+    "accent.text": "#C77DFF",
+    "border": "#3C3C3C",
+    "error": "#F88A8A",
+    "surface.hover": "#2D2D2D",
+    "surface.panel": "#1F1F1F",
+    "surface.raised": "#252526",
+    "surface.window": "#181818",
+    "text.disabled": "#6E6E6E",
+    "text.primary": "#CCCCCC",
+    "text.secondary": "#9D9D9D",
+    "warn": "#F59E0B"
+  }
+}

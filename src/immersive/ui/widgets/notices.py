@@ -1,0 +1,228 @@
+"""The notice surface: a status-bar line, an unread count, and the list.
+
+The *Notices* section of docs/04-ui-spec.md, drawn. The model it draws is
+`ui/notices.py`, which holds no Qt (D-81) — this file is the half that does.
+
+**One surface, not a dialog per caller.** A modal for a cosmetic theme typo
+is the behaviour F-47 exists to prevent, and nothing here is modal.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QScrollArea,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from immersive.ui import theme
+from immersive.ui.notices import Notice, NoticeLog, Severity
+
+#: A glyph per severity, because 04-ui-spec.md's *Accessibility and feel*
+#: says no information is carried by colour alone - and a count that is only
+#: distinguishable as red or amber fails that on the one widget whose whole
+#: job is to be noticed. The shapes differ, not just the hue.
+_GLYPH = {
+    Severity.ERROR: "✕",
+    Severity.WARN: "⚠",
+    Severity.INFO: "•",
+}
+
+#: The token each severity is drawn in. `info` is deliberately quiet: it
+#: reports that something happened, and something that happened correctly
+#: should not compete with something that did not.
+_TOKEN = {
+    Severity.ERROR: "error",
+    Severity.WARN: "warn",
+    Severity.INFO: "text.secondary",
+}
+
+
+class NoticeList(QFrame):
+    """Everything reported this session, newest first.
+
+    A popup rather than a dialog: it closes when you look away, like every
+    other notification list, and nothing in this application is modal except
+    discarding an unsaved project.
+    """
+
+    def __init__(self, log: NoticeLog, parent: QWidget | None = None) -> None:
+        super().__init__(parent, Qt.WindowType.Popup)
+        self._log = log
+        self.setObjectName("NoticeList")
+        self.setFrameShape(QFrame.Shape.NoFrame)
+
+        self._body = QWidget()
+        self._rows = QVBoxLayout(self._body)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidget(self._body)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(1, 1, 1, 1)
+        self._outer.addWidget(scroll)
+
+        self.setMinimumWidth(360)
+        self.setMaximumHeight(320)
+        self.retheme()
+
+    def rows(self) -> list[QLabel]:
+        """The row widgets, newest first. Named so a test can read them."""
+        found: list[QLabel] = []
+        for index in range(self._rows.count()):
+            item = self._rows.itemAt(index)
+            if item is not None and isinstance(row := item.widget(), QLabel):
+                found.append(row)
+        return found
+
+    def populate(self) -> None:
+        """Rebuild the rows from the log.
+
+        Rebuilt rather than appended to, because the list is short by
+        construction and a rebuild cannot drift out of step with the model.
+        Per-notice *actions* - Relink…, Reveal, Choose device… - are M8's
+        (D-65); this builds the surface they will hang off.
+        """
+        while self._rows.count():
+            item = self._rows.takeAt(0)
+            if item is not None and (widget := item.widget()) is not None:
+                # Unparented *and* deleted. `deleteLater` alone leaves the row
+                # a child of this widget until the event loop next turns, so a
+                # theme change would find stale rows still carrying the old
+                # palette - harmless on screen, and enough to make "no widget
+                # kept an old colour" unassertable.
+                widget.setParent(None)
+                widget.deleteLater()
+
+        notices: list[Notice | None] = list(self._log.newest_first())
+        for notice in notices or [None]:
+            self._rows.addWidget(self._row(notice))
+        # Spare height goes below the rows, not into them.
+        self._rows.addStretch(1)
+
+    def fit(self) -> None:
+        """As tall as the rows need at the width they got, up to the maximum.
+
+        `adjustSize()` works from size hints, and a word-wrapped label's hint
+        is for a width of its own choosing - at the width the popup actually
+        gets, the rows can need more height than that.
+        """
+        self.adjustSize()
+        chrome = self.contentsMargins() + self._outer.contentsMargins()
+        needed = self._body.heightForWidth(
+            self.width() - chrome.left() - chrome.right()
+        )
+        if needed > 0:
+            height = needed + chrome.top() + chrome.bottom()
+            self.resize(
+                self.width(), min(max(height, self.height()), self.maximumHeight())
+            )
+
+    def _row(self, notice: Notice | None) -> QLabel:
+        if notice is None:
+            label = QLabel("Nothing reported this session")
+            label.setStyleSheet(
+                f"color: {theme.color('text.disabled')}; padding: 10px;"
+            )
+            return label
+
+        detail = "\n".join(f"    {line}" for line in notice.detail)
+        label = QLabel(
+            f"{_GLYPH[notice.severity]}  {notice.at:%H:%M:%S}  {notice.message}"
+            + (f"\n{detail}" if detail else "")
+        )
+        label.setWordWrap(True)
+        label.setStyleSheet(
+            f"color: {theme.color(_TOKEN[notice.severity])};"
+            f" border-bottom: 1px solid {theme.color('border')};"
+            f" padding: 6px 10px;"
+        )
+        # ⚠️ No fixed vertical policy. A wrapped row's height depends on its
+        # width, and `Fixed` caps it at the hint's height - for a width of the
+        # label's own choosing - which cut off the last detail lines: the ones
+        # naming what was wrong. The stretch in `populate` keeps rows compact.
+        return label
+
+    def retheme(self) -> None:
+        self.setStyleSheet(
+            f"#NoticeList {{"
+            f" background: {theme.color('surface.raised')};"
+            f" border: 1px solid {theme.color('border')};"
+            f" }}"
+        )
+        self.populate()
+
+
+class NoticeCount(QToolButton):
+    """The unread count, beside the xrun counter. Invisible at zero.
+
+    The same rule the xrun counter already follows, and for the same reason:
+    a zero that is always on screen is a thing people stop seeing, which
+    costs exactly the attention the widget exists to hold.
+
+    A `QToolButton` rather than a `QLabel` dressed as one - the lesson the
+    ARM chip taught in M0. It is clickable, so it has to look and behave like
+    something clickable.
+    """
+
+    def __init__(self, log: NoticeLog, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._log = log
+        self.setObjectName("NoticeCount")
+        self.setAutoRaise(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._list = NoticeList(log, self)
+        self.clicked.connect(self.open_list)
+        self.refresh()
+
+    def refresh(self) -> None:
+        """Take the count, the glyph and the colour from the log.
+
+        ⚠️ **Styled even while hidden.** `QStatusBar` sizes itself from every
+        permanent widget, hidden ones included, so a count that took its
+        compact style only on its first notice held the bar taller - in the
+        toolbar buttons' metrics - until something was reported, and the
+        whole window jumped when something was.
+        """
+        unread = self._log.unread
+        severity = self._log.unread_severity()
+        token = _TOKEN[severity] if severity is not None else _TOKEN[Severity.INFO]
+        self.setStyleSheet(
+            f"#NoticeCount {{ color: {theme.color(token)};"
+            f" padding: 0 8px; border: none; }}"
+        )
+        if not unread or severity is None:
+            self.setText("")
+            self.hide()
+            return
+
+        self.setText(f"{_GLYPH[severity]} {unread}")
+        self.setToolTip(
+            f"{unread} unread notice{'s' if unread != 1 else ''}\nClick to read"
+        )
+        self.show()
+
+    def open_list(self) -> None:
+        """Show everything reported, and mark it read."""
+        self._list.populate()
+        self._list.fit()
+        corner = self.mapToGlobal(self.rect().topLeft())
+        self._list.move(
+            corner.x() - self._list.width() + self.width(),
+            corner.y() - self._list.height(),
+        )
+        self._list.show()
+        self._log.mark_read()
+        self.refresh()
+
+    def retheme(self) -> None:
+        self._list.retheme()
+        self.refresh()

@@ -12,7 +12,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from immersive import __version__
-from immersive.ui import theme
+from immersive.ui import theme, theme_menu
 from immersive.ui.main_window import MainWindow
 
 
@@ -34,6 +34,11 @@ def build_application(argv: list[str] | None = None) -> QApplication:
 def run(argv: list[str] | None = None) -> int:
     """Start the GUI and block until it closes."""
     app = build_application(argv)
+    # M9 phase 4: make the theme directory on a real launch, so there is
+    # somewhere to put a .3dimtheme. Deliberately here rather than anywhere
+    # a test reaches - building a window must not make directories on
+    # somebody's machine.
+    theme_menu.user_theme_directory()
     window = MainWindow()
     window.show()
     return app.exec()

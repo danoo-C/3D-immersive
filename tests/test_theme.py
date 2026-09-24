@@ -5,35 +5,27 @@ theme.py has no Qt dependency at import time, so this runs headless.
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Iterator, Mapping
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from importlib import resources
 from pathlib import Path
 
 import pytest
 
-from immersive.ui import theme
+from immersive.ui import theme, theme_io
 
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
-PALETTE = tuple(theme.BUILTIN.tokens.values())
+PALETTE = tuple(theme_io.builtin().tokens.values())
 
-#: The surfaces, in the order 04-ui-spec.md requires them to be: deepest
-#: first, each step lighter. Widgets rely on that ordering rather than on the
-#: values, because a theme may replace them.
-SURFACE_TOKENS = (
-    "surface.window",
-    "surface.panel",
-    "surface.raised",
-    "surface.hover",
-)
-
-#: 04-ui-spec.md promises 4.5:1 for text on every surface. `text.disabled`
-#: (disabled) and `accent` (a fill and stroke colour, never text) are the two
-#: documented exemptions; `accent.text` is the text-safe purple and is held to
-#: the rule.
-TEXT_TOKENS = ("text.primary", "text.secondary", "accent.text", "warn", "error")
+#: The rule moved into the package in M9 phase 2, exemptions and all: the
+#: theme loader has to apply it to a user's file, and a rule implemented in a
+#: test suite cannot be applied to anything. Aliased so the tests below read
+#: as they always did.
+SURFACE_TOKENS = theme.SURFACE_TOKENS
+TEXT_TOKENS = theme.TEXT_TOKENS
 
 
 @pytest.mark.parametrize("value", PALETTE)
@@ -42,7 +34,7 @@ def test_palette_entries_are_hex(value: str) -> None:
 
 
 def test_channel_colors_are_distinct_and_hex() -> None:
-    channels = theme.BUILTIN.channels
+    channels = theme_io.builtin().channels
     assert len(channels) == 8
     assert len(set(channels)) == len(channels)
     for value in channels:
@@ -51,7 +43,7 @@ def test_channel_colors_are_distinct_and_hex() -> None:
 
 def test_channel_color_wraps() -> None:
     """`channel_color(i)` keeps the signature and behaviour it always had."""
-    channels = theme.BUILTIN.channels
+    channels = theme_io.builtin().channels
     n = len(channels)
     assert theme.channel_color(0) == channels[0]
     assert theme.channel_color(n) == channels[0]
@@ -97,47 +89,85 @@ def test_stylesheet_parses(capfd: pytest.CaptureFixture[str]) -> None:
     assert app.styleSheet() == theme.stylesheet()
 
 
-def _luminance(hex_colour: str) -> float:
-    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
-    linear = [
-        c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels
-    ]
-    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-
-
-def contrast(a: str, b: str) -> float:
-    """WCAG contrast ratio between two hex colours."""
-    la, lb = _luminance(a), _luminance(b)
-    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
-
-
-SURFACES = tuple(theme.color(name) for name in SURFACE_TOKENS)
-
-
 @pytest.mark.parametrize("token", TEXT_TOKENS)
 @pytest.mark.parametrize("surface", SURFACE_TOKENS)
 def test_text_contrast_meets_the_spec(token: str, surface: str) -> None:
     """Named by token, so a failure says which colour rather than which hex."""
-    ratio = contrast(theme.color(token), theme.color(surface))
+    ratio = theme.contrast(theme.color(token), theme.color(surface))
     assert ratio >= 4.5, f"{token} on {surface} is {ratio:.2f}:1"
 
 
-@pytest.mark.parametrize("colour", theme.BUILTIN.channels)
+@pytest.mark.parametrize("colour", theme_io.builtin().channels)
 def test_channel_colours_are_legible_on_panels(colour: str) -> None:
     """04-ui-spec.md: channel colours must stay legible on surface.panel."""
-    assert contrast(colour, theme.color("surface.panel")) >= 3.0, colour
+    assert theme.contrast(colour, theme.color("surface.panel")) >= 3.0, colour
 
 
 def test_accent_clears_the_ui_component_threshold() -> None:
     """`accent` is not text, but a playhead nobody can see is still a bug."""
     for surface in SURFACE_TOKENS:
-        ratio = contrast(theme.color("accent"), theme.color(surface))
+        ratio = theme.contrast(theme.color("accent"), theme.color(surface))
         assert ratio >= 3.0, f"accent on {surface} is {ratio:.2f}:1"
+
+
+def _variant(tokens: Mapping[str, str]) -> theme.Theme:
+    """The built-in theme with some tokens given different values."""
+    return replace(theme_io.builtin(), tokens={**theme_io.builtin().tokens, **tokens})
+
+
+def test_the_builtin_has_no_contrast_problems() -> None:
+    """The default is *held* to the rule; a user's theme is only told about it."""
+    assert theme_io.builtin().contrast_problems() == []
+
+
+def test_contrast_problems_names_every_failing_pair() -> None:
+    """All of them, not the first: an author wants the list, not one a run."""
+    problems = _variant({"text.primary": "#202020"}).contrast_problems()
+
+    assert len(problems) == len(SURFACE_TOKENS)
+    for surface in SURFACE_TOKENS:
+        assert any(f"text.primary on {surface}" in line for line in problems), surface
+    assert all(line.startswith("text.primary") for line in problems), problems
+
+
+def test_contrast_problems_keeps_the_two_documented_exemptions() -> None:
+    """`text.disabled` and `accent` are exempt, and stay exempt once it moves.
+
+    A check that rediscovered them as failures would fire on every load of
+    every theme including the built-in, and a report that is never empty is a
+    report nobody reads.
+    """
+    invisible = _variant({"text.disabled": "#1A1A1A", "accent": "#1A1A1A"})
+    assert invisible.contrast_problems() == []
+
+
+def test_contrast_problems_skips_tokens_a_theme_does_not_define() -> None:
+    """Completeness is the merge's job, not this rule's."""
+    partial = theme.Theme(
+        name="partial",
+        tokens={"surface.panel": "#1F1F1F", "text.primary": "#CCCCCC"},
+        channels=("#A855F7",),
+    )
+    assert partial.contrast_problems() == []
+
+
+def test_the_contrast_vocabulary_cannot_go_empty() -> None:
+    """A guard against a vacuous parametrization, not a second home for the lists.
+
+    The parametrized tests above draw from `theme`'s own tuples, which is what
+    stops the spec and the code drifting - and it also means emptying either
+    tuple would produce zero cases and a green run. This asserts the shape
+    rather than the contents, so it is not itself something that can drift.
+    """
+    assert len(theme.SURFACE_TOKENS) == 4
+    assert len(theme.TEXT_TOKENS) == 5
+    assert "text.disabled" not in theme.TEXT_TOKENS, "04 exempts it"
+    assert "accent" not in theme.TEXT_TOKENS, "04 exempts it"
 
 
 def test_surfaces_are_monotonic() -> None:
     """Deepest first, each step lighter; widgets rely on the ordering."""
-    levels = [_luminance(theme.color(name)) for name in SURFACE_TOKENS]
+    levels = [theme.luminance(theme.color(name)) for name in SURFACE_TOKENS]
     assert levels == sorted(levels), levels
 
 
@@ -177,16 +207,20 @@ def test_the_palette_table_is_well_formed() -> None:
     assert len(set(palette.values())) == len(palette), "two tokens share a colour"
 
 
-def test_the_palette_table_holds_the_colours_the_code_holds() -> None:
-    """The document and `theme.py` agree on the thirteen colours.
+def test_the_palette_table_is_the_bundled_theme() -> None:
+    """The document and the shipped file agree, name for name and value for value.
 
-    Checked by value here, because D-74's rename lands in the document before
-    the object that will carry the names exists. Phase 1's next step ties the
-    *names* together too, and this assertion stops being the interesting one
-    then — but it is what can be true today, and a value drift between the
-    spec and the palette is worth catching either way.
+    This used to compare the two as *sets of colours*, and said so: the names
+    could not be tied together while D-74's rename lived in the document and
+    the object that would carry it did not exist yet. Both exist now, and the
+    palette is a file, so the assertion gets to be the whole mapping.
+
+    Which makes 04's Colour palette table the specification and
+    `assets/themes/vscode_dark.3dimtheme` its implementation, checked against
+    each other on every run. A colour edited in one and not the other fails
+    here rather than shipping.
     """
-    assert set(palette_table().values()) == set(PALETTE)
+    assert palette_table() == dict(theme_io.builtin().tokens)
 
 
 def test_the_old_token_names_are_gone() -> None:
@@ -363,13 +397,13 @@ def test_the_builtin_tokens_are_exactly_the_palette_table() -> None:
     Two homes for one palette is two values the first time somebody edits one
     of them, and the document is the home that gets read.
     """
-    assert dict(theme.BUILTIN.tokens) == palette_table()
+    assert dict(theme_io.builtin().tokens) == palette_table()
 
 
 def test_the_builtin_surfaces_are_monotonic() -> None:
     """04: deepest to lightest, and widgets rely on the ordering."""
     surfaces = [
-        theme.BUILTIN.token(name)
+        theme_io.builtin().token(name)
         for name in (
             "surface.window",
             "surface.panel",
@@ -377,12 +411,12 @@ def test_the_builtin_surfaces_are_monotonic() -> None:
             "surface.hover",
         )
     ]
-    levels = [_luminance(colour) for colour in surfaces]
+    levels = [theme.luminance(colour) for colour in surfaces]
     assert levels == sorted(levels), surfaces
 
 
 def test_the_builtin_is_well_formed() -> None:
-    assert theme.BUILTIN.problems() == []
+    assert theme_io.builtin().problems() == []
 
 
 def test_every_group_value_on_a_built_theme_is_resolvable() -> None:
@@ -401,7 +435,10 @@ def test_every_group_value_on_a_built_theme_is_resolvable() -> None:
     unobservable - it starts painting token *names* as colours, which Qt
     silently drops.
     """
-    for built in (theme.BUILTIN, a_theme(groups={"clip": {"body": theme.CHANNEL}})):
+    for built in (
+        theme_io.builtin(),
+        a_theme(groups={"clip": {"body": theme.CHANNEL}}),
+    ):
         for group, values in built.groups.items():
             for key, raw in values.items():
                 resolvable = (
@@ -445,7 +482,7 @@ def test_every_group_key_fills_exactly_one_placeholder() -> None:
     placeholders = set(re.findall(r"\$([a-z_0-9]+)", sheet))
     keys = {
         f"{group}.{key}".replace(".", "_")
-        for group, values in theme.BUILTIN.groups.items()
+        for group, values in theme_io.builtin().groups.items()
         for key in values
     }
     assert placeholders == keys
@@ -465,9 +502,9 @@ def test_the_stylesheet_follows_the_theme_it_is_given() -> None:
     """A different theme renders a different sheet, without being made active."""
     recoloured = theme.Theme(
         name="Green",
-        tokens={**theme.BUILTIN.tokens, "accent": "#00FF00"},
-        channels=theme.BUILTIN.channels,
-        groups=theme.BUILTIN.groups,
+        tokens={**theme_io.builtin().tokens, "accent": "#00FF00"},
+        channels=theme_io.builtin().channels,
+        groups=theme_io.builtin().groups,
     )
     sheet = theme.stylesheet(recoloured)
 
@@ -516,20 +553,91 @@ def test_no_module_level_colour_constant_survives() -> None:
     assert not colours, f"colour constants back on the module: {colours}"
 
 
-def test_the_only_place_a_hex_appears_is_the_built_in_theme() -> None:
-    """F-44 at its strongest: even `theme.py` says colours in exactly one place.
+def test_no_hex_appears_in_the_theme_module_at_all() -> None:
+    """M9 phase 3's first acceptance line, and F-44 at its strongest.
 
-    Every hex in this module's source has to be inside `BUILTIN` — its
-    thirteen tokens and its eight channel colours, twenty-one in all. A hex
-    anywhere else in the file is a colour that no theme can replace, which is
-    the failure this milestone exists to prevent, one file earlier than
-    anybody would look for it.
+    Until this phase the rule was "every hex in this module is inside
+    `BUILTIN`" — twenty-one of them, the thirteen tokens and the eight
+    channel colours. The palette is now a bundled `.3dimtheme`, so the rule
+    gets to be the simpler one: **there are no colours in this file.** It
+    holds the code that reads them.
+
+    Asserted over the source rather than over the module, because a hex in a
+    comment or a docstring is still a colour somebody will copy.
     """
     source = Path(theme.__file__).read_text(encoding="utf-8")
-    found = re.findall(r"#[0-9A-Fa-f]{6}", source)
-    expected = list(theme.BUILTIN.tokens.values()) + list(theme.BUILTIN.channels)
 
-    assert sorted(found) == sorted(expected), "a hex outside the built-in theme"
+    assert not re.findall(r"#[0-9A-Fa-f]{6}", source), (
+        "a colour is back in theme.py; the palette lives in "
+        "assets/themes/vscode_dark.3dimtheme"
+    )
+
+
+#: Every module that reaches a bundled resource. `theme.py` reads `app.qss`
+#: and `theme_io.py` reads the built-in `.3dimtheme`; both are inside the
+#: package and both are subject to D-30.
+RESOURCE_READERS = (theme, theme_io)
+
+
+@pytest.mark.parametrize("module", RESOURCE_READERS, ids=lambda m: m.__name__)
+def test_no_module_reaches_a_resource_by_file_path_walking(module: object) -> None:
+    """D-30: bundled resources come through `importlib.resources`.
+
+    `__file__` path-walking works from a source tree and breaks under
+    PyInstaller and zipimport, which is exactly where it is hardest to debug
+    — free to avoid now, expensive at M8.
+
+    Both modules, because a mutation sweep found this asserted for one of
+    them. `theme.py` read `app.qss` from M9 phase 1 and was covered;
+    `theme_io.py` started reading the bundled theme in phase 3 and was not,
+    so the rule held by accident rather than by test.
+
+    Asserted over the parsed module rather than over its text: `theme.py`
+    says the words "walking up from `__file__`" in a comment warning against
+    it, and a test that cannot tell a warning from the thing it warns about
+    is a test that gets deleted the first time it is wrong.
+    """
+    source = Path(module.__file__).read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    walking = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Name) and node.id == "__file__"
+    ]
+
+    assert not walking, (
+        f"{module.__name__} reaches a resource by __file__ on lines "  # type: ignore[attr-defined]
+        f"{[node.lineno for node in walking]}"
+    )
+    assert "resources.files" in source, "and it still reads its resources"
+
+
+@pytest.mark.parametrize("module", RESOURCE_READERS, ids=lambda m: m.__name__)
+def test_every_resource_is_read_with_an_explicit_encoding(module: object) -> None:
+    """A bundled file is UTF-8 wherever it is read from.
+
+    `read_text()` with no encoding uses the platform default, which is UTF-8
+    on the Linux leg of CI and need not be on a user's Windows machine. The
+    bundled theme is ASCII today, so the bug is latent rather than live — and
+    latent is exactly how M1 phase 5 described the class: a cross-platform
+    behaviour asserted only end to end is asserted on one platform.
+
+    Found by a mutation that survived, which is the honest reason it is here.
+    """
+    source = Path(module.__file__).read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    bare = [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "read_text"
+        and not node.args
+        and not any(keyword.arg == "encoding" for keyword in node.keywords)
+    ]
+
+    assert not bare, (
+        f"{module.__name__} reads a resource with the platform encoding "  # type: ignore[attr-defined]
+        f"on lines {bare}"
+    )
 
 
 @pytest.mark.gui
@@ -552,9 +660,9 @@ def test_a_widget_built_under_a_new_theme_wears_it() -> None:
     theme.use(
         theme.Theme(
             name="Green",
-            tokens={**theme.BUILTIN.tokens, "surface.panel": "#00FF00"},
-            channels=theme.BUILTIN.channels,
-            groups=theme.BUILTIN.groups,
+            tokens={**theme_io.builtin().tokens, "surface.panel": "#00FF00"},
+            channels=theme_io.builtin().channels,
+            groups=theme_io.builtin().groups,
         )
     )
 
