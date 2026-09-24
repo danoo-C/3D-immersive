@@ -16,6 +16,7 @@ import soundfile
 
 from immersive.app import build_application
 from immersive.core.document import Document
+from immersive.core.edits import Relink
 from immersive.core.io import project_io
 from immersive.core.io.media import Decoded, Refused, content_hash, decode
 from immersive.core.model import Channel, Clip, MediaFile, Project
@@ -169,6 +170,27 @@ def test_an_old_project_cannot_compare_and_says_so(tmp_path: Path) -> None:
 
     assert result == Relinked(same_audio=None)
     assert media_of(document).hash == content_hash(path)
+
+
+def test_a_relink_clears_missing_whatever_it_is_handed() -> None:
+    """The command's own promise, not its caller's.
+
+    `relink()` always hands it a freshly decoded entry, which is never missing,
+    so no test through `relink()` could tell whether `Relink` clears the mark
+    or merely copies it. The sweep found that; a replacement built any other
+    way - from another project's pool, say - must not carry `missing` in.
+    """
+    media = MediaFile("m-00000001", "/gone.wav", "gone.wav", SAMPLE_RATE, 1, 10)
+    media.missing = True
+    replacement = MediaFile("m-00000001", "/here.wav", "here.wav", SAMPLE_RATE, 1, 10)
+    replacement.missing = True
+
+    command = Relink(media, replacement)
+    command.do()
+    assert not media.missing
+
+    command.undo()
+    assert media.missing
 
 
 # --------------------------------------------------------------------------- #
