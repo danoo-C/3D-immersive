@@ -1,6 +1,6 @@
 # Plan — M2 · Phase 1 — The project in the window
 
-**Written:** 2026-09-24 · **Status:** in progress
+**Written:** 2026-09-24 · **Status:** ✅ complete
 
 ## Approach
 
@@ -155,4 +155,52 @@ tests/test_layering.py                     amended if core/document.py is not
 
 ## Outcome
 
-Filled in at the end.
+Four steps in the planned order, all seven acceptance boxes ticked, eighteen
+mutations and no survivor. 832 tests, and the suite takes eight seconds
+rather than three minutes.
+
+### What the plan got right
+
+**Putting the document in `core/`.** Every rule the phase exists for is
+asserted headless, and the window's tests are about the window. It also
+made the mutation sweep sharp: half the mutations are in `document.py` and
+each was killed by a test that names the rule it broke.
+
+**The Save-that-did-not-save case.** Named in the Approach, in a risk row
+and as a mutation before any code existed, and it is the one branch of the
+prompt a quick implementation gets wrong.
+
+**Dialogs behind replaceable methods.** A risk row said a modal dialog would
+hang the suite. It would have, and it would have done it silently.
+
+### What the plan did not see
+
+**That the suite had been leaking every window it built.** Nothing in the
+plan's risk table is about test speed, because nothing suggested it was a
+problem rather than the cost of a GUI. It was a leak, and the leak was
+quadratic: fixing it took the suite from 185 seconds to 8.
+
+**That the guard has a hole.** The risk row assumed every modal dialog could
+be intercepted; `QMessageBox.question` cannot. Found by a probe hanging, and
+recorded in the guard's docstring so the next dialog does not use it.
+
+**That the disabled-control rule had a second case.** The plan said Undo's
+tooltip would explain itself; it did not see that the shell's existing test
+encoded "disabled means not built", and would have to be taught otherwise.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| `test_layering.py` amended if `document.py` was not covered | not needed — the core walk uses `rglob`, so every new module is covered on arrival |
+| Nothing about `project_io` | gained `SUFFIX`, beside `theme_io.SUFFIX`, because the format's suffix belongs to the format |
+| Nothing about the suite's speed | an autouse fixture that frees every window after each test, in its own commit |
+
+### What phase 2 needs to know
+
+**Edits go through `window.document()`**, never to a stack directly — phase
+6's import pushes its command there. **A dialog is a method a test
+replaces**, and never `QMessageBox.question`. `open_project(path)` takes a
+path for callers that already have one, which M8's recent projects will be.
+And the suite is fast enough to run whole for every mutation, so there is no
+longer a reason to choose target files.

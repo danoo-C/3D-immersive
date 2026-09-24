@@ -8,7 +8,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 
 | Phase | Status |
 |---|---|
-| [1 — The project in the window](phase_1_project_in_the_window.md) | in progress |
+| [1 — The project in the window](phase_1_project_in_the_window.md) | ✅ |
 | [2 — Decode and resample](phase_2_decode_and_resample.md) | not started |
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | not started |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | not started |
@@ -85,3 +85,17 @@ phase's first decision.
 ## Notes
 
 Appended as phases complete.
+
+**Phase 1.** The window holds a document — the project, its undo stack and
+its file — and File › New, Open, Save, Save As and Edit › Undo, Redo work
+through it. One decision: the open project is a Qt-free `Document` in
+`core/`, and every edit goes through it (D-85). The one confirmation the
+application is allowed now exists — Save, Discard or Cancel — and Save goes
+ahead only if the save worked.
+
+The finding that matters beyond the phase is about the tests. Every window
+the suite built was still alive when it finished, and each made the
+next slower to build; freeing them took the suite from three minutes to
+eight seconds. A guard now fails any test that reaches a real modal dialog
+rather than letting it hang — except `QMessageBox.question`, which runs its
+loop out of reach and so is never used. Eighteen mutations, none surviving.
