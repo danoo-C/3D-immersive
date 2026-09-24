@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QScrollArea,
-    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -67,9 +66,9 @@ class NoticeList(QFrame):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(1, 1, 1, 1)
-        layout.addWidget(scroll)
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(1, 1, 1, 1)
+        self._outer.addWidget(scroll)
 
         self.setMinimumWidth(360)
         self.setMaximumHeight(320)
@@ -103,12 +102,29 @@ class NoticeList(QFrame):
                 widget.setParent(None)
                 widget.deleteLater()
 
-        notices = self._log.newest_first()
-        if not notices:
-            self._rows.addWidget(self._row(None))
-            return
-        for notice in notices:
+        notices: list[Notice | None] = list(self._log.newest_first())
+        for notice in notices or [None]:
             self._rows.addWidget(self._row(notice))
+        # Spare height goes below the rows, not into them.
+        self._rows.addStretch(1)
+
+    def fit(self) -> None:
+        """As tall as the rows need at the width they got, up to the maximum.
+
+        `adjustSize()` works from size hints, and a word-wrapped label's hint
+        is for a width of its own choosing - at the width the popup actually
+        gets, the rows can need more height than that.
+        """
+        self.adjustSize()
+        chrome = self.contentsMargins() + self._outer.contentsMargins()
+        needed = self._body.heightForWidth(
+            self.width() - chrome.left() - chrome.right()
+        )
+        if needed > 0:
+            height = needed + chrome.top() + chrome.bottom()
+            self.resize(
+                self.width(), min(max(height, self.height()), self.maximumHeight())
+            )
 
     def _row(self, notice: Notice | None) -> QLabel:
         if notice is None:
@@ -129,7 +145,10 @@ class NoticeList(QFrame):
             f" border-bottom: 1px solid {theme.color('border')};"
             f" padding: 6px 10px;"
         )
-        label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        # ⚠️ No fixed vertical policy. A wrapped row's height depends on its
+        # width, and `Fixed` caps it at the hint's height - for a width of the
+        # label's own choosing - which cut off the last detail lines: the ones
+        # naming what was wrong. The stretch in `populate` keeps rows compact.
         return label
 
     def retheme(self) -> None:
@@ -165,9 +184,21 @@ class NoticeCount(QToolButton):
         self.refresh()
 
     def refresh(self) -> None:
-        """Take the count, the glyph and the colour from the log."""
+        """Take the count, the glyph and the colour from the log.
+
+        ⚠️ **Styled even while hidden.** `QStatusBar` sizes itself from every
+        permanent widget, hidden ones included, so a count that took its
+        compact style only on its first notice held the bar taller - in the
+        toolbar buttons' metrics - until something was reported, and the
+        whole window jumped when something was.
+        """
         unread = self._log.unread
         severity = self._log.unread_severity()
+        token = _TOKEN[severity] if severity is not None else _TOKEN[Severity.INFO]
+        self.setStyleSheet(
+            f"#NoticeCount {{ color: {theme.color(token)};"
+            f" padding: 0 8px; border: none; }}"
+        )
         if not unread or severity is None:
             self.setText("")
             self.hide()
@@ -177,16 +208,12 @@ class NoticeCount(QToolButton):
         self.setToolTip(
             f"{unread} unread notice{'s' if unread != 1 else ''}\nClick to read"
         )
-        self.setStyleSheet(
-            f"#NoticeCount {{ color: {theme.color(_TOKEN[severity])};"
-            f" padding: 0 8px; border: none; }}"
-        )
         self.show()
 
     def open_list(self) -> None:
         """Show everything reported, and mark it read."""
         self._list.populate()
-        self._list.adjustSize()
+        self._list.fit()
         corner = self.mapToGlobal(self.rect().topLeft())
         self._list.move(
             corner.x() - self._list.width() + self.width(),

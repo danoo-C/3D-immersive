@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
+from immersive.ui import theme_io
+from immersive.ui.main_window import MainWindow
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.widgets.notices import NoticeCount
 
@@ -133,3 +137,67 @@ def test_nothing_here_is_modal(count: NoticeCount, log: NoticeLog) -> None:
 
     assert not count._list.isModal()
     assert count._list.windowFlags() & Qt.WindowType.Popup
+
+
+# --------------------------------------------------------------------------- #
+# what the screenshot found
+# --------------------------------------------------------------------------- #
+
+
+def settle() -> None:
+    """Let deferred layout land. One turn is not always enough for a status bar."""
+    for _ in range(10):
+        QApplication.processEvents()
+
+
+def test_no_row_in_the_list_is_cut_off(count: NoticeCount, log: NoticeLog) -> None:
+    """The problem lines are the ones that must not be cut off.
+
+    A wrapped row's height depends on the width it gets, and both the popup's
+    `adjustSize()` and a `Fixed` vertical policy sized rows from their hint -
+    for a width of the label's own choosing. The last detail lines went
+    behind the edge. The notices are the milestone journey's own - a theme
+    chosen, then a broken one - because whether it happens depends on the
+    wording and on how many rows share the width.
+    """
+    report = theme_io.loads(
+        json.dumps(
+            {
+                "schema_version": theme_io.SCHEMA_VERSION,
+                "tokens": {"accent": "not a colour", "invented": "#FF0000"},
+                "groups": {"spaceship": {"hull": "#FF0000"}},
+            }
+        )
+    )
+    log.add(Severity.INFO, "Theme: Red accent")
+    log.add(Severity.WARN, "Theme: Broken", [str(p) for p in report.problems])
+
+    count.open_list()
+    settle()
+    shown = count._list
+
+    for row in shown.rows():
+        assert row.height() >= row.heightForWidth(row.width()), row.text()
+    chrome = 4  # the popup's border and its layout's margin, both sides
+    assert shown.height() - chrome >= shown._body.heightForWidth(shown.width() - chrome)
+
+
+def test_the_first_notice_does_not_move_the_window() -> None:
+    """`QStatusBar` sizes itself from hidden permanent widgets too.
+
+    So a count that took its compact style only when it first appeared held
+    the bar taller - in the toolbar buttons' metrics - until something was
+    reported, and every panel in the window jumped when it was.
+    """
+    build_application([])
+    window = MainWindow()
+    window.resize(1000, 700)
+    window.show()
+    settle()
+    before = window.statusBar().height()
+
+    window.notices().add(Severity.WARN, "something")
+    settle()
+
+    assert window.statusBar().height() == before
+    window.deleteLater()

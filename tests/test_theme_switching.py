@@ -313,3 +313,134 @@ def test_restoring_a_broken_theme_still_reports() -> None:
     assert len(reported) == 1
     assert reported[0].severity is Severity.WARN
     second.deleteLater()
+
+
+# --------------------------------------------------------------------------- #
+# the milestone's own acceptance
+# --------------------------------------------------------------------------- #
+
+
+def test_a_broken_theme_is_listed_selectable_reported_and_survivable(
+    window: MainWindow,
+) -> None:
+    """M9's acceptance line, as one journey.
+
+    "a deliberately broken theme file is reported without preventing
+    startup" — so it has to appear in the menu, be selectable, report what is
+    wrong *in the UI*, and leave the application painting whatever it could
+    salvage.
+    """
+    directory = theme_menu.user_theme_directory()
+    path = directory / f"broken{theme_io.SUFFIX}"
+    written(
+        path,
+        name="Broken",
+        tokens={"accent": "not a colour", "invented": "#FF0000"},
+        groups={"spaceship": {"hull": "#FF0000"}},
+    )
+
+    window._theme_menu.repopulate()
+    entries = {action.text(): action for action in window._theme_menu.actions()}
+    assert "broken" in entries, "it is listed"
+    assert entries["broken"].isEnabled(), "and selectable"
+
+    entries["broken"].trigger()
+
+    # Still painting, on what could be salvaged.
+    assert theme.stylesheet(theme.active())
+    assert theme.color("accent") == theme_io.builtin().token("accent")
+
+    # Reported, in the UI, not on stderr (F-56).
+    reported = window.notices().newest_first()
+    assert len(reported) == 1
+    assert reported[0].severity is Severity.WARN
+    assert len(reported[0].detail) == 3, reported[0].detail
+    assert window.statusBar().currentMessage() == reported[0].message
+    assert not window._notice_count.isHidden()
+
+
+def test_a_theme_that_is_not_even_json_is_reported_as_an_error(
+    window: MainWindow,
+) -> None:
+    directory = theme_menu.user_theme_directory()
+    path = directory / f"garbage{theme_io.SUFFIX}"
+    path.write_text("this is not json", encoding="utf-8")
+
+    window.choose_theme(path)
+
+    reported = window.notices().newest_first()
+    assert reported[0].severity is Severity.ERROR
+    assert theme.active() == theme_io.builtin(), "and it still paints"
+
+
+def test_a_theme_changing_only_the_accent_changes_only_the_accent_rules(
+    window: MainWindow,
+) -> None:
+    """The milestone's own line, met more precisely than it asks.
+
+    The phase doc names "the playhead and focus ring". There is no playhead —
+    the timeline is M3's, and 04's ownership table says so. What is assertable
+    now is stronger than the sentence: **every rule that resolves to accent
+    changes, and no other byte of the sheet does.** That is what "and nothing
+    else" means.
+    """
+    builtin = theme_io.builtin()
+    before = theme.stylesheet(builtin)
+    old_accent = builtin.token("accent")
+    new_accent = "#FF0000"
+
+    directory = theme_menu.user_theme_directory()
+    window.choose_theme(
+        written(
+            directory / f"accent{theme_io.SUFFIX}",
+            name="Red accent",
+            tokens={"accent": new_accent},
+        )
+    )
+    after = theme.stylesheet(theme.active())
+
+    assert before != after, "something changed"
+    assert len(before.splitlines()) == len(after.splitlines())
+
+    changed = [
+        (was, now)
+        for was, now in zip(before.splitlines(), after.splitlines(), strict=True)
+        if was != now
+    ]
+    assert changed, "and it was the sheet that changed"
+    for was, now in changed:
+        assert old_accent in was, f"a line changed that was not accent: {was}"
+        assert now == was.replace(old_accent, new_accent)
+
+    # The focus ring is one of them, so the assertion keeps its connection to
+    # what the acceptance line was actually asking about. Only the selector
+    # can say so: every changed line contains the new accent by construction.
+    assert any(":focus" in was for was, _ in changed), changed
+
+
+def test_the_accent_reaches_actual_pixels(window: MainWindow) -> None:
+    """ "Visibly" — rendered, not merely substituted into a string.
+
+    Offscreen Qt still rasterises, so this is a real image. A stylesheet that
+    is correct and never reaches the screen would pass every other test in
+    this file.
+    """
+    window.resize(400, 300)
+    directory = theme_menu.user_theme_directory()
+    window.choose_theme(
+        written(
+            directory / f"green{theme_io.SUFFIX}",
+            name="Green",
+            tokens={"surface.window": "#00FF00"},
+        )
+    )
+    window.show()
+
+    image = window.grab().toImage()
+    colours = {
+        image.pixelColor(x, y).name().upper()
+        for x in range(0, image.width(), 7)
+        for y in range(0, image.height(), 7)
+    }
+
+    assert "#00FF00" in colours, sorted(colours)
