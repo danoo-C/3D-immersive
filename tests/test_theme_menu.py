@@ -1,19 +1,22 @@
 """Where themes are found, and what the application remembers.
 
-⚠️ Every test here runs under `QStandardPaths.setTestModeEnabled(True)`.
-Without it `user_theme_directory()` creates a directory in the developer's
-real config and `QSettings` writes their real settings — a test run that
-changes the machine it ran on, and a persistence test that can pass because
-of yesterday's run rather than because of today's code.
+⚠️ Every test here runs under `QStandardPaths.setTestModeEnabled(True)`, with
+`QSettings` forced into an INI file in a temporary home. Without them
+`user_theme_directory()` creates a directory in the developer's real config
+and `QSettings` writes their real settings — a test run that changes the
+machine it ran on, and a persistence test that can pass because of
+yesterday's run rather than because of today's code. The last section below
+asserts both, because nothing else would notice either going.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QStandardPaths
 
 from immersive.app import build_application
 from immersive.ui import theme_io, theme_menu
@@ -23,16 +26,9 @@ pytestmark = pytest.mark.gui
 
 @pytest.fixture(autouse=True)
 def _application() -> Iterator[None]:
-    """A QApplication, and settings emptied between tests.
-
-    Redirecting the home directory is `conftest.py`'s, autouse for every
-    test in the suite - building a `MainWindow` is enough to reach for it,
-    so confining the guard to this file would not have been a guard.
-    """
+    """A QApplication. Home and settings are `conftest.py`'s, for everyone."""
     build_application([])
-    QSettings().clear()
     yield
-    QSettings().clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -149,3 +145,38 @@ def test_a_stored_value_of_the_wrong_kind_means_the_built_in() -> None:
     QSettings().setValue(theme_menu.SETTINGS_KEY, 7)
 
     assert theme_menu.remembered() is None
+
+
+# --------------------------------------------------------------------------- #
+# the suite's own isolation
+# --------------------------------------------------------------------------- #
+
+
+def test_settings_are_a_file_inside_the_test_home() -> None:
+    """Not the registry, not CFPreferences, not the developer's `~/.config`.
+
+    The format line is what fails on every platform if `conftest.py` stops
+    forcing INI - including Linux, where the path alone would still pass
+    because the native format there happens to be a file under `HOME`.
+    """
+    settings = QSettings()
+
+    assert settings.format() == QSettings.Format.IniFormat
+    assert Path(settings.fileName()).is_relative_to(Path(os.environ["HOME"]))
+
+
+def test_the_theme_directory_is_not_the_one_a_real_launch_uses() -> None:
+    """Qt's test mode is the guard that holds on every platform.
+
+    The environment redirects are enough on Linux. Whether Qt's Windows
+    lookup reads `APPDATA` at all is not something this suite has checked, so
+    the guarantee that does not depend on it is test mode's own corner.
+    """
+    under_test = theme_menu.user_theme_directory(create=False)
+    QStandardPaths.setTestModeEnabled(False)
+    try:
+        real = theme_menu.user_theme_directory(create=False)
+    finally:
+        QStandardPaths.setTestModeEnabled(True)
+
+    assert under_test != real
