@@ -13,7 +13,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | ✅ |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | ✅ |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | ✅ |
-| [6 — The media pool](phase_6_media_pool.md) | in progress |
+| [6 — The media pool](phase_6_media_pool.md) | ✅ |
 | [7 — Audition](phase_7_audition.md) | not started |
 
 The order is dependency order. Everything after phase 1 edits a project the
@@ -130,3 +130,11 @@ the rule was right and too narrow. D-92 widens it: painted groups are
 declared, and a test requires every painted key to be read by a
 `group_color()` call. Looking at a grab fixed the one thing the tests could
 not see, a line running through the words that say a sample is missing.
+
+**Phase 6.** A folder imports on workers as one undoable edit, the pool shows
+its folders, lengths and waveforms, a filter narrows it, and a row drags for
+M3. The session store keeps decoded audio across Undo, so Redo is free and
+phase 7 has somewhere to read from. Building it found that a reopened project
+had no samples in the store, so opening now prepares them too; and looking at
+a real import found a thumbnail squeezed to a smear, which no test measured.
+Eighteen mutations, none surviving.

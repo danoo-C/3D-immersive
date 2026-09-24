@@ -1,6 +1,6 @@
 # Plan — M2 · Phase 6 — The media pool
 
-**Written:** 2026-09-24 · **Status:** in progress
+**Written:** 2026-09-24 · **Status:** ✅ complete
 
 ## Approach
 
@@ -155,4 +155,44 @@ tests/fixtures/stylesheet_before_m9.qss    removed
 
 ## Outcome
 
-Filled in at the end.
+Five steps — one added while building — all ten acceptance boxes ticked,
+eighteen mutations and no survivor. 1045 tests.
+
+### What the plan got right
+
+**The four layers.** Every rule about what an import adds was settled
+headless, and the window's part stayed small enough to read at a glance.
+
+**The store surviving Undo.** It made Redo free and gave phase 7 somewhere to
+read audio from, without either being a separate piece of work.
+
+**Testing N-3 as a timer.** A test that waited for the import to finish would
+have passed with the import on the UI thread; the timer cannot.
+
+### What the plan did not see
+
+**That opening a project needed the same workers.** The plan's store was an
+import-time idea, and a saved project reopened was the case it forgot.
+Step 4 is the fix, marked as added in the steps above.
+
+**Layout.** No test measured whether a 72-pixel thumbnail fits beside a name
+in 250 pixels, and it did not until the grab was looked at.
+
+**macOS's AppleDouble files**, which carry an audio suffix without the audio.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| Four steps | five — an opened project's samples load too |
+| `Placeholder` unchanged | a `Panel` base pulled out of it, so the header's style has one home |
+| The waveform widget unchanged | its drawing pulled out into `paint_peaks`, shared with the pool's delegate |
+| Thirteen mutations | eighteen |
+
+### What phase 7 needs to know
+
+`window.store().audio(media_id)` is the decoded sample, float32 at 48 kHz,
+`(frames, channels)` and read-only; it is there for every imported sample and,
+once `importing()` is false, for every present sample of an opened project.
+The pool's rows carry their media id in `ID_ROLE`, and a double-click on a
+row is phase 7's to wire.
