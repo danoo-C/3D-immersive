@@ -73,7 +73,7 @@ milestone nobody has opened yet:
 | `m6_automation/` | |
 | `m7_render/` | |
 | `m8_polish_and_ship/` | |
-| `m9_theming/` | **next** — phase documents written, no phases started. Built after M1, not last — see [06](06-roadmap.md) |
+| `m9_theming/` | complete — built after M1, not last; see [06](06-roadmap.md) |
 
 ## Sizing a phase
 

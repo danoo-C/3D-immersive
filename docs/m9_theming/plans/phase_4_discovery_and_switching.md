@@ -1,6 +1,6 @@
 # Plan — M9 · Phase 4 — Discovery and switching
 
-**Written:** 2026-09-23 · **Status:** in progress
+**Written:** 2026-09-23 · **Status:** ✅ complete
 
 ## Approach
 
@@ -255,4 +255,86 @@ listed.
 
 ## Outcome
 
-Filled in at the end.
+Six steps in the order planned, all nine acceptance boxes ticked, and one
+correction to test isolation that steps 3 and 4 believed finished. Seventeen
+mutations named; five survived a first run and four of those were real.
+767 tests.
+
+### What the plan got right
+
+**Checking phase 3's prediction instead of following it.** Where `Severity`
+lives was settled before step 1 by reading `theme_io`'s import graph, and
+nothing afterwards had to be undone (D-81).
+
+**A walk rather than a signal** (D-82). The test that looks for *any* old
+colour *anywhere* found notice rows that no list of widgets would have named —
+which is the property the decision was argued for: a forgotten widget is
+visible.
+
+**Writing the settings guard before the feature.** It was wrong three times,
+but it existed from the start, so each fault was found by a test leaning on it
+rather than by a developer's config changing under them.
+
+**Saying before building that the accent line could not be met as written**,
+rather than narrowing it quietly at the end.
+
+### What the plan did not see
+
+**That test isolation has platforms.** The risk row said
+`QSettings.setPath` to a temporary directory; what was built redirected
+environment variables, which reaches `QSettings` only on Linux. It is M1
+phase 5's lesson — a cross-platform behaviour asserted end to end is asserted
+on one platform — applied to the test harness, which nobody thinks of as
+having platforms. Qt caching the location on first use, which turned a
+per-test redirect into a per-session one, was not foreseen either.
+
+**That the interesting failures would be layout, not colour.** The unknown
+the plan named was how much the walk would catch, and it caught everything on
+its list. What it could not have caught was a hidden widget taking part in
+layout and a wrapped row capped at its hint — neither a colour, both found
+only by looking. The screenshot line in the acceptance read like ceremony and
+was the most productive check in the phase.
+
+**An assertion that could not fail.** Step 6's first draft or'ed the focus-ring
+check with a clause true by construction. Reading the test against what it
+claimed found it; the sweep would not have, because the sweep mutates code.
+
+**That a fixed bug is not a tested one.** Step 4 found and fixed listing
+creating the directory, wrote a commit message about it, and pinned nothing.
+The sweep only found the gap because the bug was added to the list while
+running it.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| Widget tests in `tests/test_notices.py` | `tests/test_notice_surface.py` — the model's tests build no `QApplication`, and mixing the two would have hidden which half needs a display |
+| The screenshot in the Notes | described in the Notes, not committed — [doc-system.md](../../doc-system.md) keeps image files out of `docs/`; the re-runnable part is a pixel test |
+| `04` "possibly amended" | amended: the notice rules the surface settled, and a *Choosing a theme* subsection for the directory, the menu and what is remembered |
+| Seventeen mutations | twenty — the order with the sheet built from the outgoing theme, listing creating the directory, and a direct check that the accent-only test has teeth |
+
+### What M2 needs to know
+
+**The notice centre is ready for F-3.** `MainWindow.notices()` is the log, and
+`NoticeLog.add(severity, message, detail)` needs no widget and no Qt. One
+notice per thing that happened, with its particulars as detail lines — a
+folder with four missing files is one notice, not four. Relinking hangs off a
+notice at M8; it is not a dialog.
+
+**Isolation is mostly done.** Every test runs inside a temporary home with
+empty settings and no subdirectories in the application's config location, so
+a new settings key needs nothing extra. F-9's peak cache will more likely live
+in Qt's *cache* location, which is inside the same temporary home but is **not**
+emptied between tests — M2 decides whether it should be, before a test passes
+because of a peak file its predecessor wrote. Creating anything at import is
+caught now; do it on use.
+
+**New widgets add their groups to `04`** — tree view, header, filter field,
+waveform thumbnail — and either implement `retheme()` or read colours at paint
+time. The waveform is a paint-time widget by nature. M3 inherits the playhead
+half of this phase's accent line, and must retheme its `QGraphicsItem`s
+itself, because the walk only reaches `QWidget`s.
+
+**Not yet run on Windows or macOS.** The INI fix exists because of those two
+platforms and has only run on Linux. CI runs on pull requests and on `main`,
+and this branch has reached neither.

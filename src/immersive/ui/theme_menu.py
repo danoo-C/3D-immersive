@@ -33,8 +33,10 @@ BUILTIN_SENTINEL = "<builtin>"
 def user_theme_directory(*, create: bool = True) -> Path:
     """The platform's place for this application's themes.
 
-    `~/.config/3d immersive/themes` on Linux and the equivalent elsewhere,
-    resolved by Qt rather than by assembling a path per platform.
+    `~/.config/3d immersive/3d immersive/themes` on Linux - Qt nests the
+    organisation name and the application name, and here they are the same -
+    and the equivalent elsewhere, resolved by Qt rather than by assembling a
+    path per platform.
 
     Created on use rather than at import, which is the difference between an
     application that makes a directory when somebody opens the theme menu and

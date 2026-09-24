@@ -334,6 +334,31 @@ rule would mean refusing somebody's own theme on their own machine, which is
 not a call this application gets to make. The **default** theme is a different
 matter: it is held to the rule by `tests/test_theme.py`.
 
+### Choosing a theme
+
+Themes live in a `themes` folder inside the application's config directory —
+`~/.config/3d immersive/3d immersive/themes` on Linux, where Qt nests the
+organisation name and the application name and the two happen to be the same,
+and the platform's equivalent elsewhere, resolved by Qt rather than assembled
+per platform. A real launch creates it, so there is somewhere to drop a file;
+nothing else does, and an empty or missing one simply means there are no user
+themes.
+
+`View > Theme` lists the bundled theme first, by its name, then every
+`.3dimtheme` in that folder, by file name. It is **rescanned each time the
+menu opens**, so a file dropped in appears without a restart (F-48); there is
+no file watcher, and a theme edited on disk is re-read when it is next chosen.
+With none installed, a disabled entry says so and its tooltip names the
+folder. Every file found is listed and selectable, including a broken one —
+choosing it is how its author finds out what is wrong with it.
+
+Choosing a theme repaints the running application and is remembered by
+**path** (D-83). At the next launch it is restored **quietly**: replaying a
+previous session's choice is not news, and a notice on every launch is how
+people learn to stop reading them. Quiet when it works is not quiet when it
+does not — a restored theme with problems reports them, and one whose file has
+gone falls back to the built-in and says so.
+
 ### The vocabulary grows
 
 There is no complete list of groups today, and writing one now would be
@@ -568,14 +593,21 @@ exists to prevent in the other direction.
 ```
 
 - The **status bar** carries the most recent notice as one line, and a count
-  of unread ones beside the xrun counter. The count is `warn` for warnings,
-  `error` for errors, and invisible at zero — the same rule the xrun counter
-  already follows.
+  of unread ones beside the xrun counter. The count is coloured by the
+  **worst** unread notice rather than the newest — an error followed by a
+  warning is still an error waiting to be read — and is invisible at zero, the
+  same rule the xrun counter already follows. Its severity is a glyph as well
+  as a colour (✕ ⚠ •), because nothing here is carried by colour alone.
+- **One notice per thing that happened.** A theme file with three problems is
+  one notice whose detail lines are its three problems, not three notices: the
+  count moves once, and the status line names the file rather than whichever
+  problem was found last.
 - Clicking the count opens the **notice list**: a popover of everything
   reported this session, newest first, each with its severity, its time, its
-  message and, where there is one, an action — *Relink…* for missing media,
-  *Reveal* for a theme file, *Choose device…* for a stream that would not
-  open.
+  message, its detail lines and, where there is one, an action — *Relink…* for
+  missing media, *Reveal* for a theme file, *Choose device…* for a stream that
+  would not open. Opening the list marks everything in it read, which is what
+  makes the count go away.
 - Notices persist for the session and are cleared explicitly. A message you
   can only read in the second it appears has not been reported to anybody.
 
