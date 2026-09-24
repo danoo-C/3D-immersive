@@ -1,6 +1,7 @@
 # M2 · Phase 3 — Content hash and relink
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_3_hash_and_relink.md](plans/phase_3_hash_and_relink.md)
 
 ## Goal
 
