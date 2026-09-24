@@ -148,6 +148,26 @@ class SetAttribute(Command):
         setattr(self.target, self.name, self.previous)
 
 
+class AddMedia(Command):
+    """Add several samples to the pool as one edit: one import, one Undo.
+
+    Redo puts back the same objects rather than new ones, so anything that
+    already refers to them by id - the session's decoded audio above all -
+    still finds them.
+    """
+
+    def __init__(self, project: Project, entries: Sequence[MediaFile]) -> None:
+        self.project = project
+        self.entries = list(entries)
+        self.at = len(project.media_pool)
+
+    def do(self) -> None:
+        self.project.media_pool[self.at : self.at] = self.entries
+
+    def undo(self) -> None:
+        del self.project.media_pool[self.at : self.at + len(self.entries)]
+
+
 class Relink(Command):
     """Point a pool entry at another file, and take that file's facts (D-90).
 
