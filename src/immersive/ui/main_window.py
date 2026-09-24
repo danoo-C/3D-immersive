@@ -148,6 +148,12 @@ class MainWindow(QMainWindow):
         self._store = MediaStore()
         self._importer = Importer(self)
         self._importer.finished.connect(self._imported)
+        #: Fills the store for a project opened from disk, which imports
+        #: never touched: the same workers, and no edit.
+        self._loader = Importer(self)
+        self._loader.finished.connect(self._loaded)
+        self._loading: list[MediaFile] = []
+        self._loading_into: Project | None = None
         #: The project an import in flight is for. A different one by the
         #: time it finishes means the person opened another, and the samples
         #: must not land in it.
@@ -469,6 +475,7 @@ class MainWindow(QMainWindow):
         """File > New. False when the person chose to keep what was open."""
         if not self._may_discard():
             return False
+        self._store.clear()
         self._document.new()
         return True
 
@@ -499,6 +506,10 @@ class MainWindow(QMainWindow):
                 f"{chosen.name} could not be opened", [_reason(unreadable)]
             )
             return False
+
+        # Reaching here, the open succeeded: every failure returned above.
+        self._store.clear()
+        self._load_samples()
 
         missing = [
             media for media in self._document.project.media_pool if media.missing
@@ -542,7 +553,46 @@ class MainWindow(QMainWindow):
         return self._store
 
     def importing(self) -> bool:
-        return self._importer.busy
+        """Whether workers are still preparing samples - imported or loaded."""
+        return self._importer.busy or self._loader.busy
+
+    def _load_samples(self) -> None:
+        """Prepare the opened project's samples that are here, into the store.
+
+        Not an edit: nothing in the model changes, so nothing is marked
+        unsaved and no hash is written into an old project (D-89). Samples
+        whose files have gone are not tried - they are already reported.
+        """
+        present = [
+            media for media in self._document.project.media_pool if not media.missing
+        ]
+        if not present or self._loader.busy:
+            return
+        self._loading = present
+        self._loading_into = self._document.project
+        self._loader.start([Path(media.path) for media in present])
+
+    def _loaded(self, results: list[Prepared | Refused]) -> None:
+        loading, self._loading = self._loading, []
+        into, self._loading_into = self._loading_into, None
+        if into is not self._document.project:
+            return
+        trouble: list[str] = []
+        for media, result in zip(loading, results, strict=True):
+            if isinstance(result, Refused):
+                trouble.append(str(result))
+                continue
+            self._store.keep(media.id, result)
+            if media.hash and media.hash != result.hash:
+                trouble.append(f"{media.name}: has changed since the project was saved")
+        if trouble:
+            self._notices.add(
+                Severity.WARN,
+                f"{len(trouble)} sample{'s' if len(trouble) != 1 else ''} "
+                "did not load as saved",
+                trouble,
+            )
+        self._pool.tree.viewport().update()
 
     def import_files(self) -> bool:
         """File > Import Audio. Several files, prepared on workers."""

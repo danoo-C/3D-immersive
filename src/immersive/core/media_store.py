@@ -103,6 +103,10 @@ class MediaStore:
     def __contains__(self, media_id: object) -> bool:
         return media_id in self._prepared
 
+    def clear(self) -> None:
+        """Forget everything - a different project's ids mean different samples."""
+        self._prepared.clear()
+
 
 @dataclass(frozen=True)
 class Admission:
