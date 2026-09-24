@@ -32,11 +32,14 @@ from PySide6.QtWidgets import (
 
 from immersive import __version__
 from immersive.core.document import Document
+from immersive.core.edits import AddMedia
 from immersive.core.io import project_io
 from immersive.core.io.media import Refused
-from immersive.core.model import MediaFile
+from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, find_audio
+from immersive.core.model import MediaFile, Project
 from immersive.core.relink import relink
 from immersive.ui import icons, theme, theme_io, theme_menu
+from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
 from immersive.ui.theme_menu import ThemeMenu
@@ -47,6 +50,11 @@ WINDOW_TITLE = "3d immersive"
 
 #: What the Open and Save As dialogs show.
 PROJECT_FILTER = f"3d immersive project (*{project_io.SUFFIX})"
+
+#: What the Import Audio dialog shows: F-5's formats (D-93).
+AUDIO_FILTER = "Audio ({})".format(
+    " ".join(f"*{suffix}" for suffix in sorted(SUFFIXES))
+)
 
 
 class Unsaved(Enum):
@@ -70,7 +78,6 @@ _PARAMS_H = 220
 # milestone rather than a dozen scattered strings - and so that a grep for
 # "M3" finds everything the timeline milestone switches on. The milestones
 # themselves are defined in docs/06-roadmap.md.
-_M2 = "the media pool arrives at M2"
 _M3 = "the timeline and transport arrive at M3"
 _M5 = "the spatial views arrive at M5"
 _M6 = "automation arrives at M6"
@@ -135,6 +142,15 @@ class MainWindow(QMainWindow):
         #: the window reads its state back after each one rather than keeping
         #: a second copy that could disagree.
         self._document = Document()
+        #: The session's decoded audio and peaks, by media id - not the model,
+        #: and not saved. Kept across Undo so Redo of an import is free.
+        self._store = MediaStore()
+        self._importer = Importer(self)
+        self._importer.finished.connect(self._imported)
+        #: The project an import in flight is for. A different one by the
+        #: time it finishes means the person opened another, and the samples
+        #: must not land in it.
+        self._importing_into: Project | None = None
         #: Widgets that paint themselves from a token, and the token they use.
         #: Kept so a theme change can ask for the colour again (D-82).
         self._chips: list[tuple[QLabel, str]] = []
@@ -175,7 +191,12 @@ class MainWindow(QMainWindow):
             self.save_project_as
         )
         file_menu.addSeparator()
-        self._add(file_menu, "&Import Audio…", "Ctrl+I", arrives=_M2)
+        self._add(file_menu, "&Import Audio…", "Ctrl+I").triggered.connect(
+            self.import_files
+        )
+        self._add(file_menu, "Import &Folder…", "Ctrl+Shift+I").triggered.connect(
+            self.import_folder
+        )
         file_menu.addSeparator()
         quit_action = self._add(file_menu, "&Quit", _quit_shortcut())
         quit_action.triggered.connect(self.close)
@@ -511,6 +532,76 @@ class MainWindow(QMainWindow):
         target = chosen
         return self._written(target, lambda: self._document.save_as(target))
 
+    def store(self) -> MediaStore:
+        """The session's decoded audio and peaks, by media id."""
+        return self._store
+
+    def importing(self) -> bool:
+        return self._importer.busy
+
+    def import_files(self) -> bool:
+        """File > Import Audio. Several files, prepared on workers."""
+        return self.import_paths(self._choose_audio_files())
+
+    def import_folder(self) -> bool:
+        """File > Import Folder. Everything F-5 can read beneath it (D-93)."""
+        folder = self._choose_folder()
+        if folder is None:
+            return False
+        found = find_audio(folder)
+        if not found:
+            self._notices.add(
+                Severity.INFO, f"No audio found in {folder.name}", [str(folder)]
+            )
+            return False
+        return self.import_paths(found)
+
+    def import_paths(self, paths: list[Path]) -> bool:
+        """Prepare `paths` on workers; the pool fills when all are in (N-3)."""
+        if not paths or self._importer.busy:
+            return False
+        self._importing_into = self._document.project
+        self._importer.start(list(paths))
+        return True
+
+    def _imported(self, results: list[Prepared | Refused]) -> None:
+        """On the UI thread, the only place the model is edited from.
+
+        One import is one edit, so one Undo takes back a folder of forty.
+        Everything that did not come in is one notice with a line each -
+        success on its own is quiet, since the pool itself shows it.
+        """
+        into, self._importing_into = self._importing_into, None
+        if into is not self._document.project:
+            self._notices.add(
+                Severity.INFO,
+                "Import set aside: another project was opened while it ran",
+                [str(result.path) for result in results],
+            )
+            return
+
+        admission = admit(self._document.project, results)
+        if admission.admitted:
+            for entry, prepared in admission.admitted:
+                self._store.keep(entry.id, prepared)
+            self._document.push(
+                AddMedia(
+                    self._document.project, [entry for entry, _ in admission.admitted]
+                )
+            )
+
+        detail = [str(refusal) for refusal in admission.refused] + [
+            f"{path.name}: already in the pool" for path in admission.already
+        ]
+        if detail:
+            count = len(admission.admitted)
+            self._notices.add(
+                Severity.WARN if admission.refused else Severity.INFO,
+                f"Imported {count} of {len(results)} "
+                f"file{'s' if len(results) != 1 else ''}",
+                detail,
+            )
+
     def relink_media(self, media: MediaFile, path: Path) -> bool:
         """Point a sample at another file, and say what that did (D-90).
 
@@ -574,7 +665,7 @@ class MainWindow(QMainWindow):
             return self.save_project()
         return True
 
-    # --- the three places this window waits for a person. Methods, so a
+    # --- the places this window waits for a person. Methods, so a
     # --- test replaces them; conftest.py fails any test that reaches the
     # --- real dialogs instead of hanging on them.
 
@@ -608,6 +699,18 @@ class MainWindow(QMainWindow):
     def _choose_save_path(self) -> Path | None:
         chosen, _ = QFileDialog.getSaveFileName(
             self, "Save Project As", self._dialog_directory(), PROJECT_FILTER
+        )
+        return Path(chosen) if chosen else None
+
+    def _choose_audio_files(self) -> list[Path]:
+        chosen, _ = QFileDialog.getOpenFileNames(
+            self, "Import Audio", self._dialog_directory(), AUDIO_FILTER
+        )
+        return [Path(each) for each in chosen]
+
+    def _choose_folder(self) -> Path | None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Import Folder", self._dialog_directory()
         )
         return Path(chosen) if chosen else None
 
