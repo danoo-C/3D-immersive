@@ -18,8 +18,16 @@ import numpy.typing as npt
 import pytest
 import soundfile
 
-from immersive.core.io import media
-from immersive.core.io.media import Decoded, Refused, decode, frames_at_project_rate
+from immersive.core.document import Document
+from immersive.core.io import media, project_io
+from immersive.core.io.media import (
+    Decoded,
+    Refused,
+    content_hash,
+    decode,
+    frames_at_project_rate,
+)
+from immersive.core.model import Project
 from immersive.core.time import SAMPLE_RATE
 
 
@@ -337,3 +345,129 @@ def test_the_resampler_quality_is_the_documented_one() -> None:
     """The plan chose `HQ` over `VHQ` against N-4's load budget; pinned so a
     change is a decision someone writes down rather than an edit."""
     assert media.QUALITY == "HQ"
+
+
+# --------------------------------------------------------------------------- #
+# the content hash (D-88)
+# --------------------------------------------------------------------------- #
+
+
+def hashed(path: Path) -> str:
+    result = content_hash(path)
+    assert isinstance(result, str), result
+    return result
+
+
+def test_the_same_bytes_hash_the_same_wherever_they_live(tmp_path: Path) -> None:
+    contents = np.random.default_rng(5).bytes(10_000)
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "kick.wav").write_bytes(contents)
+    (tmp_path / "renamed.wav").write_bytes(contents)
+
+    first = hashed(tmp_path / "a" / "kick.wav")
+
+    assert first == hashed(tmp_path / "renamed.wav")
+    assert first.startswith("sha256:")
+    assert len(first) == len("sha256:") + 64
+
+
+def test_a_change_past_the_first_chunk_changes_the_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The *last* byte, so a hash of only the first chunk would miss it."""
+    monkeypatch.setattr(media, "CHUNK", 64)
+    contents = bytearray(np.random.default_rng(6).bytes(1_000))
+    path = tmp_path / "x.wav"
+    path.write_bytes(bytes(contents))
+    before = hashed(path)
+
+    contents[-1] ^= 0xFF
+    path.write_bytes(bytes(contents))
+
+    assert hashed(path) != before
+
+
+def test_a_retag_changes_the_hash_though_the_audio_does_not(tmp_path: Path) -> None:
+    """The case that tells bytes from audio, and D-88 chose bytes.
+
+    Same samples, different title: the hash differs, so a retagged file
+    relinks with a notice and its peaks are computed again - the safe side
+    of the trade for a key that must mean the same file on every machine.
+    """
+    audio = tone(SAMPLE_RATE)
+    paths = []
+    for title in ("Kick", "Kick (final)"):
+        path = tmp_path / f"{title}.flac"
+        with soundfile.SoundFile(
+            path, "w", SAMPLE_RATE, 1, format="FLAC", subtype="PCM_16"
+        ) as file:
+            file.title = title
+            file.write(audio)
+        paths.append(path)
+
+    np.testing.assert_array_equal(decoded(paths[0]).audio, decoded(paths[1]).audio)
+    assert hashed(paths[0]) != hashed(paths[1])
+
+
+def test_a_large_file_is_read_a_chunk_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A two-gigabyte WAV must cost one chunk of memory to hash, not two
+    gigabytes - asserted by recording every read."""
+    monkeypatch.setattr(media, "CHUNK", 64)
+    path = tmp_path / "big.wav"
+    path.write_bytes(np.random.default_rng(8).bytes(1_000))
+    reads: list[int] = []
+    real_open = Path.open
+
+    def recording(self: Path, *args: object, **kwargs: object) -> object:
+        file = real_open(self, *args, **kwargs)  # type: ignore[call-overload]
+        original = file.read
+
+        def read(size: int = -1) -> bytes:
+            reads.append(size)
+            return original(size)
+
+        file.read = read
+        return file
+
+    monkeypatch.setattr(Path, "open", recording)
+    hashed(path)
+    monkeypatch.undo()
+
+    assert len(reads) > 1
+    assert all(0 < size <= 64 for size in reads), reads
+
+
+def test_a_file_that_cannot_be_hashed_is_refused(tmp_path: Path) -> None:
+    folder = tmp_path / "folder.wav"
+    folder.mkdir()
+
+    gone = content_hash(tmp_path / "gone.wav")
+    assert isinstance(gone, Refused) and gone.reason == "is not there"
+    assert isinstance(content_hash(folder), Refused)
+
+
+def test_the_hash_is_in_the_saved_file(tmp_path: Path) -> None:
+    """Read from the text, not through a round trip - M1 phase 5's lesson."""
+    path = written(tmp_path / "kick.wav", tone(SAMPLE_RATE), SAMPLE_RATE)
+    digest = hashed(path)
+    entry = decoded(path).media_file("m-00000001", path, digest)
+    project_io.save(Project(media_pool=[entry]), tmp_path / "song.3dim")
+
+    assert f'"hash": "{digest}"' in (tmp_path / "song.3dim").read_text(encoding="utf-8")
+
+
+def test_a_project_saved_without_hashes_opens_clean_and_keeps_none(
+    tmp_path: Path,
+) -> None:
+    """D-89: filling them on open would be an edit nobody made."""
+    path = written(tmp_path / "kick.wav", tone(SAMPLE_RATE), SAMPLE_RATE)
+    entry = decoded(path).media_file("m-00000001", path)
+    project_io.save(Project(media_pool=[entry]), tmp_path / "old.3dim")
+    document = Document()
+
+    document.open(tmp_path / "old.3dim")
+
+    assert document.project.media_pool[0].hash == ""
+    assert not document.is_dirty

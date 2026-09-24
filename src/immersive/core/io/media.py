@@ -19,6 +19,7 @@ this file was one of forty, and so what kind of trouble it is.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,14 @@ QUALITY: Final = "HQ"
 #: Mono or stereo (03, `MediaFile.channels`). More is refused rather than
 #: guessed at (D-87).
 MAX_CHANNELS: Final = 2
+
+#: How much of a file is read at a time when hashing it: memory for one chunk,
+#: never for the whole file.
+CHUNK: Final = 1 << 20
+
+#: What a content hash starts with. The algorithm is part of the value, so a
+#: later build that hashes differently can tell an old hash from a mismatch.
+HASH_PREFIX: Final = "sha256:"
 
 Audio = npt.NDArray[np.float32]
 
@@ -64,12 +73,15 @@ class Decoded:
     def channels(self) -> int:
         return int(self.audio.shape[1])
 
-    def media_file(self, media_id: str, path: str | os.PathLike[str]) -> MediaFile:
-        """The pool entry for this sample, as far as decoding can fill it.
+    def media_file(
+        self, media_id: str, path: str | os.PathLike[str], hash: str = ""
+    ) -> MediaFile:
+        """The pool entry for this sample.
 
         `name` is the file's whole name, suffix included, as `03`'s example
         has it: `kick.wav` and `kick.mp3` are two samples and should look it.
-        The hash is phase 3's.
+        `hash` is `content_hash`'s, taken by the caller, which is the one
+        that knows whether it already has one.
         """
         where = Path(path).absolute()
         return MediaFile(
@@ -79,6 +91,7 @@ class Decoded:
             source_rate=self.source_rate,
             channels=self.channels,
             frames=self.frames,
+            hash=hash,
         )
 
 
@@ -133,6 +146,34 @@ def decode(path: str | os.PathLike[str]) -> Decoded | Refused:
     audio = np.ascontiguousarray(audio, dtype=np.float32)
     audio.flags.writeable = False
     return Decoded(audio, int(rate))
+
+
+def content_hash(path: str | os.PathLike[str]) -> str | Refused:
+    """SHA-256 of the file's **bytes**, as `sha256:<hex>` (D-88).
+
+    Bytes rather than decoded audio, because decoders differ by version and
+    D-40 declines to promise the same floats on two machines - and a relink
+    key and a cache key must mean the same file everywhere. A retagged file
+    therefore hashes differently, which errs the safe way: it relinks with a
+    notice, and its peaks are computed again.
+
+    Read `CHUNK` bytes at a time, so a two-gigabyte WAV costs one chunk of
+    memory to hash.
+    """
+    source = Path(path)
+    if not source.exists():
+        return Refused(str(source), "is not there")
+    if not source.is_file():
+        return Refused(str(source), "is a folder, not a sound file")
+
+    digest = hashlib.sha256()
+    try:
+        with source.open("rb") as file:
+            while block := file.read(CHUNK):
+                digest.update(block)
+    except OSError as unreadable:
+        return Refused(str(source), f"could not be read ({unreadable.strerror})")
+    return HASH_PREFIX + digest.hexdigest()
 
 
 def _reason(error: Exception) -> str:
