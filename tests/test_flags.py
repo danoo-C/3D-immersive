@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from immersive import app
 from immersive.__main__ import parse
 from immersive.audio.device import DEFAULT_BLOCK, settle
 
@@ -113,3 +114,72 @@ def test_a_device_that_refuses_48k_is_said_and_not_worked_around() -> None:
 
     assert not settled.usable
     assert "will not open at 48000 Hz" in settled.problems[-1]
+
+
+# --------------------------------------------------------------------------- #
+# a real launch, through app.run
+# --------------------------------------------------------------------------- #
+
+
+def launched(
+    monkeypatch: pytest.MonkeyPatch, backend: object, **flags: str
+) -> dict[str, Any]:
+    """Run `app.run` for real, look at its window once the loop is turning,
+    and quit. What was seen comes back."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from immersive.ui.main_window import MainWindow
+
+    seen: dict[str, Any] = {}
+
+    def look() -> None:
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, MainWindow):
+                seen["notices"] = [n.message for n in widget.notices().newest_first()]
+                seen["audition"] = widget._audition
+        instance = QApplication.instance()
+        assert instance is not None
+        instance.quit()
+
+    real_build = app.build_application
+
+    def build(argv: list[str] | None = None) -> QApplication:
+        application = real_build(argv)
+        QTimer.singleShot(0, look)
+        return application
+
+    monkeypatch.setattr(app, "load_backend", lambda: backend)
+    monkeypatch.setattr(app, "build_application", build)
+    seen["exit"] = app.run(["immersive"], **flags)
+    return seen
+
+
+@pytest.mark.gui
+def test_a_launch_reports_every_flag_it_could_not_honour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = launched(monkeypatch, Backend(), device="Nowhere", block="64")
+
+    assert seen["exit"] == 0
+    assert seen["audition"] is not None, "and can still be heard, on the default"
+    assert sorted(seen["notices"]) == sorted(
+        [
+            "--block 64 is outside 256-2048; using 512",
+            "--device 'Nowhere': no output device matching 'Nowhere'; "
+            "using the default output device",
+        ]
+    )
+
+
+@pytest.mark.gui
+def test_a_launch_with_no_audio_stack_starts_and_says_what_to_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reason = "Audio output is unavailable (PortAudio library not found) - install it"
+
+    seen = launched(monkeypatch, reason)
+
+    assert seen["exit"] == 0
+    assert seen["audition"] is None
+    assert seen["notices"] == [reason]
