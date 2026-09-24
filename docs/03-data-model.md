@@ -344,6 +344,23 @@ it.
 > entry has been added. `tests/test_project_io.py` now loads this block
 > directly, so the example cannot drift away from the format again.
 
+### What decoding decides
+
+`frames` is the file's length **at 48 kHz**: its own frame count times 48 000
+over its rate, rounded half up. That is what `soxr` produces, and the rule is
+kept in integers because a float product of two large counts can land either
+side of an exact half. A 48 kHz file is not resampled at all — a no-op filter
+still moves samples.
+
+Integer formats arrive within ±1 by construction. **Float formats arrive
+unchanged, overs included**: a float file may legitimately hold 2.0, and
+clipping it on import would change the audio before anyone heard it. Overs
+are the master limiter's business (D-54).
+
+`name` is the file's whole name, suffix included — `kick.wav` and `kick.mp3`
+are two samples and should look it. A file with more than two channels is
+refused rather than folded down (D-87).
+
 ## Caches, not project data
 
 One **user-level** cache directory, safe to delete at any time, never
