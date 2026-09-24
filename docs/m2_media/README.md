@@ -9,7 +9,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | Phase | Status |
 |---|---|
 | [1 — The project in the window](phase_1_project_in_the_window.md) | ✅ |
-| [2 — Decode and resample](phase_2_decode_and_resample.md) | not started |
+| [2 — Decode and resample](phase_2_decode_and_resample.md) | in progress |
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | not started |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | not started |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | not started |
