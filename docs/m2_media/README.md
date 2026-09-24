@@ -10,7 +10,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 |---|---|
 | [1 — The project in the window](phase_1_project_in_the_window.md) | ✅ |
 | [2 — Decode and resample](phase_2_decode_and_resample.md) | ✅ |
-| [3 — Content hash and relink](phase_3_hash_and_relink.md) | in progress |
+| [3 — Content hash and relink](phase_3_hash_and_relink.md) | ✅ |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | not started |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | not started |
 | [6 — The media pool](phase_6_media_pool.md) | not started |
@@ -68,8 +68,8 @@ phase's first decision.
   wheel carries libsndfile 1.2.2 with MP3 (D-86, phase 2).
 - ~~**What does a file with more than two channels become?**~~ Refused, with
   the count in the reason (D-87, phase 2).
-- **What is hashed, and with what?** The bytes on disk or the decoded audio,
-  and how long a two-gigabyte WAV may take. Phase 3.
+- ~~**What is hashed, and with what?**~~ SHA-256 of the bytes, streamed
+  (D-88, phase 3).
 - **Where exactly is the cache, and who resolves it?** `03` gives literal
   paths per platform (`~/.cache/3dimmersive`); Qt's cache location for this
   application is a different path; and `peaks.py` lives in `core/`, which
@@ -107,3 +107,11 @@ rather than guessed at (D-87). Float files keep their overs. The sweep
 disproved the plan's most confident claim — `soxr` at equal rates is exact,
 so skipping it at 48 kHz is a saving rather than a safeguard — and one of the
 questions in this README is answered: the fallback decoder is not needed.
+
+**Phase 3.** Every sample carries a SHA-256 of its bytes (D-88), and a
+missing sample can be pointed at a file that is here by one undoable edit
+that takes the new file's facts (D-90). Projects saved before hashing are
+left alone rather than silently edited on open (D-89). The test that shows
+the trade — the same audio under two titles hashes differently — is the
+phase's most useful. The sweep found one command promise that could only be
+seen from outside its one caller.

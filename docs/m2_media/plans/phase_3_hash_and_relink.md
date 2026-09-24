@@ -1,6 +1,6 @@
 # Plan — M2 · Phase 3 — Content hash and relink
 
-**Written:** 2026-09-24 · **Status:** in progress
+**Written:** 2026-09-24 · **Status:** ✅ complete
 
 ## Approach
 
@@ -136,4 +136,36 @@ tests/test_relink.py               new — headless, plus the window's notices
 
 ## Outcome
 
-Filled in at the end.
+Two steps in the planned order, all seven acceptance boxes ticked, thirteen
+mutations with one survivor, which was a missing test. 914 tests.
+
+### What the plan got right
+
+**Choosing bytes over audio before writing either.** The retag test made the
+trade visible rather than arguable, and nothing afterwards pulled the other
+way.
+
+**Letting `validate()` refuse short relinks.** The plan predicted no new rule
+would be needed, and none was: the refusal carries `validate()`'s own words.
+
+### What the plan did not see
+
+**That a command's promise can hide behind its only caller.** The mutation
+table listed a relink that leaves `missing` cleared on *undo*, and missed the
+mirror image: a relink that does not clear it on *do*. Every test went
+through `relink()`, which only builds replacements that are never missing, so
+the command's own contract had no test of its own.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| Eleven mutations | thirteen — a relink keeping the old name, and one not clearing `missing` |
+
+### What phase 4 needs to know
+
+`content_hash(path)` is the cache key, `sha256:<hex>`, and an empty
+`MediaFile.hash` means *unknown* (D-89) — phase 4 has to key peaks for such a
+sample without writing a hash into the model, since filling one would be an
+edit. Hashing reads the whole file, so it belongs on the same worker as
+decoding.
