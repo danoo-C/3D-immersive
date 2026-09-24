@@ -13,7 +13,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | ✅ |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | ✅ |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | ✅ |
-| [6 — The media pool](phase_6_media_pool.md) | not started |
+| [6 — The media pool](phase_6_media_pool.md) | in progress |
 | [7 — Audition](phase_7_audition.md) | not started |
 
 The order is dependency order. Everything after phase 1 edits a project the

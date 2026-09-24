@@ -1,6 +1,7 @@
 # M2 · Phase 6 — The media pool
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_6_media_pool.md](plans/phase_6_media_pool.md)
 
 ## Goal
 
