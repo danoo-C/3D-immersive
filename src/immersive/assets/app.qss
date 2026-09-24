@@ -118,3 +118,35 @@ QToolTip {
     border: 1px solid $tooltip_border;
     padding: 4px 6px;
 }
+
+/* The media pool (M2): its tree, the tree's header, and its filter. The
+   filter is styled by its object name, because a generic QLineEdit is the
+   "input field" group 04 leaves to M8. */
+QTreeView {
+    background-color: $tree_background;
+    color: $tree_text;
+    border: none;
+    outline: none;
+}
+QTreeView::item { padding: 1px 0; }
+QTreeView::item:hover { background-color: $tree_hover_background; }
+QTreeView::item:selected {
+    background-color: $tree_selected_background;
+    color: $tree_selected_text;
+}
+QHeaderView::section {
+    background-color: $header_background;
+    color: $header_text;
+    border: none;
+    border-bottom: 1px solid $header_border;
+    padding: 3px 6px;
+}
+QLineEdit#PoolFilter {
+    background-color: $filter_background;
+    color: $filter_text;
+    border: 1px solid $filter_border;
+    border-radius: 4px;
+    padding: 3px 6px;
+    margin: 6px;
+}
+QLineEdit#PoolFilter:focus { border-color: $filter_focus_border; }

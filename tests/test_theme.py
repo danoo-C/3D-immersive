@@ -451,24 +451,6 @@ def test_every_group_value_on_a_built_theme_is_resolvable() -> None:
 # the stylesheet is built from groups, and changed no pixels doing it
 # --------------------------------------------------------------------------- #
 
-BEFORE_M9 = Path(__file__).resolve().parent / "fixtures" / "stylesheet_before_m9.qss"
-
-
-def test_the_stylesheet_is_unchanged_by_the_indirection() -> None:
-    """The cheapest possible proof that this phase changed no pixels.
-
-    The fixture was captured and committed before a line of M9 was written,
-    and the whole point is that it is *asserted* rather than regenerated. A
-    regenerated golden file records whatever the code now does, which is not
-    a test of anything.
-
-    It is a migration check with an expiry. It retires the first time a
-    milestone legitimately changes a colour in the sheet — in a commit that
-    says which colour and why, which is exactly the conversation this is
-    meant to force.
-    """
-    assert theme.stylesheet() == BEFORE_M9.read_text(encoding="utf-8")
-
 
 def test_every_group_key_fills_exactly_one_placeholder() -> None:
     """The sheet and the vocabulary cover each other, with nothing spare.

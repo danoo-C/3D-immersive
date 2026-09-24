@@ -119,7 +119,7 @@ def test_a_row_shows_its_name_and_duration(window: MainWindow, kit: Path) -> Non
     names = visible(pool)
     assert "pad.wav" in names
     pad = next(m for m in window.document().project.media_pool if m.name == "pad.wav")
-    assert duration(pad.frames) == "0:01.500"
+    assert duration(pad.frames) == "1.50s"
 
 
 def test_the_thumbnails_are_drawn(window: MainWindow, kit: Path) -> None:
@@ -241,3 +241,17 @@ def test_folders_do_not_drag(window: MainWindow, kit: Path) -> None:
     assert drums is not None and drums.text() == "drums"
 
     assert not drums.isDragEnabled()
+
+
+@pytest.mark.parametrize(
+    ("seconds", "shown"),
+    [
+        (0.25, "0.25s"),
+        (1.5, "1.50s"),
+        (59.994, "59.99s"),
+        (60.0, "1:00"),
+        (192.4, "3:12"),
+    ],
+)
+def test_a_length_fits_the_column(seconds: float, shown: str) -> None:
+    assert duration(round(seconds * SAMPLE_RATE)) == shown

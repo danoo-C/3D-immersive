@@ -22,9 +22,20 @@
       "pressed.background": "accent.pressed",
       "text": "text.primary"
     },
+    "filter": {
+      "background": "surface.window",
+      "border": "border",
+      "focus.border": "accent",
+      "text": "text.primary"
+    },
     "focus": {
       "menu.background": "surface.hover",
       "ring": "accent"
+    },
+    "header": {
+      "background": "surface.raised",
+      "border": "border",
+      "text": "text.secondary"
     },
     "menu": {
       "background": "surface.raised",
@@ -74,6 +85,13 @@
     "tooltip": {
       "background": "surface.raised",
       "border": "accent.pressed",
+      "text": "text.primary"
+    },
+    "tree": {
+      "background": "surface.panel",
+      "hover.background": "surface.raised",
+      "selected.background": "surface.hover",
+      "selected.text": "text.primary",
       "text": "text.primary"
     },
     "waveform": {

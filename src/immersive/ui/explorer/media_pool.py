@@ -54,16 +54,26 @@ ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 NAME, DURATION, WAVEFORM = range(3)
 
+#: How wide a row's waveform is drawn. Enough to see a sample's shape - a hit
+#: from a pad - in a column that also has to hold a name.
+THUMBNAIL_WIDTH = 72
+
 #: A missing sample's row says so in words as well as in `warn` (04,
 #: *Accessibility and feel*: never by colour alone).
 MISSING_MARK = "⚠ "
 
 
 def duration(frames: int) -> str:
-    """`m:ss.mmm` at the project rate."""
+    """A length a pool row has room for: `1.40s` under a minute, `3:12` above.
+
+    Compact because the column shares 250 px with a name and a waveform; the
+    exact length belongs to the parameters pane, which has the room.
+    """
     seconds = frames / SAMPLE_RATE
-    minutes, rest = divmod(seconds, 60)
-    return f"{int(minutes)}:{rest:06.3f}"
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes}:{rest:02d}"
 
 
 class _Model(QStandardItemModel):
@@ -111,7 +121,7 @@ class _Thumbnail(QStyledItemDelegate):
     def sizeHint(
         self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
     ) -> QSize:
-        return QSize(120, 22)
+        return QSize(THUMBNAIL_WIDTH, 22)
 
 
 class MediaPool(Panel):
@@ -130,7 +140,8 @@ class MediaPool(Panel):
         self.filter.setClearButtonEnabled(True)
 
         self.model = _Model(0, 3, self)
-        self.model.setHorizontalHeaderLabels(["Name", "Duration", "Waveform"])
+        # No title over the waveform: the column says what it is.
+        self.model.setHorizontalHeaderLabels(["Name", "Length", ""])
         self.proxy = QSortFilterProxyModel(self)
         self.proxy.setSourceModel(self.model)
         self.proxy.setRecursiveFilteringEnabled(True)
@@ -145,11 +156,17 @@ class MediaPool(Panel):
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setUniformRowHeights(True)
+        self.tree.setIndentation(12)
+        # The column is narrow - 250 px by default - so the name takes what
+        # is left after the other two, rather than three fixed widths that
+        # squeezed the thumbnail to a smear and scrolled sideways.
         header = self.tree.header()
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(NAME, QHeaderView.ResizeMode.Interactive)
-        header.resizeSection(NAME, 140)
-        header.resizeSection(DURATION, 64)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(NAME, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(DURATION, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(WAVEFORM, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(WAVEFORM, THUMBNAIL_WIDTH)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.body().addWidget(self.filter)
         self.body().addWidget(self.tree, 1)

@@ -374,7 +374,7 @@ who owns what. M9 is built *third*, before all of them:
 |---|---|
 | window, panel, menu, toolbar, button, **tab**, splitter, scrollbar, status bar, tooltip, **focus** | M9 — the widgets that exist when the system is built. Tab and focus were missing from this row until M9 phase 1 went looking: the tab bar exists because of D-49 and the focus ring is required by *Accessibility and feel*, and the stylesheet has styled both since M0 |
 | notice line, notice count, notice list | M9 — it builds them (D-65) |
-| tree view, header, filter field, waveform thumbnail | M2 |
+| tree view, header, filter field, waveform thumbnail | M2 — built as `tree`, `header`, `filter` and the painted `waveform`. The filter is styled by its object name, so the generic input field stays M8's |
 | ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
