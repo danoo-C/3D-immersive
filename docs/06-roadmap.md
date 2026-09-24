@@ -279,12 +279,23 @@ arrives with the playhead, at M3.
 ---
 
 ## M2 — Media
+
+Phases: [`docs/m2_media/`](m2_media/README.md)
+
+- The project in the window: File › New, Open, Save, Save As and Edit › Undo,
+  Redo wired to M1's model, file and stack, with missing media reported on
+  open. *Added before the milestone started* — M1 was headless by design and
+  no milestone had been given the wiring, which importing cannot do without
 - Decode via `soundfile`, resample to 48 kHz via `soxr`, hold in RAM
 - Content hashing, relink handling
 - Peak pyramid generation + on-disk cache
 - Media pool tree in the explorer, with filter and drag source
 - Waveform widget, reused later by clips and the parameters pane
 - Audition playback: the first use of `sounddevice`, deliberately trivial
+- `--device` and `--block` command-line flags, and the 48 kHz stream rule
+  (F-55, D-63). *Moved here from M3 before the milestone started*: D-63 and
+  [05](05-audio-engine.md) already said "from M2", because audition is the
+  first sound
 
 **Done when:** you can import a folder, see waveforms, and double-click to hear
 a sample.
@@ -304,9 +315,9 @@ a sample.
 - The master meter and its clip indicator (F-54) — the first milestone that
   produces a level at all, and the last comfortable one to add it before M4
   starts summing 32 sources
-- `--device` and `--block` command-line flags, and the 48 kHz stream rule
-  (F-55, D-63). Preferences promotes them at M8; the gap between the first
-  sound and M8 is otherwise five milestones with no way to pick a device
+- ~~`--device` and `--block` command-line flags, and the 48 kHz stream rule~~
+  — moved to M2, where the first sound is (D-63). Preferences still promotes
+  them at M8
 
 **Done when:** you can build an arrangement and hear it play back flat. This
 validates the whole realtime plumbing — command ring, snapshot swap, xrun

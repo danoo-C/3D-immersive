@@ -66,7 +66,7 @@ milestone nobody has opened yet:
 | `m0_scaffolding/` | complete — built before this system existed, no phase docs |
 | `s0_listening_spike/` | complete — the throwaway spike; got a directory like anything else |
 | `m1_core_model/` | complete |
-| `m2_media/` | |
+| `m2_media/` | **next** — phase documents written, no phases started |
 | `m3_timeline/` | |
 | `m4_binaural_engine/` | |
 | `m5_spatial_workspace/` | |
