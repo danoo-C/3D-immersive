@@ -1,6 +1,6 @@
 # Plan — M2 · Phase 7 — Audition
 
-**Written:** 2026-09-24 · **Status:** in progress
+**Written:** 2026-09-24 · **Status:** steps 1–2 ✅ · step 3 waiting to be heard
 
 ## Approach
 
@@ -112,4 +112,30 @@ tests/test_flags.py                new
 
 ## Outcome
 
-Filled in at the end.
+*Written with step 3 still open.* Steps 1 and 2 in one commit, since the
+application's wiring needed the audition object that step 2 builds; six of
+seven acceptance boxes ticked; eleven mutations with one survivor, which was
+a missing test. 1078 tests. Step 3 is a person listening and is not done.
+
+### What the plan got right
+
+**The backend as a parameter.** Every audio test drives a stand-in's callback
+block by block, and the suite runs the same on a machine with no audio stack
+as on one with a studio's.
+
+**Never importing `sounddevice` at module level.** This machine is the proof:
+without it, there would have been no application to report the missing
+library from.
+
+### What the plan did not see
+
+**That `app.run` had never been run by a test.** It is the one place the
+backend, the flags and the window meet. Checked by hand first — and the first
+check hung, because a `QTimer` made before the `QApplication` never fires —
+then made into two tests.
+
+**The seam between parsing and running**, which is what the sweep found.
+
+### What remains
+
+Step 3, and with it the milestone: the phase doc's Notes say how.

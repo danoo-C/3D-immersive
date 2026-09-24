@@ -14,7 +14,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | ✅ |
 | [5 — The waveform widget](phase_5_waveform_widget.md) | ✅ |
 | [6 — The media pool](phase_6_media_pool.md) | ✅ |
-| [7 — Audition](phase_7_audition.md) | in progress |
+| [7 — Audition](phase_7_audition.md) | built — **waiting to be heard** |
 
 The order is dependency order. Everything after phase 1 edits a project the
 window has to be holding; peaks need decoded audio and a hash to be keyed by;
@@ -73,11 +73,10 @@ phase's first decision.
 - ~~**Where exactly is the cache, and who resolves it?**~~ `03`'s paths,
   worked out by `core` from the environment, and redirected by the suite
   (D-91, phase 4).
-- **PortAudio is not installed here, and not on CI's Linux runner.**
-  `import sounddevice` fails on this WSL venv with *PortAudio library not
-  found*: on Linux the wheel does not bundle it. Phase 7 has to decide what
-  CI installs, what `08` tells a developer to install, and how audition is
-  tested without a device.
+- ~~**PortAudio is not installed here, and not on CI's Linux runner.**~~ CI
+  installs `libportaudio2`, `08` tells a developer to, the application starts
+  and says so without it, and audition is tested against a stand-in
+  (phase 7).
 
 ## Notes
 
@@ -138,3 +137,10 @@ phase 7 has somewhere to read from. Building it found that a reopened project
 had no samples in the store, so opening now prepares them too; and looking at
 a real import found a thumbnail squeezed to a smear, which no test measured.
 Eighteen mutations, none surviving.
+
+**Phase 7 — built, not yet heard.** Double-clicking a pool row plays it at
+48 kHz; `--device` and `--block` choose the output and a value that cannot be
+honoured becomes a notice and a default; a machine with no PortAudio starts
+and says what to install. Six of seven boxes are ticked by tests. The seventh
+is a person listening on native Windows or Linux, and **M2 is not complete
+until one has** — the phase's Notes say exactly what to do.
