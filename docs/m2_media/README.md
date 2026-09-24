@@ -12,7 +12,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [2 — Decode and resample](phase_2_decode_and_resample.md) | ✅ |
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | ✅ |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | ✅ |
-| [5 — The waveform widget](phase_5_waveform_widget.md) | in progress |
+| [5 — The waveform widget](phase_5_waveform_widget.md) | ✅ |
 | [6 — The media pool](phase_6_media_pool.md) | not started |
 | [7 — Audition](phase_7_audition.md) | not started |
 
@@ -121,3 +121,12 @@ isolation checkable on every platform. Measuring for N-4 found the build
 slower than decoding because of how memory was walked; after fixing that it
 takes 0.06 s for five minutes of stereo, and a hundred samples' peaks load
 warm in under a fifth of a second.
+
+**Phase 5.** The waveform widget draws a pyramid one lane per channel, reads
+between one and four buckets a pixel column at any width, and reads its
+colours when it paints. It is the first painted theme group, and it broke
+M9's rule that every group key is a stylesheet placeholder — correctly, since
+the rule was right and too narrow. D-92 widens it: painted groups are
+declared, and a test requires every painted key to be read by a
+`group_color()` call. Looking at a grab fixed the one thing the tests could
+not see, a line running through the words that say a sample is missing.

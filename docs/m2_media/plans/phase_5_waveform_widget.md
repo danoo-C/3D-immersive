@@ -1,6 +1,6 @@
 # Plan — M2 · Phase 5 — The waveform widget
 
-**Written:** 2026-09-24 · **Status:** in progress
+**Written:** 2026-09-24 · **Status:** ✅ complete
 
 ## Approach
 
@@ -101,4 +101,42 @@ tests/test_waveform.py                          new — gui
 
 ## Outcome
 
-Filled in at the end.
+Two steps in the planned order, all six acceptance boxes ticked, nine
+mutations with one survivor, which was a missing test. 994 tests.
+
+### What the plan got right
+
+**Bounding the work by width.** The level choice was asserted at thirty
+points from one pixel to four thousand and from one bucket to two hours, and
+held at all of them.
+
+**Grabs, not painter calls.** The over test's first version had the sign of
+the over backwards; a test of calls would have agreed with the wrong
+expectation, and the grab showed the widget was right.
+
+### What the plan did not see
+
+**That the risk row about the spec example was the wrong risk.** The plan
+worried that a new group would break the tests of `04`'s worked example. It
+did not; it broke M9's rule that every group key is a stylesheet
+placeholder, which is a better thing to have broken, because the rule was
+right and its scope was too narrow. D-92 is the result.
+
+**The centre line's real job.** The plan named "the centre line not drawn"
+as a mutation and assumed silence would catch it. Silence cannot, and a
+sample offset from zero can.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| No change to M9's vocabulary tests | the placeholder test narrowed to stylesheet groups, and two tests added for painted ones (D-92) |
+| Eight mutations | nine — a misspelled painted key |
+
+### What phase 6 needs to know
+
+`Waveform.set_peaks(pyramid, missing=...)` is the whole interface; with
+`None` and not missing it draws only its background, which is the state
+while a worker is still building the pyramid. It is `Expanding` horizontally
+and has a minimum height of 12, and a pool row of about 20 px gives each
+channel of a stereo sample 10.
