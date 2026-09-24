@@ -68,13 +68,13 @@ Four schemes, all monotonic, all permanent.
 |---|---|---|---|
 | `F-n` | Functional requirement | `01-requirements` §Functional | F-56 |
 | `N-n` | Non-functional requirement | `01-requirements` §Non-functional | N-6 |
-| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-83 |
+| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-84 |
 | `QA-n` | A question asked during spec review, and its answer | `07-qa-archive` | QA-38 |
 
 These four numbers are themselves the kind of fact §2 is about, so they are
 asserted by `tests/test_docs.py` rather than maintained by hand.
 
-Milestones use `M0`–`M8` and `S0`, defined in `06-roadmap`.
+Milestones use `M0`–`M9` and `S0`, defined in `06-roadmap`.
 
 ### The rules that make identifiers worth having
 

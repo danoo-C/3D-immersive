@@ -395,19 +395,36 @@ trail, the curve and the sound agree.
 ---
 
 ## M8 — Polish & ship
+
+Beta is a line drawn through this milestone rather than a milestone of its own
+(D-84). The first list is what beta needs; the second follows it.
+
+**Before beta**
+
+- `PyInstaller` bundles for Windows and Linux
+- README with install instructions for those two platforms
+- Autosave and crash recovery: the sidecar file, and the offer on next launch
+  (F-49, D-64)
+- Missing-media relink dialog, hung off the notice built at M9 — the first of
+  the actions that hang off individual notices
+
+**After beta**
+
 - Preferences: audio device, block size, HRTF set, and the theme picker
   promoted out of the `View` menu (the theme *system* is M9). The device and
   block flags from M3 become fields here (F-55)
 - Session persistence: window geometry, splitters, recent projects
-- Autosave and crash recovery: the sidecar file, and the offer on next launch
-  (F-49, D-64)
-- Missing-media relink dialog, hung off the notice built at M9
 - Error surfaces **promoted, not invented**: the notice centre is M9 (D-65);
-  M8 adds the actions that hang off individual notices and the first-run
-  polish around them
+  M8 adds the remaining actions that hang off individual notices and the
+  first-run polish around them
 - Empty states and a first-run sample project
-- `PyInstaller` bundles for Windows, macOS and Linux
-- README with install instructions per platform
+- The macOS bundle, with signing and notarisation
+- README install instructions for macOS
+
+**Beta when:** somebody who is not you installs it on Windows or Linux from a
+bundle, takes a folder of their own samples to a rendered binaural WAV —
+import, arrange, place, animate, render — without being helped, and a crash
+along the way costs them no more than the last autosave interval.
 
 **Done when:** someone who is not you can install it and make a mix.
 
