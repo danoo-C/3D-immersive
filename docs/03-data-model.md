@@ -349,8 +349,10 @@ it.
 `frames` is the file's length **at 48 kHz**: its own frame count times 48 000
 over its rate, rounded half up. That is what `soxr` produces, and the rule is
 kept in integers because a float product of two large counts can land either
-side of an exact half. A 48 kHz file is not resampled at all — a no-op filter
-still moves samples.
+side of an exact half. A 48 kHz file is not passed through `soxr` at all.
+That is a saving, not a safeguard: `soxr` returns equal-rate audio exactly —
+measured — so skipping it saves a copy of the whole file rather than
+protecting a single sample.
 
 Integer formats arrive within ±1 by construction. **Float formats arrive
 unchanged, overs included**: a float file may legitimately hold 2.0, and

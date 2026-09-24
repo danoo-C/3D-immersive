@@ -127,12 +127,41 @@ def test_stereo_stays_two_channels(tmp_path: Path) -> None:
 
 
 def test_a_48k_source_comes_back_untouched(tmp_path: Path) -> None:
-    """No resampling pass at all - a no-op filter still moves samples."""
     noise = np.random.default_rng(1).uniform(-0.9, 0.9, (4801, 2)).astype(np.float32)
 
     result = decoded(written(tmp_path / "n.wav", noise, SAMPLE_RATE, subtype="FLOAT"))
 
     np.testing.assert_array_equal(result.audio, noise)
+
+
+def test_a_48k_source_never_reaches_the_resampler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipping `soxr` at 48 kHz saves a copy of the whole file.
+
+    Found by the phase's mutation sweep: resampling a 48 kHz file anyway
+    changed no sample, because `soxr` passes equal rates through exactly - so
+    the only thing the rate check does is the saving, and this is what says
+    it happens.
+    """
+
+    def forbidden(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a 48 kHz file was resampled")
+
+    monkeypatch.setattr(media.soxr, "resample", forbidden)
+
+    decoded(written(tmp_path / "a.wav", tone(SAMPLE_RATE), SAMPLE_RATE))
+
+
+def test_soxr_passes_equal_rates_through_exactly() -> None:
+    """Why skipping it is a saving and not a safeguard - pinned, so that a
+    `soxr` which ever stops doing this makes the rate check load-bearing out
+    loud rather than silently."""
+    audio = np.random.default_rng(3).uniform(-1, 1, (4801, 2)).astype(np.float32)
+
+    same = media.soxr.resample(audio, SAMPLE_RATE, SAMPLE_RATE, quality=media.QUALITY)
+
+    np.testing.assert_array_equal(same, audio)
 
 
 @pytest.mark.parametrize("subtype", ["PCM_16", "PCM_24"])
