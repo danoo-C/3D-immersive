@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -11,6 +14,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QToolBar,
     QToolButton,
+    QWidget,
 )
 
 from immersive.app import build_application
@@ -18,6 +22,8 @@ from immersive.ui import theme
 from immersive.ui.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
+
+ROADMAP = Path(__file__).resolve().parents[1] / "docs" / "06-roadmap.md"
 
 
 @pytest.fixture(scope="module")
@@ -234,3 +240,48 @@ def test_the_transport_readout_is_the_only_primary_chip(app: object) -> None:
     assert theme.color("text.primary") in primary
     assert theme.color("text.secondary") in secondary
     assert primary != secondary
+
+
+# --------------------------------------------------------------------------- #
+# promises
+# --------------------------------------------------------------------------- #
+
+
+def completed_milestones() -> set[str]:
+    """Every milestone `06` marks ✅, read from its headings."""
+    text = ROADMAP.read_text(encoding="utf-8")
+    return set(re.findall(r"^## ([MS]\d+) — .*✅", text, flags=re.MULTILINE))
+
+
+def stale_promises(tooltips: list[str], complete: set[str]) -> list[str]:
+    """Tooltips saying something arrives at a milestone that already has."""
+    return [
+        tip
+        for tip in tooltips
+        for milestone in re.findall(r"arrives? at ([MS]\d+)", tip)
+        if milestone in complete
+    ]
+
+
+def test_the_roadmap_markers_are_where_this_reads_them() -> None:
+    """If the headings change shape the check below goes vacuous, so say so."""
+    assert {"M0", "S0", "M1", "M9"} <= completed_milestones()
+
+
+def test_the_check_would_have_caught_this_phase(app: object) -> None:
+    """M1 finished headless, and five actions went on saying they arrive at M1
+    for as long as nothing read the roadmap to notice. That is the reason M2
+    phase 1 exists."""
+    stale = "Save  (Ctrl+S)\nNot built yet — the project model arrives at M1."
+
+    assert stale_promises([stale], completed_milestones()) == [stale]
+
+
+def test_no_tooltip_promises_a_milestone_that_has_arrived(app: object) -> None:
+    """Every tooltip in the window, actions and widgets alike, against `06`."""
+    window = MainWindow()
+    tooltips = [action.toolTip() for action in window.findChildren(QAction)]
+    tooltips += [widget.toolTip() for widget in window.findChildren(QWidget)]
+    assert any("arrive" in tip for tip in tooltips), "the walk found no promises"
+
+    assert stale_promises(tooltips, completed_milestones()) == []
