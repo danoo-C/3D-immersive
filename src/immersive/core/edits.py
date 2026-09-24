@@ -16,7 +16,7 @@ from dataclasses import fields, is_dataclass
 from typing import Any, TypeVar
 
 from immersive.core.commands import Command
-from immersive.core.model import Channel, Clip, Project
+from immersive.core.model import Channel, Clip, MediaFile, Project
 
 _T = TypeVar("_T")
 
@@ -146,6 +146,34 @@ class SetAttribute(Command):
 
     def undo(self) -> None:
         setattr(self.target, self.name, self.previous)
+
+
+class Relink(Command):
+    """Point a pool entry at another file, and take that file's facts (D-90).
+
+    Every field the file determines changes with the path, together, because
+    keeping the old frame count would be the pool lying about what plays. The
+    id stays: it is what every clip holds.
+
+    `missing` is part of it. Undoing a relink has to say the file is gone
+    again, or Undo claims the audio is back when it is not.
+    """
+
+    FIELDS = ("path", "name", "hash", "source_rate", "channels", "frames", "missing")
+
+    def __init__(self, media: MediaFile, replacement: MediaFile) -> None:
+        self.media = media
+        self.before = {name: getattr(media, name) for name in self.FIELDS}
+        self.after = {name: getattr(replacement, name) for name in self.FIELDS}
+        self.after["missing"] = False
+
+    def do(self) -> None:
+        for name, value in self.after.items():
+            setattr(self.media, name, value)
+
+    def undo(self) -> None:
+        for name, value in self.before.items():
+            setattr(self.media, name, value)
 
 
 class MoveClip(Command):

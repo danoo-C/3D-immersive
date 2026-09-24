@@ -33,6 +33,9 @@ from PySide6.QtWidgets import (
 from immersive import __version__
 from immersive.core.document import Document
 from immersive.core.io import project_io
+from immersive.core.io.media import Refused
+from immersive.core.model import MediaFile
+from immersive.core.relink import relink
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
@@ -507,6 +510,28 @@ class MainWindow(QMainWindow):
             chosen = chosen.with_suffix(project_io.SUFFIX)
         target = chosen
         return self._written(target, lambda: self._document.save_as(target))
+
+    def relink_media(self, media: MediaFile, path: Path) -> bool:
+        """Point a sample at another file, and say what that did (D-90).
+
+        M8's relink dialog is the caller in waiting. The same audio is quiet;
+        different audio is allowed and is a `warn`, because the person should
+        know the sample they placed has changed under their clips; a file that
+        cannot stand in is an `error`, since what they asked for did not
+        happen.
+        """
+        name = media.name
+        result = relink(self._document, media, path)
+        if isinstance(result, Refused):
+            self._report_failure(f"{name} was not relinked", [str(result)])
+            return False
+        if result.same_audio is False:
+            self._notices.add(
+                Severity.WARN,
+                f"{name} now points at different audio",
+                [f"{path} is not the file this sample was imported from"],
+            )
+        return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Quit asks, like New and Open, and Cancel keeps the window."""

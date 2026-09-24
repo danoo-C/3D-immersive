@@ -57,6 +57,7 @@ src/immersive/
     commands.py          Command base + undo/redo stack
     edits.py             concrete commands (MoveClip, AddKeyframe, …)
     document.py          the open project: model, stack, file (D-85, M2)
+    relink.py            pointing a missing sample at a file (D-90, M2)
     selection.py         what is currently selected, observed by ui
     signals.py           tiny observer so core can notify without Qt
     io/

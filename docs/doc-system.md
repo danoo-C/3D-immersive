@@ -68,7 +68,7 @@ Four schemes, all monotonic, all permanent.
 |---|---|---|---|
 | `F-n` | Functional requirement | `01-requirements` §Functional | F-56 |
 | `N-n` | Non-functional requirement | `01-requirements` §Non-functional | N-6 |
-| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-89 |
+| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-90 |
 | `QA-n` | A question asked during spec review, and its answer | `07-qa-archive` | QA-38 |
 
 These four numbers are themselves the kind of fact §2 is about, so they are
