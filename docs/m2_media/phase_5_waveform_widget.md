@@ -1,6 +1,7 @@
 # M2 · Phase 5 — The waveform widget
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_5_waveform_widget.md](plans/phase_5_waveform_widget.md)
 
 ## Goal
 

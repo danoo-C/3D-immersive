@@ -12,7 +12,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [2 — Decode and resample](phase_2_decode_and_resample.md) | ✅ |
 | [3 — Content hash and relink](phase_3_hash_and_relink.md) | ✅ |
 | [4 — Peaks and the cache](phase_4_peaks_and_cache.md) | ✅ |
-| [5 — The waveform widget](phase_5_waveform_widget.md) | not started |
+| [5 — The waveform widget](phase_5_waveform_widget.md) | in progress |
 | [6 — The media pool](phase_6_media_pool.md) | not started |
 | [7 — Audition](phase_7_audition.md) | not started |
 
