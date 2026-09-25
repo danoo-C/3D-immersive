@@ -9,9 +9,9 @@ from collections.abc import Iterator
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QImage, QMouseEvent, QWheelEvent
+from PySide6.QtGui import QAction, QFocusEvent, QImage, QMouseEvent, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMenu
 
 from immersive.app import build_application
 from immersive.core.document import Document
@@ -19,8 +19,9 @@ from immersive.core.edits import AddChannel, MoveChannel, RemoveChannel, SetAttr
 from immersive.core.model import Channel, SnapSetting, new_channel
 from immersive.core.time import Division
 from immersive.ui import theme
+from immersive.ui.main_window import MainWindow
 from immersive.ui.time_axis import TimeAxis
-from immersive.ui.timeline.headers import SILENCED, ChannelHeader
+from immersive.ui.timeline.headers import DRAG_THRESHOLD, SILENCED, ChannelHeader
 from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.timeline.view import LANE_HEIGHT
 
@@ -332,3 +333,269 @@ def test_headers_below_the_lanes_are_hidden_under_nothing() -> None:
     column must lose the same, or the last header hangs below its lane."""
     panel = paneled(15, height=400)
     assert panel.headers._clip.height() == panel.view.viewport().height()
+
+
+# --------------------------------------------------------------------------- #
+# adding and removing
+# --------------------------------------------------------------------------- #
+
+
+def names(panel: TimelinePanel) -> list[str]:
+    return [header.name.text() for header in headers(panel)]
+
+
+def test_the_corner_adds_a_channel_below_the_last_in_one_command() -> None:
+    panel = paneled(2)
+    document = document_of(panel)
+
+    panel.corner.click()
+
+    assert names(panel) == ["Channel 1", "Channel 2", "Channel 3"]
+    assert channel(panel, 2).color == theme.active().channels[2]
+    document.undo()
+    assert names(panel) == ["Channel 1", "Channel 2"]
+
+
+def test_edit_add_channel_adds_one() -> None:
+    window = MainWindow()
+    [add] = [a for a in window.findChildren(QAction) if a.text() == "Add &Channel"]
+    assert add.isEnabled() and "M3" not in add.toolTip()
+
+    add.trigger()
+
+    assert [c.name for c in window.document().project.channels] == ["Channel 1"]
+
+
+def action(menu: QMenu, text: str) -> QAction:
+    [found] = [a for a in menu.actions() if a.text() == text]
+    return found
+
+
+def test_removing_a_channel_is_one_command_and_undo_puts_it_back_in_place() -> None:
+    panel = paneled(3)
+
+    action(headers(panel)[1].context_menu(), "Remove Channel").trigger()
+
+    assert names(panel) == ["Channel 1", "Channel 3"]
+    document_of(panel).undo()
+    assert names(panel) == ["Channel 1", "Channel 2", "Channel 3"]
+
+
+# --------------------------------------------------------------------------- #
+# renaming
+# --------------------------------------------------------------------------- #
+
+
+def test_a_double_click_on_the_name_opens_it_with_all_of_it_selected() -> None:
+    panel = paneled(1)
+    header = headers(panel)[0]
+    point = QPointF(5, 5)
+    QApplication.sendEvent(
+        header.name,
+        QMouseEvent(
+            QEvent.Type.MouseButtonDblClick,
+            point,
+            header.name.mapToGlobal(point),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+    field = header.renaming()
+    assert field is not None
+    assert field.selectedText() == "Channel 1"
+
+
+def rename(
+    panel: TimelinePanel, index: int, text: str, key: Qt.Key = Qt.Key.Key_Return
+) -> None:
+    field = headers(panel)[index].rename()
+    field.selectAll()
+    QTest.keyClicks(field, text)
+    QTest.keyClick(field, key)
+
+
+def test_a_rename_is_one_command_and_undo_brings_the_old_name_back() -> None:
+    panel = paneled(2)
+
+    rename(panel, 1, "Drums")
+
+    assert names(panel) == ["Channel 1", "Drums"]
+    assert headers(panel)[1].renaming() is None
+    document_of(panel).undo()
+    assert names(panel) == ["Channel 1", "Channel 2"]
+
+
+def test_escape_keeps_the_old_name() -> None:
+    panel = paneled(1)
+    before = document_of(panel).can_undo
+
+    rename(panel, 0, "Drums", key=Qt.Key.Key_Escape)
+
+    assert names(panel) == ["Channel 1"]
+    assert document_of(panel).can_undo == before
+
+
+@pytest.mark.parametrize("empty", ["", "   "])
+def test_an_empty_name_is_refused(empty: str) -> None:
+    panel = paneled(1)
+    field = headers(panel)[0].rename()
+    field.setText(empty)
+    QTest.keyClick(field, Qt.Key.Key_Return)
+
+    assert names(panel) == ["Channel 1"]
+
+
+def test_leaving_the_field_keeps_the_new_name() -> None:
+    panel = paneled(1)
+    field = headers(panel)[0].rename()
+    field.setText("Pads")
+
+    # Offscreen the test's window is never active; send what losing focus sends.
+    QApplication.sendEvent(
+        field, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.OtherFocusReason)
+    )
+
+    assert names(panel) == ["Pads"]
+
+
+# --------------------------------------------------------------------------- #
+# recolouring
+# --------------------------------------------------------------------------- #
+
+
+def test_the_chip_offers_the_palette_with_the_current_colour_checked() -> None:
+    panel = paneled(2)
+    menu = headers(panel)[1].colour_menu()
+    palette = theme.active().channels
+
+    assert [a.text() for a in menu.actions()] == [
+        f"Colour {n}" for n in range(1, len(palette) + 1)
+    ]
+    assert [a.isChecked() for a in menu.actions()] == [
+        n == 1 for n in range(len(palette))
+    ]
+
+
+def test_a_colour_from_the_palette_is_one_command() -> None:
+    panel = paneled(1)
+    palette = theme.active().channels
+
+    headers(panel)[0].colour_menu().actions()[4].trigger()
+
+    assert channel(panel, 0).color == palette[4]
+    assert headers(panel)[0].chip.colour() == palette[4]
+    document_of(panel).undo()
+    assert channel(panel, 0).color == palette[0]
+
+
+def test_clicking_the_chip_pops_the_palette_up_without_waiting() -> None:
+    panel = paneled(1)
+    chip = headers(panel)[0].chip
+    point = QPointF(4, 4)
+    QApplication.sendEvent(
+        chip,
+        QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            point,
+            chip.mapToGlobal(point),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+    assert any(menu.isVisible() for menu in headers(panel)[0].findChildren(QMenu))
+
+
+# --------------------------------------------------------------------------- #
+# reordering
+# --------------------------------------------------------------------------- #
+
+
+def drag_header(panel: TimelinePanel, index: int, steps: list[float]) -> None:
+    """Press on a header, move by each step - the header following the
+    pointer, as it does - and release."""
+    header = headers(panel)[index]
+    grabbed = QPointF(150, 28)
+
+    def send(kind: QEvent.Type, point: QPointF) -> None:
+        left = Qt.MouseButton.LeftButton
+        QApplication.sendEvent(
+            header,
+            QMouseEvent(
+                kind,
+                point,
+                header.mapToGlobal(point),
+                Qt.MouseButton.NoButton if kind is QEvent.Type.MouseMove else left,
+                Qt.MouseButton.NoButton
+                if kind is QEvent.Type.MouseButtonRelease
+                else left,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
+    send(QEvent.Type.MouseButtonPress, grabbed)
+    for step in steps:
+        send(QEvent.Type.MouseMove, grabbed + QPointF(0, step))
+    send(QEvent.Type.MouseButtonRelease, grabbed)
+
+
+def test_dragging_a_header_down_two_lanes_moves_its_channel_in_one_command() -> None:
+    panel = paneled(4)
+    before = len(document_of(panel).project.channels)
+
+    drag_header(panel, 0, [25.0] * 5)  # 125 px: its middle is over lane 3
+
+    assert names(panel) == ["Channel 2", "Channel 3", "Channel 1", "Channel 4"]
+    assert aligned(panel)
+    document_of(panel).undo()
+    assert names(panel) == ["Channel 1", "Channel 2", "Channel 3", "Channel 4"]
+    assert len(document_of(panel).project.channels) == before
+
+
+def test_dragging_a_header_up_moves_it_up() -> None:
+    panel = paneled(4)
+    drag_header(panel, 3, [-30.0] * 4)
+    assert names(panel) == ["Channel 1", "Channel 4", "Channel 2", "Channel 3"]
+
+
+def test_a_press_that_barely_moves_reorders_nothing() -> None:
+    panel = paneled(3)
+    before = document_of(panel).can_undo
+
+    drag_header(panel, 0, [DRAG_THRESHOLD - 1])
+
+    assert names(panel) == ["Channel 1", "Channel 2", "Channel 3"]
+    assert document_of(panel).can_undo == before
+    assert aligned(panel)
+
+
+@pytest.mark.parametrize(
+    ("index", "steps", "order"),
+    [
+        (0, [-40.0] * 5, ["Channel 1", "Channel 2", "Channel 3"]),
+        (0, [60.0] * 20, ["Channel 2", "Channel 3", "Channel 1"]),
+    ],
+)
+def test_a_header_dragged_past_either_end_stops_there(
+    index: int, steps: list[float], order: list[str]
+) -> None:
+    panel = paneled(3)
+    drag_header(panel, index, steps)
+    assert names(panel) == order
+    assert aligned(panel)
+
+
+def test_a_header_dragged_while_scrolled_lands_under_the_pointer() -> None:
+    """The mutation this is for: the drop worked out without the scroll, which
+    is right only while nothing has been scrolled."""
+    panel = paneled(15, height=400)
+    panel.view.verticalScrollBar().setValue(200)
+    assert aligned(panel)
+
+    drag_header(panel, 5, [28.0] * 4)  # two lanes down, from lane 6
+
+    assert names(panel)[7] == "Channel 6"
+    assert aligned(panel)

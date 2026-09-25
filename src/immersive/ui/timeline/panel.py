@@ -15,10 +15,13 @@ neither panel may own it (D-94).
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QGridLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
 from immersive.core.document import Document
+from immersive.core.edits import AddChannel
+from immersive.core.model import new_channel
 from immersive.core.time import SAMPLE_RATE
+from immersive.ui import theme
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit
 from immersive.ui.timeline.headers import HEADER_WIDTH, ChannelHeaders
@@ -54,9 +57,14 @@ class TimelinePanel(Panel):
         self.ruler = Ruler(document, axis)
         self.view = TimelineView(document, axis)
         self.headers = ChannelHeaders(document, self.view)
-        self.corner = QWidget()
-        self.corner.setObjectName("TimelineCorner")
+        # The corner holds Add channel, so it is in reach however far the
+        # lanes are scrolled.
+        self.corner = QToolButton()
+        self.corner.setObjectName("AddChannel")
+        self.corner.setText("Add channel")
+        self.corner.setToolTip("Add Channel — below the last, coloured in turn")
         self.corner.setFixedSize(HEADER_WIDTH, self.ruler.height())
+        self.corner.clicked.connect(self.add_channel)
 
         cells = QWidget()
         grid = QGridLayout(cells)
@@ -91,6 +99,12 @@ class TimelinePanel(Panel):
         """The view and the ruler read the tempo when they paint, and repaint
         on their own; what is left is how far there is to scroll."""
         self._axis.set_extent(extent_for(self._document.project.length))
+
+    def add_channel(self) -> None:
+        """A new channel below the last, named and coloured in turn."""
+        project = self._document.project
+        channel = new_channel(project, theme.active().channels)
+        self._document.push(AddChannel(project, channel))
 
     def unit(self) -> Unit:
         return self.ruler.unit

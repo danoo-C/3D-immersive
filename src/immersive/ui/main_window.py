@@ -238,6 +238,10 @@ class MainWindow(QMainWindow):
         self._undo.triggered.connect(self._document.undo)
         self._redo.triggered.connect(self._document.redo)
         edit_menu.addSeparator()
+        self._add(edit_menu, "Add &Channel").triggered.connect(
+            lambda: self._timeline.add_channel()
+        )
+        edit_menu.addSeparator()
         self._add(edit_menu, "&Copy", "Ctrl+C", arrives=_M3)
         self._add(edit_menu, "&Paste", "Ctrl+V", arrives=_M3)
         self._add(edit_menu, "&Duplicate", "Ctrl+D", arrives=_M3)
