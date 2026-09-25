@@ -628,14 +628,17 @@ def test_the_specifications_own_example_is_the_built_in_theme() -> None:
 def test_the_example_only_reports_groups_no_milestone_has_built_yet() -> None:
     """The example is forward-looking, and that is allowed - but say which.
 
-    `timeline` and `clip` belong to M3 by 04's own ownership table. If a
-    *third* group shows up here, either the example grew a group nobody owns
-    or M9 dropped one it was supposed to build.
+    `timeline` and `clip` belong to M3 by 04's own ownership table, and M3 is
+    building them a key at a time: the grid at phase 1 step 3, the playhead
+    at step 4, the loop region at phase 9, the clip at phase 3. Each leaves
+    this list as it arrives. Anything else here means the example grew a key
+    nobody owns, or a milestone dropped one it was supposed to build.
     """
     problems = theme_io.loads(spec_example()).problems
 
     assert [problem.where for problem in problems] == [
-        "groups.timeline",
+        "groups.timeline.playhead",
+        "groups.timeline.loop.region",
         "groups.clip",
     ]
     assert all(p.severity is theme_io.Severity.WARN for p in problems)

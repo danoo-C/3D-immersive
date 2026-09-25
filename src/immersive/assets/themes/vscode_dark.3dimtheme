@@ -77,6 +77,12 @@
       "selected.text": "text.primary",
       "text": "text.secondary"
     },
+    "timeline": {
+      "background": "surface.panel",
+      "grid": "border",
+      "grid.beat": "surface.hover",
+      "grid.division": "surface.raised"
+    },
     "toolbar": {
       "background": "surface.raised",
       "border": "border",

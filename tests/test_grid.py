@@ -7,6 +7,7 @@ import math
 
 import pytest
 
+from immersive.core.model import Project, SnapSetting
 from immersive.core.time import (
     SAMPLE_RATE,
     BarBeat,
@@ -27,6 +28,7 @@ from immersive.ui.timeline.grid import (
     Unit,
     grid_lines,
     ruler_marks,
+    tempo_of,
     time_label,
 )
 
@@ -330,3 +332,26 @@ def test_the_time_ruler_does_not_read_the_tempo() -> None:
     other = ruler_marks(0, 480_000, 480.0, Unit.TIME, bpm=73.0, time_signature=(7, 8))
     assert one == other
     assert [m.sample for m in one if m.label == "0:02"] == [96_000]
+
+
+# --------------------------------------------------------------------------- #
+# what the grid is drawn from
+# --------------------------------------------------------------------------- #
+
+
+def test_the_grid_is_drawn_from_the_projects_tempo_and_snap() -> None:
+    project = Project(
+        bpm=90.0,
+        time_signature=(3, 4),
+        snap=SnapSetting(division=Division.EIGHTH, triplet=True),
+    )
+
+    tempo = tempo_of(project)
+
+    assert (tempo.bpm, tempo.time_signature) == (90.0, (3, 4))
+    assert (tempo.division, tempo.triplet) == (Division.EIGHTH, True)
+
+
+def test_snapping_off_draws_no_division() -> None:
+    project = Project(snap=SnapSetting(enabled=False, division=Division.EIGHTH))
+    assert tempo_of(project).division is None

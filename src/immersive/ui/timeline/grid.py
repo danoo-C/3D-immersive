@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from typing import Final
 
+from immersive.core.model import Project
 from immersive.core.time import (
     SAMPLE_RATE,
     TICKS_PER_BEAT,
@@ -86,6 +87,28 @@ class Mark:
 # --------------------------------------------------------------------------- #
 # the grid
 # --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class Tempo:
+    """What the grid is drawn from."""
+
+    bpm: float
+    time_signature: tuple[int, int]
+    division: Division | None
+    triplet: bool
+
+
+def tempo_of(project: Project) -> Tempo:
+    """The project's grid. A disabled snap draws no division: the grid shows
+    the division a drag will snap to (04, *Timeline*), and there is none."""
+    snap = project.snap
+    return Tempo(
+        project.bpm,
+        project.time_signature,
+        snap.division if snap.enabled else None,
+        snap.triplet,
+    )
 
 
 @dataclass(frozen=True)
