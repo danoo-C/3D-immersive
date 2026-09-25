@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 1 — The time axis, the ruler and the grid
 
-**Written:** 2026-09-25 · **Status:** in progress
+**Written:** 2026-09-25 · **Status:** ✅ complete
 
 ## Approach
 
@@ -153,8 +153,8 @@ deepest first, and not on their literal values.
 
 ```
 docs/01-requirements.md                        amended — D-94
-docs/02-architecture.md                        amended — time_axis.py, timeline/
-docs/04-ui-spec.md                             amended — ruler, grid, playhead groups
+docs/02-architecture.md                        amended — time_axis.py
+docs/04-ui-spec.md                             amended — two painted groups
 docs/doc-system.md                             amended — high-water mark
 docs/m3_timeline/phase_1_*.md                  amended — Notes, boxes
 src/immersive/assets/themes/vscode_dark.3dimtheme   amended — three groups
@@ -164,11 +164,11 @@ src/immersive/ui/timeline/grid.py              new — Qt-free
 src/immersive/ui/timeline/view.py              new
 src/immersive/ui/timeline/ruler.py             new
 src/immersive/ui/timeline/panel.py             new
-src/immersive/ui/main_window.py                amended — the panel, View menu, chips
+src/immersive/ui/main_window.py                amended — panel, menu, chips
 tests/test_time_axis.py                        new — headless
 tests/test_grid.py                             new — headless
 tests/test_timeline.py                         new — gui
-tests/test_layering.py                         amended — the two Qt-free modules
+tests/test_layering.py                         amended — Qt-free modules
 tests/test_main_window.py                      amended if the panel count moves
 ```
 
@@ -215,4 +215,62 @@ tests/test_main_window.py                      amended if the panel count moves
 
 ## Outcome
 
-Filled in at the end.
+Six steps in the planned order, all ten acceptance boxes ticked. Twenty-six
+mutations were run and two survived their first run, both now killed:
+fourteen named in advance, the rest found on the way. 1417 tests.
+
+### What the plan got right
+
+**Three layers, each testable without the one above.** Every question about
+where a line goes or where a click lands was settled by 297 tests that run
+in under a second, most of them with no window at all. The widgets draw
+what the numbers say and decide nothing, and their tests only check that
+they did.
+
+**Offset in whole pixels.** The ruler and the lanes never came apart. A test
+drags the scrollbar and reads the axis, and another does the reverse; they
+could not disagree by a fraction because there is no fraction to disagree
+by.
+
+**Deciding the rounding question before writing the grid.** Five minutes
+comparing `from_bar_beat` with `snap` meant `core.time` did not change.
+
+### What the plan did not see
+
+**That `04` had already named the colours.** The plan invented `ruler`,
+`grid` and `playhead` groups. The worked example of a theme file in `04`
+already held a `timeline` group with `grid` and `playhead` keys, and a test
+holds the built-in to it. The spec won: see the phase's Notes.
+
+**That lines can crowd across series.** The plan's level-of-detail rule
+checked each series against the minimum spacing. Triplet halves among beats
+passed that and still drew lines four pixels apart. The rule is now judged
+on the union, in ticks, by the greatest common divisor, and the mutation that
+undoes it is killed.
+
+**That a grab cannot see a missing repaint.** `grab()` renders afresh
+whatever was scheduled, so "the lanes repaint when the project changes" was
+untestable the way the plan said. The test counts paint events instead.
+
+**That the ruler's ticks needed three lengths.** Only the grab showed it.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| Groups `ruler`, `grid`, `playhead` | `ruler`, and `timeline` with `grid`, `grid.beat`, `grid.division` and `playhead`, as `04`'s example named them |
+| Level of detail judged per series | judged on the union of what is drawn, by greatest common divisor |
+| A ruler mark major or minor | a ruler mark carries its line's level, and three tick lengths |
+| The theme-switch test at step 5 | written at step 4, to kill the survivor there |
+| Two redundant scale clamps | one; the second was an equivalent mutation, removed rather than pinned |
+
+### What phase 2 needs to know
+
+`TimelinePanel(document, axis)` is a `Panel` holding `ruler` and `view`, and
+the window's `timeline()` returns it. The view's scene is one pixel high and
+exactly `axis.span()` wide; phase 2 makes it as tall as its lanes, and puts
+the channel headers in a column to the left. The ruler has to stay aligned
+with the lanes, so it will need a spacer as wide as the headers. The view's
+`drawBackground` draws the grid over whatever rectangle is exposed, so lanes
+can be drawn over it, as items or as background, without the grid being
+asked. `panel.playhead()` is where the playhead is until phase 9.

@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
 from PySide6.QtGui import QAction, QImage, QMouseEvent, QWheelEvent
@@ -341,11 +342,13 @@ def test_the_ruler_units_are_one_checked_pair_in_the_view_menu() -> None:
 
 
 def everything(image: QImage) -> set[str]:
-    return {
-        image.pixelColor(x, y).name().upper()
-        for x in range(image.width())
-        for y in range(image.height())
-    }
+    """Every colour in `image`, read in one pass rather than pixel by pixel -
+    a window-sized grab is a third of a million `pixelColor` calls."""
+    rgb = image.convertToFormat(QImage.Format.Format_RGB32)
+    pixels = np.frombuffer(
+        rgb.constBits(), dtype=np.uint32, count=rgb.sizeInBytes() // 4
+    )
+    return {f"#{value & 0xFFFFFF:06X}" for value in np.unique(pixels)}
 
 
 def test_a_theme_switch_in_the_window_repaints_the_ruler_and_the_lanes() -> None:
@@ -478,3 +481,21 @@ def test_a_change_to_the_project_repaints_the_lanes_and_the_ruler() -> None:
     QApplication.processEvents()
 
     assert lanes.count and ruler.count
+
+
+def test_ruler_ticks_are_longest_at_bars_and_shortest_at_divisions() -> None:
+    """Looking at a grab found beats and divisions ticked alike, so the beat
+    was hard to find on the ruler; the lanes had always told them apart."""
+    panel = paneled()
+    panel._document.project.snap.enabled = True  # 1/16: 12.5 px
+    panel.set_playhead(10 * BAR_PX * int(SCALE))  # out of the way
+    image = panel.ruler.grab().toImage()
+    tick = theme.group_color("ruler", "tick").upper()
+
+    def length(x: int) -> int:
+        return sum(
+            image.pixelColor(x, y).name().upper() == tick for y in range(image.height())
+        )
+
+    bar, beat, division = length(BAR_PX), length(BAR_PX + 50), length(BAR_PX + 25)
+    assert bar > beat > division > 0

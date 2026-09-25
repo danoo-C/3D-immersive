@@ -11,7 +11,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 
 | Phase | Status |
 |---|---|
-| [1 — The time axis, the ruler and the grid](phase_1_time_axis_and_ruler.md) | in progress |
+| [1 — The time axis, the ruler and the grid](phase_1_time_axis_and_ruler.md) | ✅ |
 | [2 — Channels](phase_2_channels.md) | not started |
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | not started |
 | [4 — Selection](phase_4_selection.md) | not started |
@@ -139,3 +139,13 @@ phase's first decision.
 ## Notes
 
 Appended as phases complete.
+
+**Phase 1.** The timeline has a view, a ruler and a grid on one shared time
+axis, and the axis is a Qt-free object the window holds — not the
+timeline's, because M6's curve editor observes it too (D-94). Its scroll
+offset is whole pixels, so the ruler and the lanes cannot come apart. The
+grid is placed as `core.time` places bars and snap targets, and thins by a
+rule judged on everything drawn together, which the plan had judged series
+by series. The colours were already named: `04`'s worked example of a theme
+file had a `timeline` group, and the lanes draw from it. Twenty-six
+mutations, all killed.

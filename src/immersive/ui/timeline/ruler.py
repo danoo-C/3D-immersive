@@ -23,14 +23,13 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 from immersive.core.document import Document
 from immersive.ui import theme
 from immersive.ui.time_axis import TimeAxis
-from immersive.ui.timeline.grid import Unit, ruler_marks, tempo_of
+from immersive.ui.timeline.grid import Level, Unit, ruler_marks, tempo_of
 
 #: Tall enough for a label over a tick.
 HEIGHT = 22
 
-#: Tick lengths, from the bottom edge, in pixels.
-MAJOR_TICK = 10
-MINOR_TICK = 4
+#: Tick lengths, from the bottom edge, in pixels: bars, beats, divisions.
+TICKS = {Level.BAR: 10, Level.BEAT: 6, Level.DIVISION: 3}
 
 #: Label size in pixels, and how far a label sits right of its tick.
 LABEL_PX = 10
@@ -113,12 +112,11 @@ class Ruler(QWidget):
         ):
             x = round(self._axis.x_of(mark.sample))
             painter.setPen(tick)
-            length = MAJOR_TICK if mark.major else MINOR_TICK
-            painter.drawLine(x, bottom - length + 1, x, bottom)
+            painter.drawLine(x, bottom - TICKS[mark.level] + 1, x, bottom)
             if mark.label:
                 painter.setPen(text)
                 painter.drawText(
-                    QRect(x + LABEL_GAP, 0, 200, bottom - MINOR_TICK),
+                    QRect(x + LABEL_GAP, 0, 200, bottom - TICKS[Level.BEAT]),
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     mark.label,
                 )

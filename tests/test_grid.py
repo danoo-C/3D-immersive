@@ -288,13 +288,15 @@ def test_bar_labels_never_crowd_and_thin_by_powers_of_two(scale: float) -> None:
     assert all(step & (step - 1) == 0 for step in steps)
 
 
-def test_every_grid_line_has_a_tick_and_bars_are_the_major_ones() -> None:
+def test_every_grid_line_has_a_tick_of_its_own_level() -> None:
     kwargs = {"bpm": 120.0, "time_signature": (4, 4), "division": Division.EIGHTH}
     marks = ruler_marks(0, 192_000, 50.0, Unit.BARS, **kwargs)  # type: ignore[arg-type]
     drawn = grid_lines(0, 192_000, 50.0, **kwargs)  # type: ignore[arg-type]
 
-    assert [mark.sample for mark in marks] == [line.sample for line in drawn]
-    assert [mark.sample for mark in marks if mark.major] == of(Level.BAR, drawn)
+    assert [(mark.sample, mark.level) for mark in marks] == [
+        (line.sample, line.level) for line in drawn
+    ]
+    assert {line.level for line in drawn} == set(Level), "all three are here"
 
 
 @pytest.mark.parametrize("scale", SCALES)

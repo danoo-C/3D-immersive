@@ -77,11 +77,16 @@ class Unit(StrEnum):
 
 @dataclass(frozen=True)
 class Mark:
-    """A tick on the ruler, labelled or not."""
+    """A tick on the ruler, labelled or not.
+
+    `level` sets the tick's length. In bars:beats it is the grid line's own
+    level, so beats stand out from the division as they do in the lanes; in
+    minutes:seconds a labelled tick is a `BAR` and the rest `DIVISION`.
+    """
 
     sample: int
     label: str
-    major: bool
+    level: Level
 
 
 # --------------------------------------------------------------------------- #
@@ -270,7 +275,7 @@ def _bar_marks(
                 label = str(bar + 1)
             elif beat_in_bar and beats_labelled:
                 label = f"{bar + 1}.{beat_in_bar + 1}"
-        marks.append(Mark(line.sample, label, line.level is Level.BAR))
+        marks.append(Mark(line.sample, label, line.level))
     return marks
 
 
@@ -303,7 +308,7 @@ def _time_marks(first: float, last: float, scale: float) -> list[Mark]:
             continue
         labelled = ms % label_ms == 0
         text = time_label(ms, fractional=label_ms < 1000) if labelled else ""
-        marks.append(Mark(sample, text, labelled))
+        marks.append(Mark(sample, text, Level.BAR if labelled else Level.DIVISION))
     return marks
 
 
