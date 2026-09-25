@@ -22,6 +22,15 @@ from immersive.ui.widgets.placeholder import Panel
 #: empty project still has somewhere to put the first clip.
 EXTENT_FLOOR = SAMPLE_RATE * 60 * 10
 
+#: How far past the last clip the timeline can be scrolled: room to put the
+#: next one after it.
+EXTENT_BEYOND = SAMPLE_RATE * 60
+
+
+def extent_for(length: int) -> int:
+    """The timeline that can be scrolled over, for a project this long."""
+    return max(length + EXTENT_BEYOND, EXTENT_FLOOR)
+
 
 class TimelinePanel(Panel):
     """Channels, clips, ruler and playhead - the ruler and the grid so far."""
@@ -41,7 +50,8 @@ class TimelinePanel(Panel):
         layout.addWidget(self.view, 1)
 
         self.ruler.clicked.connect(self.set_playhead)
-        axis.set_extent(EXTENT_FLOOR)
+        document.observe(self._project_changed)
+        self._project_changed()
         self.retheme()
 
     @property
@@ -55,6 +65,11 @@ class TimelinePanel(Panel):
         self._playhead = max(sample, 0)
         self.ruler.set_playhead(self._playhead)
         self.view.set_playhead(self._playhead)
+
+    def _project_changed(self) -> None:
+        """The view and the ruler read the tempo when they paint, and repaint
+        on their own; what is left is how far there is to scroll."""
+        self._axis.set_extent(extent_for(self._document.project.length))
 
     def unit(self) -> Unit:
         return self.ruler.unit

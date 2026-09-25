@@ -8,20 +8,24 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
 from PySide6.QtGui import QAction, QImage, QMouseEvent, QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from immersive.app import build_application
 from immersive.core.document import Document
-from immersive.core.time import SAMPLE_RATE
+from immersive.core.edits import AddChannel, AddClip, AddMedia, SetAttribute
+from immersive.core.io import project_io
+from immersive.core.model import Channel, Clip, MediaFile, Project, SnapSetting
+from immersive.core.time import SAMPLE_RATE, Division
 from immersive.ui import theme, theme_io
-from immersive.ui.main_window import MainWindow
+from immersive.ui.main_window import MainWindow, snap_text
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit
-from immersive.ui.timeline.panel import TimelinePanel
+from immersive.ui.timeline.panel import EXTENT_BEYOND, EXTENT_FLOOR, TimelinePanel
 from immersive.ui.timeline.view import SCROLL_STEP, ZOOM_STEP, TimelineView
 
 pytestmark = pytest.mark.gui
@@ -361,3 +365,116 @@ def test_a_theme_switch_in_the_window_repaints_the_ruler_and_the_lanes() -> None
         grabbed(timeline.view)
     )
     assert not before & after
+
+
+# --------------------------------------------------------------------------- #
+# the project in the timeline
+# --------------------------------------------------------------------------- #
+
+
+def saved(tmp_path: Path, project: Project) -> Path:
+    path = tmp_path / "song.3dim"
+    project_io.save(project, path)
+    return path
+
+
+def test_an_opened_project_draws_its_own_tempo_and_new_goes_back(
+    tmp_path: Path,
+) -> None:
+    """90 BPM in 3/4: a beat is 32 000 samples and a bar three of them."""
+    panel = paneled()
+    document = panel._document
+    document.open(saved(tmp_path, Project(bpm=90.0, time_signature=(3, 4))))
+    document.project.snap.enabled = False
+    image = grabbed(panel.view)
+
+    def x(sample: float) -> int:
+        return round(panel.axis.x_of(sample))
+
+    assert at(image, x(96_000)) == colour("grid")  # bar 2
+    assert at(image, x(32_000)) == colour("grid.beat")
+    assert at(image, x(24_000)) == colour("background"), "not 120's beat"
+
+    document.new()
+    document.project.snap.enabled = False
+    image = grabbed(panel.view)
+    assert at(image, x(24_000)) == colour("grid.beat")
+    assert at(image, x(96_000)) == colour("grid")
+
+
+def chips(window: MainWindow) -> set[str]:
+    return {label.text() for label in window.findChildren(QLabel)}
+
+
+def test_the_toolbar_reads_the_open_projects_tempo_and_follows_undo(
+    tmp_path: Path,
+) -> None:
+    window = MainWindow()
+    project = Project(
+        bpm=90.0,
+        time_signature=(3, 4),
+        snap=SnapSetting(division=Division.EIGHTH, triplet=True),
+    )
+    window.document().open(saved(tmp_path, project))
+    assert {"90.0 BPM", "3/4", "Snap 1/8T"} <= chips(window)
+
+    window.document().push(SetAttribute(window.document().project, "bpm", 100.0))
+    assert "100.0 BPM" in chips(window)
+    window.document().undo()
+    assert "90.0 BPM" in chips(window)
+
+    window.document().new()
+    assert {"120.0 BPM", "4/4", "Snap 1/16"} <= chips(window)
+
+
+def test_the_snap_chip_says_off_and_triplet() -> None:
+    assert snap_text(SnapSetting(enabled=False)) == "Snap off"
+    assert snap_text(SnapSetting(division=Division.QUARTER)) == "Snap 1/4"
+    assert snap_text(SnapSetting(division=Division.EIGHTH, triplet=True)) == "Snap 1/8T"
+
+
+def test_the_timeline_scrolls_as_far_as_the_project_reaches() -> None:
+    panel = paneled()
+    document = panel._document
+    assert panel.axis.extent == EXTENT_FLOOR
+
+    twenty_minutes = SAMPLE_RATE * 60 * 20
+    media = MediaFile("m-00000001", "/a.wav", "a.wav", SAMPLE_RATE, 1, SAMPLE_RATE)
+    channel = Channel("c-00000001", "One", "#A855F7")
+    document.push(AddMedia(document.project, [media]))
+    document.push(AddChannel(document.project, channel))
+    document.push(
+        AddClip(channel, Clip("k-00000001", media.id, twenty_minutes, 0, SAMPLE_RATE))
+    )
+
+    assert panel.axis.extent == twenty_minutes + SAMPLE_RATE + EXTENT_BEYOND
+    document.undo()
+    assert panel.axis.extent == EXTENT_FLOOR
+
+
+class Paints(QObject):
+    """Counts the paint events a widget is sent."""
+
+    def __init__(self, widget: QObject) -> None:
+        super().__init__()
+        self.count = 0
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Paint:
+            self.count += 1
+        return False
+
+
+def test_a_change_to_the_project_repaints_the_lanes_and_the_ruler() -> None:
+    """A grab renders afresh whatever was scheduled, so what is counted here
+    is the repaint itself - without it the screen keeps the old grid until
+    something else happens to repaint it."""
+    panel = paneled()
+    QApplication.processEvents()
+    lanes, ruler = Paints(panel.view.viewport()), Paints(panel.ruler)
+
+    panel._document.push(SetAttribute(panel._document.project, "bpm", 90.0))
+    QApplication.processEvents()
+
+    assert lanes.count and ruler.count

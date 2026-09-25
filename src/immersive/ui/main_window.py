@@ -37,7 +37,7 @@ from immersive.core.edits import AddMedia
 from immersive.core.io import project_io
 from immersive.core.io.media import Refused
 from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, find_audio
-from immersive.core.model import MediaFile, Project
+from immersive.core.model import MediaFile, Project, SnapSetting
 from immersive.core.relink import relink
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.explorer.media_pool import MediaPool
@@ -373,10 +373,16 @@ class MainWindow(QMainWindow):
         )
         bar.addWidget(self._position)
         bar.addSeparator()
-        bar.addWidget(self._chip("120.0 BPM"))
-        bar.addWidget(self._chip("4/4"))
+        # The open project's tempo, signature and snap, read back after every
+        # change the document reports. Readouts until phase 5 makes the snap
+        # a control and phase 7 the other two.
+        self._bpm_chip = self._chip("")
+        self._signature_chip = self._chip("")
+        self._snap_chip = self._chip("")
+        bar.addWidget(self._bpm_chip)
+        bar.addWidget(self._signature_chip)
         bar.addSeparator()
-        bar.addWidget(self._chip("Snap 1/16"))
+        bar.addWidget(self._snap_chip)
         bar.addSeparator()
 
         bar.addAction(self._undo)
@@ -836,6 +842,10 @@ class MainWindow(QMainWindow):
         """
         document = self._document
         self.setWindowTitle(f"{document.title}[*] — {WINDOW_TITLE}")
+        project = document.project
+        self._bpm_chip.setText(f"{project.bpm:.1f} BPM")
+        self._signature_chip.setText("{}/{}".format(*project.time_signature))
+        self._snap_chip.setText(snap_text(project.snap))
         self.setWindowModified(document.is_dirty)
         for action, able, nothing in (
             (self._undo, document.can_undo, "Nothing to undo."),
@@ -992,6 +1002,13 @@ class MainWindow(QMainWindow):
         if (latest := self._notices.latest()) is not None:
             self.statusBar().showMessage(latest.message)
         self._notice_count.refresh()
+
+
+def snap_text(snap: SnapSetting) -> str:
+    """`Snap 1/16`, `Snap 1/8T` for a triplet, or `Snap off`."""
+    if not snap.enabled:
+        return "Snap off"
+    return f"Snap {snap.division.value}{'T' if snap.triplet else ''}"
 
 
 def _reason(error: OSError) -> str:

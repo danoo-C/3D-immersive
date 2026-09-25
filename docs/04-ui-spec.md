@@ -375,7 +375,7 @@ who owns what. M9 is built *third*, before all of them:
 | window, panel, menu, toolbar, button, **tab**, splitter, scrollbar, status bar, tooltip, **focus** | M9 — the widgets that exist when the system is built. Tab and focus were missing from this row until M9 phase 1 went looking: the tab bar exists because of D-49 and the focus ring is required by *Accessibility and feel*, and the stylesheet has styled both since M0 |
 | notice line, notice count, notice list | M9 — it builds them (D-65) |
 | tree view, header, filter field, waveform thumbnail | M2 — built as `tree`, `header`, `filter` and the painted `waveform`. The filter is styled by its object name, so the generic input field stays M8's |
-| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 |
+| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file* |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
 | dialog, progress bar, input field, spin box, check box, slider, combo box | M8 — the first milestone with dialogs and a preferences form |
@@ -393,6 +393,26 @@ placeholders. The waveform's, built at M2:
 | `centre` | `border` | the zero line — what silence looks like |
 | `fill` | `text.secondary` | the envelope, one lane per channel |
 | `missing` | `warn` | a sample whose file has gone, which also says so in text |
+
+The timeline's, built at M3. The lanes and the playhead draw from
+`timeline`, whose `grid` and `playhead` values the worked example under *The
+file* already gave; the ruler draws from its own group. The three grid
+colours rely on the surfaces being monotonic, deepest first, and not on
+their values:
+
+| `timeline` key | Default | For |
+|---|---|---|
+| `background` | `surface.panel` | behind the lanes |
+| `grid` | `border` | bar lines — the strongest |
+| `grid.beat` | `surface.hover` | beat lines |
+| `grid.division` | `surface.raised` | the snap division — the faintest, and only while snapping is on |
+| `playhead` | `accent` | the playhead, over everything, in the lanes and across the ruler |
+
+| `ruler` key | Default | For |
+|---|---|---|
+| `background` | `surface.raised` | behind the ticks and labels |
+| `tick` | `text.disabled` | tick marks |
+| `text` | `text.secondary` | labels |
 
 The QSS today styles none of the input widgets in that last row, which is
 correct — nothing renders one yet. It is listed so that the milestone which
@@ -506,6 +526,12 @@ height indirectly. Muted channels drop to 25% opacity; soloed ones get a glow.
 Ruler across the top, switchable bars:beats ↔ min:sec, with the grid drawn from
 BPM and the current snap division. Channel headers on the left — colour chip,
 name, gain, M/S, ⊘ (HRTF bypass), snap-override indicator. Lanes to the right.
+
+The grid thins as the view zooms out rather than crowding: no two lines are
+drawn closer than a few pixels, the snap division goes first, then beats, and
+bars are thinned to every second, fourth or eighth bar but never removed. The
+division is drawn only while snapping is on, because it is there to show
+where a drag will land.
 
 - Clips render name + waveform; waveform detail drops out as you zoom out.
 - Drag body to move; drag either edge to trim; `S` splits at playhead.
