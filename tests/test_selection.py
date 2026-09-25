@@ -8,7 +8,7 @@ from pathlib import Path
 from immersive.core.document import Document
 from immersive.core.edits import AddChannel, AddClip, AddMedia, RemoveClip
 from immersive.core.model import Channel, Clip, MediaFile, Project
-from immersive.core.selection import Kind, Selection
+from immersive.core.selection import Kind, Selection, between, lane_of
 from immersive.core.time import SAMPLE_RATE
 
 MEDIA = MediaFile("m-00000001", "a.wav", "a.wav", SAMPLE_RATE, 1, 1_000_000)
@@ -176,3 +176,66 @@ def test_pruning_keeps_the_selection_as_it_was_when_nothing_went() -> None:
 
     assert selection.channels() == project.channels
     assert calls == []
+
+
+# --------------------------------------------------------------------------- #
+# the range Shift+click selects
+# --------------------------------------------------------------------------- #
+
+
+def a_grid() -> Project:
+    """Three lanes; clips a second long at 0, 2 and 4 s on each."""
+    channels = []
+    for lane in range(3):
+        clips = [
+            Clip(f"k-0000{lane}{n}00", MEDIA.id, n * 2 * SAMPLE_RATE, 0, SAMPLE_RATE)
+            for n in range(3)
+        ]
+        channels.append(a_channel(f"c-0000000{lane}", *clips))
+    return Project(media_pool=[MEDIA], channels=channels)
+
+
+def names(clips: list[Clip]) -> list[str]:
+    return [clip.id[-4:-2] for clip in clips]
+
+
+def test_a_range_on_one_lane_runs_from_one_clip_to_the_other() -> None:
+    project = a_grid()
+    lane = project.channels[1].clips
+    assert names(between(project, lane[0], lane[2])) == ["10", "11", "12"]
+    assert names(between(project, lane[2], lane[0])) == ["10", "11", "12"]
+
+
+def test_a_range_across_lanes_takes_the_block_between() -> None:
+    project = a_grid()
+    anchor = project.channels[0].clips[1]  # lane 0, 2 s
+    clicked = project.channels[2].clips[2]  # lane 2, 4 s
+    assert names(between(project, anchor, clicked)) == [
+        "01",
+        "02",
+        "11",
+        "12",
+        "21",
+        "22",
+    ]
+
+
+def test_a_clip_partly_inside_the_stretch_is_in_the_range() -> None:
+    project = a_grid()
+    long = Clip("k-00009900", MEDIA.id, SAMPLE_RATE // 2, 0, SAMPLE_RATE)  # 0.5-1.5 s
+    project.channels[1].clips = [long]
+    anchor, clicked = project.channels[0].clips[0], project.channels[2].clips[0]
+    assert long in between(project, anchor, clicked)
+
+
+def test_the_lane_of_a_clip_is_found_by_identity() -> None:
+    project = a_grid()
+    clip = project.channels[2].clips[1]
+    assert lane_of(project, clip) == 2
+    twin = Clip(clip.id, clip.media_id, clip.start, clip.offset, clip.length)
+    try:
+        lane_of(project, twin)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an equal clip that is not in the project was found")

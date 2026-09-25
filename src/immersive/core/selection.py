@@ -118,6 +118,33 @@ class Selection:
             callback()
 
 
+def lane_of(project: Project, clip: Clip) -> int:
+    """The index of the channel holding `clip`, found by identity."""
+    for index, channel in enumerate(project.channels):
+        if any(held is clip for held in channel.clips):
+            return index
+    raise ValueError(f"{clip.id} is not on any channel of this project")
+
+
+def between(project: Project, anchor: Clip, clicked: Clip) -> list[Clip]:
+    """The range Shift+click selects: every clip overlapping the stretch of
+    time from the earlier of the two to the later, on every lane from the
+    anchor's to the clicked one's, in lane order and then time order.
+
+    What file managers teach for a list, carried across the two dimensions
+    a timeline has.
+    """
+    lanes = sorted((lane_of(project, anchor), lane_of(project, clicked)))
+    start = min(anchor.start, clicked.start)
+    end = max(anchor.end, clicked.end)
+    return [
+        clip
+        for channel in project.channels[lanes[0] : lanes[1] + 1]
+        for clip in channel.clips
+        if clip.start < end and start < clip.end
+    ]
+
+
 def _all(project: Project, kind: Kind) -> list[Selectable]:
     if kind is Kind.CLIPS:
         return [clip for channel in project.channels for clip in channel.clips]

@@ -37,6 +37,7 @@
     "clip": {
       "body": "channel",
       "missing": "text.disabled",
+      "selected.border": "accent",
       "text": "text.primary",
       "waveform": "channel"
     },

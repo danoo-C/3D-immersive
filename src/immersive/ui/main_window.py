@@ -13,7 +13,14 @@ from enum import Enum
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence, QMouseEvent
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QKeyEvent,
+    QKeySequence,
+    QMouseEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -242,6 +249,11 @@ class MainWindow(QMainWindow):
             lambda: self._timeline.add_channel()
         )
         edit_menu.addSeparator()
+        # Ctrl+A in a text field selects its text: a line edit claims the
+        # standard key before any window action sees it.
+        self._add(edit_menu, "Select &All", "Ctrl+A").triggered.connect(
+            lambda: self._timeline.view.select_all()
+        )
         self._add(edit_menu, "&Copy", "Ctrl+C", arrives=_M3)
         self._add(edit_menu, "&Paste", "Ctrl+V", arrives=_M3)
         self._add(edit_menu, "&Duplicate", "Ctrl+D", arrives=_M3)
@@ -995,6 +1007,17 @@ class MainWindow(QMainWindow):
             label.setStyleSheet(f"color: {theme.color(token)}; padding: 0 8px;")
         for label in (self._xruns, self._version):
             label.setStyleSheet(f"color: {theme.color('text.disabled')};")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Esc clears the selection while the transport is stopped (04,
+        *Selection*). Until phase 9 it always is: Transport > Stop, which
+        owns Esc, is disabled, and a disabled action's shortcut lets the key
+        through to here. Phase 9's Stop must do the same when stopped."""
+        if event.key() == Qt.Key.Key_Escape:
+            self._document.selection.clear()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def notices(self) -> NoticeLog:
         """This session's notice log, for anything that needs to report.

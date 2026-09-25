@@ -29,7 +29,7 @@ import math
 from collections.abc import Callable
 
 from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
 from immersive.core.io.peaks import Pyramid
@@ -56,6 +56,10 @@ MIN_NAME = 24
 #: waveform, drawn solid over it, is what stands out.
 BODY_ALPHA = 0.35
 
+#: A selected clip's border, drawn inside its edges: a shape as well as a
+#: colour, so a selection is never shown by colour alone.
+SELECTED_BORDER = 2
+
 #: Where a sample's peaks come from: the session's store, by media id.
 Peaks = Callable[[str], Pyramid | None]
 
@@ -71,6 +75,8 @@ class ClipItem(QGraphicsItem):
         self.clip: Clip | None = None
         self._width = 1.0
         self._look: tuple[object, ...] = ()
+        #: The lane it was last shown in: its channel's index.
+        self.lane = 0
         #: How many times it has painted - read by tests of the cache.
         self.paints = 0
 
@@ -83,6 +89,7 @@ class ClipItem(QGraphicsItem):
         missing: bool,
         lane: int,
         scale: float,
+        selected: bool = False,
     ) -> None:
         """Place and size it for `scale`, and repaint only if its look changed."""
         self.clip = clip
@@ -91,7 +98,16 @@ class ClipItem(QGraphicsItem):
             self.prepareGeometryChange()
             self._width = width
         self.setPos(clip.start / scale, lane * LANE_HEIGHT + TOP)
-        look = (clip.media_id, clip.offset, clip.length, colour, name, missing)
+        self.lane = lane
+        look = (
+            clip.media_id,
+            clip.offset,
+            clip.length,
+            colour,
+            name,
+            missing,
+            selected,
+        )
         if look != self._look:
             self._look = look
             self.update()
@@ -107,6 +123,10 @@ class ClipItem(QGraphicsItem):
     @property
     def missing(self) -> bool:
         return bool(self._look[5]) if self._look else False
+
+    @property
+    def selected(self) -> bool:
+        return bool(self._look[6]) if self._look else False
 
     @property
     def shows_waveform(self) -> bool:
@@ -173,6 +193,22 @@ class ClipItem(QGraphicsItem):
                 start=clip.offset,
                 frames=clip.length,
                 columns=range(first, last),
+            )
+
+        if self.selected:
+            pen = QPen(QColor(theme.group_color("clip", "selected.border")))
+            pen.setWidth(SELECTED_BORDER)
+            pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            inset = SELECTED_BORDER / 2
+            painter.drawRect(
+                QRectF(
+                    inset,
+                    inset,
+                    self._width - SELECTED_BORDER,
+                    HEIGHT - SELECTED_BORDER,
+                )
             )
 
         if self.shows_name:

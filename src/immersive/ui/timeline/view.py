@@ -38,6 +38,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QWidget
 
 from immersive.core.document import Document
+from immersive.core.model import Channel, Clip
+from immersive.core.selection import Kind, between, lane_of
 from immersive.ui import theme
 from immersive.ui.explorer.media_pool import MIME
 from immersive.ui.time_axis import TimeAxis
@@ -54,6 +56,9 @@ SCROLL_STEP = 60
 
 #: What Qt counts one wheel notch as.
 NOTCH = 120
+
+#: How far a press has to move before it is a drag rather than a click.
+DRAG_THRESHOLD = 4
 
 
 class TimelineView(QGraphicsView):
@@ -77,6 +82,17 @@ class TimelineView(QGraphicsView):
         self._laid_out_at: float | None = None
         #: Where a drag from the pool would land, while one is over the lanes.
         self._landing: Landing | None = None
+        #: Where a left press began, until its release.
+        self._press: QPointF | None = None
+        #: A selected clip pressed without a modifier: selected alone on the
+        #: release, unless the press became a drag (phase 5 drags them all).
+        self._alone_on_release: Clip | None = None
+        #: Where a Shift+click's range runs from: the clip last clicked or
+        #: Ctrl-clicked.
+        self._anchor: Clip | None = None
+        #: The channel last clicked, through its header or one of its clips -
+        #: what Ctrl+A selects first.
+        self._focused: Channel | None = None
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         #: Set while the axis is being written into the scrollbar, so the
@@ -97,6 +113,7 @@ class TimelineView(QGraphicsView):
         self.horizontalScrollBar().valueChanged.connect(self._scrolled)
         axis.observe(self._axis_changed)
         document.observe(self._project_changed)
+        document.selection.observe(self._lay_out)
         self._axis_changed()
 
     @property
@@ -120,6 +137,65 @@ class TimelineView(QGraphicsView):
 
     def clip_items(self) -> list[ClipItem]:
         return list(self._items.values())
+
+    # ----------------------------------------------------------- selecting
+
+    def focus(self, channel: Channel) -> None:
+        """The channel Ctrl+A selects the clips of first."""
+        self._focused = channel
+
+    def focused(self) -> Channel | None:
+        """The channel last clicked, while it is still in the project."""
+        channels = self._document.project.channels
+        return next((c for c in channels if c is self._focused), None)
+
+    def select_all(self) -> None:
+        """Every clip on the focused channel - and, once those are selected,
+        every clip in the project (04, *Selection*)."""
+        project = self._document.project
+        selection = self._document.selection
+        channel = self.focused()
+        on_channel = list(channel.clips) if channel is not None else []
+        already = [id(clip) for clip in selection.clips()]
+        if on_channel and already != [id(clip) for clip in on_channel]:
+            selection.select(Kind.CLIPS, on_channel)
+        else:
+            everything = [clip for c in project.channels for clip in c.clips]
+            selection.select(Kind.CLIPS, everything)
+
+    def _clip_at(self, position: QPointF) -> ClipItem | None:
+        item = self.itemAt(position.toPoint())
+        return item if isinstance(item, ClipItem) else None
+
+    def _click(self, item: ClipItem, modifiers: Qt.KeyboardModifier) -> None:
+        """What a press on a clip does to the selection (04, *Selection*)."""
+        project = self._document.project
+        selection = self._document.selection
+        clip = item.clip
+        assert clip is not None
+        self._focused = project.channels[item.lane]
+        ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        anchor = self._anchor
+        if anchor is not None:
+            try:
+                lane_of(project, anchor)
+            except ValueError:
+                anchor = None  # an Undo took it away
+        if shift and anchor is not None:
+            span = between(project, anchor, clip)
+            if ctrl:
+                selection.add(Kind.CLIPS, span)
+            else:
+                selection.select(Kind.CLIPS, span)
+            return
+        self._anchor = clip
+        if ctrl:
+            selection.toggle(Kind.CLIPS, clip)
+        elif clip in selection:
+            self._alone_on_release = clip
+        else:
+            selection.select(Kind.CLIPS, [clip])
 
     def landing(self) -> Landing | None:
         """Where the drag over the lanes would land now, if one is."""
@@ -182,6 +258,7 @@ class TimelineView(QGraphicsView):
                 sample = media.get(clip.media_id)
                 item.present(
                     clip,
+                    selected=clip in self._document.selection,
                     colour=channel.color,
                     name=sample.name if sample is not None else clip.media_id,
                     missing=sample is None or sample.missing,
@@ -229,6 +306,17 @@ class TimelineView(QGraphicsView):
     # ------------------------------------------------- the middle button
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() is Qt.MouseButton.LeftButton:
+            self._press = event.position()
+            self._alone_on_release = None
+            item = self._clip_at(event.position())
+            if item is not None:
+                self._click(item, event.modifiers())
+            event.accept()
+            return
+        self._pan_press(event)
+
+    def _pan_press(self, event: QMouseEvent) -> None:
         """A middle-button drag pans both ways, the lanes following the hand.
 
         It is how a mouse with no sideways wheel scrolls through time without
@@ -259,6 +347,24 @@ class TimelineView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() is Qt.MouseButton.LeftButton and self._press is not None:
+            moved = event.position() - self._press
+            clicked = abs(moved.x()) + abs(moved.y()) < DRAG_THRESHOLD
+            empty = self._clip_at(self._press) is None
+            modifiers = event.modifiers() & (
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+            )
+            if clicked and self._alone_on_release is not None:
+                self._document.selection.select(Kind.CLIPS, [self._alone_on_release])
+            elif clicked and empty and not modifiers:
+                self._document.selection.clear()
+            self._press = None
+            self._alone_on_release = None
+            event.accept()
+            return
+        self._pan_release(event)
+
+    def _pan_release(self, event: QMouseEvent) -> None:
         if event.button() is Qt.MouseButton.MiddleButton and self._pan is not None:
             self._pan = None
             self.viewport().unsetCursor()
