@@ -41,7 +41,13 @@ from immersive import __version__
 from immersive.audio.audition import Audition
 from immersive.core.commands import Compound
 from immersive.core.document import Document
-from immersive.core.edits import AddMedia, SetAttribute
+from immersive.core.edits import (
+    AddMedia,
+    DuplicateClips,
+    RemoveClips,
+    SetAttribute,
+    SplitClips,
+)
 from immersive.core.io import project_io
 from immersive.core.io.media import Refused
 from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, find_audio
@@ -260,9 +266,12 @@ class MainWindow(QMainWindow):
         )
         self._add(edit_menu, "&Copy", "Ctrl+C", arrives=_M3)
         self._add(edit_menu, "&Paste", "Ctrl+V", arrives=_M3)
-        self._add(edit_menu, "&Duplicate", "Ctrl+D", arrives=_M3)
-        self._add(edit_menu, "De&lete", QKeySequence.StandardKey.Delete, arrives=_M3)
-        self._add(edit_menu, "&Split at Playhead", "S", arrives=_M3)
+        self._duplicate = self._add(edit_menu, "&Duplicate", "Ctrl+D")
+        self._duplicate.triggered.connect(self.duplicate_clips)
+        self._delete = self._add(edit_menu, "De&lete", QKeySequence.StandardKey.Delete)
+        self._delete.triggered.connect(self.delete_clips)
+        self._split = self._add(edit_menu, "&Split at Playhead", "S")
+        self._split.triggered.connect(self.split_clips)
 
         view_menu = self._menu(bar, "&View")
         self._add(view_menu, "Focus &Top View", "1", arrives=_M5)
@@ -1031,14 +1040,44 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def split_clips(self) -> None:
+        """S: every selected clip under the playhead in two, as one edit;
+        the tails join the selection beside their heads."""
+        selection = self._document.selection
+        split = SplitClips(
+            self._document.project, selection.clips(), self._timeline.playhead()
+        )
+        if split.changes:
+            self._document.push(split)
+            selection.add(Kind.CLIPS, split.tails)
+
+    def duplicate_clips(self) -> None:
+        """Ctrl+D: the selection copied to just after itself, and the copies
+        selected, so pressing it again carries the run on."""
+        selection = self._document.selection
+        duplicate = DuplicateClips(self._document.project, selection.clips())
+        if duplicate.changes:
+            self._document.push(duplicate)
+            selection.select(Kind.CLIPS, duplicate.copies)
+
+    def delete_clips(self) -> None:
+        """Delete: every selected clip, as one edit."""
+        remove = RemoveClips(self._document.project, self._document.selection.clips())
+        if remove.changes:
+            self._document.push(remove)
+
     def _selection_changed(self) -> None:
         """What acts on the selection is enabled exactly when it can act."""
-        able = self._document.selection.kind is Kind.CHANNELS
-        self._bypass.setEnabled(able)
-        summary = self._bypass.toolTip().partition("\n")[0]
-        self._bypass.setToolTip(
-            summary if able else f"{summary}\nSelect a channel first."
-        )
+        kind = self._document.selection.kind
+        for action, able, wanted in (
+            (self._bypass, kind is Kind.CHANNELS, "a channel"),
+            (self._split, kind is Kind.CLIPS, "a clip"),
+            (self._duplicate, kind is Kind.CLIPS, "a clip"),
+            (self._delete, kind is Kind.CLIPS, "a clip"),
+        ):
+            action.setEnabled(able)
+            summary = action.toolTip().partition("\n")[0]
+            action.setToolTip(summary if able else f"{summary}\nSelect {wanted} first.")
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Esc clears the selection while the transport is stopped (04,

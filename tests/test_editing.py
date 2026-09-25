@@ -4,11 +4,16 @@ split, duplicate and delete, and choosing the snap. Marked gui."""
 from __future__ import annotations
 
 import copy
+import hashlib
+import time
 from collections.abc import Iterator
+from pathlib import Path
 
+import numpy as np
 import pytest
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+import soundfile
+from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt
+from PySide6.QtGui import QAction, QKeyEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -19,6 +24,7 @@ from immersive.core.model import Clip, MediaFile, new_channel
 from immersive.core.selection import Kind
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
+from immersive.ui.main_window import MainWindow
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.clips import TOP, ClipItem
 from immersive.ui.timeline.metrics import LANE_HEIGHT
@@ -299,3 +305,205 @@ def test_the_pointer_shows_an_edge_before_the_press() -> None:
     assert viewport.cursor().shape() is Qt.CursorShape.SizeHorCursor
     mouse(panel, QEvent.Type.MouseMove, at(0, 0.5), held=False)
     assert viewport.cursor().shape() is Qt.CursorShape.ArrowCursor
+
+
+# --------------------------------------------------------------------------- #
+# the keys
+# --------------------------------------------------------------------------- #
+
+
+def window_with_clips() -> tuple[MainWindow, list[list[Clip]]]:
+    window = MainWindow()
+    grid = arrange(window.document(), lanes=2)
+    window.show()
+    QApplication.processEvents()
+    return window, grid
+
+
+def action(window: MainWindow, text: str) -> QAction:
+    [found] = [a for a in window.findChildren(QAction) if a.text() == text]
+    return found
+
+
+SPLIT, DUPLICATE, DELETE = "&Split at Playhead", "&Duplicate", "De&lete"
+
+
+def spans_of(window: MainWindow, lane: int) -> list[tuple[int, int]]:
+    return [(c.start, c.end) for c in window.document().project.channels[lane].clips]
+
+
+def test_s_splits_every_selected_clip_under_the_playhead_as_one_edit() -> None:
+    window, grid = window_with_clips()
+    document = window.document()
+    document.selection.select(Kind.CLIPS, [grid[0][0], grid[1][0], grid[0][1]])
+    window.timeline().set_playhead(SECOND // 2)
+    before, stacked = copy.deepcopy(document.project), len(document._stack)
+
+    action(window, SPLIT).trigger()
+
+    half = SECOND // 2
+    assert spans_of(window, 0)[:3] == [
+        (0, half),
+        (half, SECOND),
+        (2 * SECOND, 3 * SECOND),
+    ]
+    assert spans_of(window, 1)[:2] == [(0, half), (half, SECOND)]
+    tails = [document.project.channels[n].clips[1] for n in (0, 1)]
+    assert document.selection.clips() == [grid[0][0], grid[1][0], grid[0][1], *tails]
+    assert len(document._stack) == stacked + 1
+    document.undo()
+    assert document.project == before
+
+
+def test_s_with_the_playhead_outside_every_selected_clip_does_nothing() -> None:
+    window, grid = window_with_clips()
+    document = window.document()
+    document.selection.select(Kind.CLIPS, [grid[0][0]])
+    window.timeline().set_playhead(SECOND + 1)
+    stacked = len(document._stack)
+    action(window, SPLIT).trigger()
+    assert len(document._stack) == stacked
+
+
+def test_ctrl_d_copies_the_selection_after_itself_and_carries_the_run_on() -> None:
+    window, grid = window_with_clips()
+    document = window.document()
+    document.selection.select(Kind.CLIPS, [grid[0][0]])
+    duplicate = action(window, DUPLICATE)
+    assert duplicate.shortcut().toString() == "Ctrl+D"
+
+    duplicate.trigger()
+    [first] = document.selection.clips()
+    assert (first.start, first.end) == (SECOND, 2 * SECOND)
+    duplicate.trigger()
+    [second] = document.selection.clips()
+    assert (second.start, second.end) == (2 * SECOND, 3 * SECOND)
+
+    assert spans_of(window, 0) == [
+        (0, SECOND),
+        (SECOND, 2 * SECOND),
+        (2 * SECOND, 3 * SECOND),
+        (4 * SECOND, 5 * SECOND),
+    ], "the second copy landed on the clip at 2 s, as a drop would"
+
+
+def test_delete_removes_every_selected_clip_as_one_edit() -> None:
+    window, grid = window_with_clips()
+    document = window.document()
+    document.selection.select(Kind.CLIPS, [grid[0][1], grid[1][2]])
+    before, stacked = copy.deepcopy(document.project), len(document._stack)
+
+    action(window, DELETE).trigger()
+
+    assert spans_of(window, 0) == [(0, SECOND), (4 * SECOND, 5 * SECOND)]
+    assert spans_of(window, 1) == [(0, SECOND), (2 * SECOND, 3 * SECOND)]
+    assert document.selection.kind is None
+    assert len(document._stack) == stacked + 1
+    document.undo()
+    assert document.project == before
+
+
+@pytest.mark.parametrize("text", [SPLIT, DUPLICATE, DELETE])
+def test_the_clip_verbs_are_enabled_exactly_while_clips_are_selected(text: str) -> None:
+    window, grid = window_with_clips()
+    document = window.document()
+    verb = action(window, text)
+
+    assert not verb.isEnabled() and "Select a clip first." in verb.toolTip()
+    document.selection.select(Kind.CHANNELS, [document.project.channels[0]])
+    assert not verb.isEnabled()
+    document.selection.select(Kind.CLIPS, [grid[0][0]])
+    assert verb.isEnabled()
+    assert "\n" not in verb.toolTip(), "no longer says why it is dead"
+
+
+@pytest.mark.parametrize(
+    ("key", "modifiers"),
+    [(Qt.Key.Key_S, NONE), (Qt.Key.Key_Delete, NONE), (Qt.Key.Key_D, CTRL)],
+)
+def test_the_rename_field_keeps_the_verbs_keys_for_itself(
+    key: Qt.Key, modifiers: Qt.KeyboardModifier
+) -> None:
+    """As phase 4 held `Ctrl+A`: what can be held offscreen is the claim."""
+    window, grid = window_with_clips()
+    window.document().selection.select(Kind.CLIPS, [grid[0][0]])
+    field = window.timeline().headers.headers()[0].rename()
+    override = QKeyEvent(
+        QEvent.Type.ShortcutOverride, key, modifiers, "s" if key is Qt.Key.Key_S else ""
+    )
+    override.ignore()
+
+    QApplication.sendEvent(field, override)
+
+    if key is Qt.Key.Key_D:
+        # Ctrl+D is not a line edit's; it reaches the window, which is right:
+        # nothing is selected in a name being typed that Ctrl+D would copy.
+        assert not override.isAccepted()
+    else:
+        assert override.isAccepted()
+
+
+# --------------------------------------------------------------------------- #
+# F-14: the source is never touched
+# --------------------------------------------------------------------------- #
+
+
+def finish(window: MainWindow, timeout: float = 20.0) -> None:
+    deadline = time.monotonic() + timeout
+    while window.importing():
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+        if time.monotonic() > deadline:
+            raise AssertionError("the import did not finish")
+    QApplication.processEvents()
+
+
+def test_no_sample_is_written_through_a_session_of_every_edit(tmp_path: Path) -> None:
+    paths = []
+    for n in range(2):
+        path = tmp_path / f"s{n}.wav"
+        audio = np.random.default_rng(n).uniform(-0.5, 0.5, 2 * SECOND)
+        soundfile.write(path, audio.astype(np.float32), SAMPLE_RATE, subtype="FLOAT")
+        paths.append(path)
+    hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+
+    window = MainWindow()
+    window.show()
+    assert window.import_paths(paths)
+    finish(window)
+    document = window.document()
+    pool = document.project.media_pool
+    for media in pool:
+        document.push(
+            AddChannel(document.project, new_channel(document.project, ["#123456"]))
+        )
+        channel = document.project.channels[-1]
+        clip = Clip(
+            f"k-0000000{len(document.project.channels)}", media.id, 0, 0, media.frames
+        )
+        document.push(DropClips(document.project, channel, [clip]))
+    panel = window.timeline()
+    panel.view.axis.zoom_about(0, SCALE / panel.view.axis.scale)
+    assert panel.view.axis.scale == pytest.approx(SCALE)
+    QApplication.processEvents()
+
+    clips = [channel.clips[0] for channel in document.project.channels]
+    document.selection.select(Kind.CLIPS, clips)
+    drag(panel, at(0, 1.0), at(1, 1.5))
+    drag(panel, edge(1, clips[0].end / SECOND, -2), edge(1, 1.2, -2))
+    panel.set_playhead(round(0.8 * SECOND))
+    for text in (SPLIT, DUPLICATE, DELETE):
+        document.selection.select(
+            Kind.CLIPS, [c for ch in document.project.channels for c in ch.clips]
+        )
+        action(window, text).trigger()
+    # the import, two channels, two clips, a drag, a trim and the three verbs
+    assert len(document._stack) == 10
+    while document.undo():
+        pass
+    while document.redo():
+        pass
+    document.save_as(tmp_path / "session.3dim")
+
+    assert {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths
+    } == hashes
