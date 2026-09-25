@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from importlib import resources
 from string import Template
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 from typing import Final
 
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -327,10 +327,23 @@ def _default() -> Theme:
     across two modules — the thing D-77 put it in one place to avoid. A
     function-level absolute import is still greppable, which is what D-28
     cares about.
-    """
-    from immersive.ui.theme_io import builtin
 
-    return builtin()
+    The import runs once and the module is kept: every colour a clip, a lane
+    or a ruler paints comes through here, and an import statement on every
+    call cost more than the rest of the lookup. The module rather than its
+    `builtin`, so the function is still looked up on every call - which is
+    the route D-80 describes, and what a test replacing it relies on.
+    """
+    global _theme_io
+    if _theme_io is None:
+        from immersive.ui import theme_io
+
+        _theme_io = theme_io
+    return _theme_io.builtin()
+
+
+#: `theme_io`, once `_default` has first imported it.
+_theme_io: ModuleType | None = None
 
 
 def active() -> Theme:

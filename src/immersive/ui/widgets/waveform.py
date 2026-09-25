@@ -20,7 +20,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen
+from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from immersive.core.io.peaks import Level, Pyramid
@@ -178,26 +178,34 @@ def paint_envelope(
     lows, highs = envelope(
         pyramid, area.width(), start=start, frames=frames, columns=wanted
     )
-    lane_height = area.height() / pyramid.channels
+    # The envelope is built as an image and drawn in one call. One line per
+    # column in Python was a line call per pixel of every waveform on screen,
+    # and five hundred clips took five times a 60 Hz frame to repaint.
+    rows = area.height()
+    pixels = np.zeros((rows, len(wanted)), dtype=np.uint32)
+    row = np.arange(rows)[:, None]
+    lane_height = rows / pyramid.channels
     for channel in range(pyramid.channels):
-        top = area.top() + round(channel * lane_height)
-        bottom = area.top() + round((channel + 1) * lane_height) - 1
+        top = round(channel * lane_height)
+        bottom = round((channel + 1) * lane_height) - 1
         middle = (top + bottom) / 2
         half = (bottom - top) / 2
         if centre is not None:
             painter.setPen(centre)
             painter.drawLine(
                 area.left() + wanted.start,
-                round(middle),
+                area.top() + round(middle),
                 area.left() + wanted.stop - 1,
-                round(middle),
+                area.top() + round(middle),
             )
-        painter.setPen(fill)
         # Overs are drawn to the lane's edge and no further: a float
         # sample above full scale must not paint into the next channel.
-        high = np.clip(highs[:, channel], -1.0, 1.0)
-        low = np.clip(lows[:, channel], -1.0, 1.0)
-        for x, column in enumerate(wanted):
-            y_high = round(middle - high[x] * half)
-            y_low = round(middle - low[x] * half)
-            painter.drawLine(area.left() + column, y_high, area.left() + column, y_low)
+        high = np.round(middle - np.clip(highs[:, channel], -1.0, 1.0) * half)
+        low = np.round(middle - np.clip(lows[:, channel], -1.0, 1.0) * half)
+        pixels[(row >= high[None, :]) & (row <= low[None, :])] = fill.rgba()
+    image = QImage(
+        pixels.data, len(wanted), rows, len(wanted) * 4, QImage.Format.Format_ARGB32
+    )
+    # Unset pixels are transparent, so the zero line drawn first shows
+    # wherever the envelope does not cover it, as it did.
+    painter.drawImage(area.left() + wanted.start, area.top(), image)
