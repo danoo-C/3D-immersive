@@ -132,3 +132,26 @@ def test_the_theme_modules_import_no_qt() -> None:
         ]
 
     assert not found, "the theme system must stay headless:\n" + "\n".join(found)
+
+
+#: `ui/` modules that are arithmetic and must stay testable with no window.
+HEADLESS_UI = ("time_axis.py",)
+
+
+def test_the_timeline_arithmetic_imports_no_qt() -> None:
+    """D-94: the time axis is Qt-free, so its scroll and zoom are tested in
+    milliseconds and in the fast lane. Named as a set, as the theme modules
+    are, so the next such module is one line."""
+    found = []
+    for name in HEADLESS_UI:
+        path = PACKAGE_ROOT / "ui" / name
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found += [
+            f"ui/{name}: {imported}"
+            for imported in imported_names(tree)
+            if imported.startswith("PySide6")
+        ]
+
+    assert not found, "the timeline's arithmetic must stay headless:\n" + "\n".join(
+        found
+    )
