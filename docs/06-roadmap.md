@@ -303,8 +303,13 @@ a sample.
 ---
 
 ## M3 — Timeline
+
+Phases: [`docs/m3_timeline/`](m3_timeline/README.md)
+
 - Channels: create, rename, reorder, recolour, gain/mute/solo, bypass flag
-- `QGraphicsView` timeline with ruler, grid, playhead, loop region
+- `QGraphicsView` timeline with ruler, grid, playhead, loop region, over the
+  one shared `TimeAxis` the risk register below names — built here, where
+  its first observer is, so that M6's curve editor observes the same one
 - Drop from pool → clip; move, trim, split, duplicate, delete
 - Snap with global setting, per-channel override, and `Alt` bypass
 - Selection: multi-select across channels, rubber band, and the one-kind rule
@@ -318,6 +323,17 @@ a sample.
 - ~~`--device` and `--block` command-line flags, and the 48 kHz stream rule~~
   — moved to M2, where the first sound is (D-63). Preferences still promotes
   them at M8
+- Per-clip gain and fades (F-15), edited in the parameters pane and by a
+  handle on the clip. *Added before the milestone started*: no milestone had
+  them, and the scheduler that applies them is this one's
+- The parameters pane, for the selections this milestone introduces —
+  channel, clip, media file, and the project when nothing is selected.
+  *Added before the milestone started*: clip gain and fade shape have no
+  other editor, and M5 adds fields to a pane no milestone built
+- Implicit 32-sample edge fades in the scheduler (D-42), and the
+  zero-allocation test on `process()`. *Moved here from M4 before the
+  milestone started*: split and trim make the edges the fade exists for, and
+  the flat engine is the first code on the audio thread
 
 **Done when:** you can build an arrangement and hear it play back flat. This
 validates the whole realtime plumbing — command ring, snapshot swap, xrun
@@ -347,8 +363,10 @@ counting — *before* any HRTF complexity is layered on top.
 - The master bus: gain, and the fixed-design limiter with its lookahead
   compensated internally (D-54) — the compensation is what keeps M7's
   stems-sum test honest, since stems skip the limiter (D-41)
-- Implicit 32-sample edge fades in the scheduler (D-42)
-- The zero-allocation test on `process()`
+- ~~Implicit 32-sample edge fades in the scheduler (D-42)~~ — moved to M3,
+  where split and trim make the edges it exists for
+- The zero-allocation test on `process()`, held over the spatial path — it
+  starts at M3, on the flat one
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
 
 **Done when:** positions set numerically in a test project are audibly, correctly

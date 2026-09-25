@@ -67,7 +67,7 @@ milestone nobody has opened yet:
 | `s0_listening_spike/` | complete — the throwaway spike; got a directory like anything else |
 | `m1_core_model/` | complete |
 | `m2_media/` | **in progress** |
-| `m3_timeline/` | |
+| `m3_timeline/` | **in progress** |
 | `m4_binaural_engine/` | |
 | `m5_spatial_workspace/` | |
 | `m6_automation/` | |
