@@ -25,6 +25,7 @@ from pathlib import Path
 from immersive.core.commands import Command, UndoStack
 from immersive.core.io import project_io
 from immersive.core.model import Problem, Project
+from immersive.core.selection import Selection
 
 #: What a document is called until it has a file.
 UNTITLED = "Untitled"
@@ -38,12 +39,20 @@ class Document:
         self._stack = UndoStack(self._project)
         self._path: Path | None = None
         self._observers: list[Callable[[], None]] = []
+        #: What is selected in this project (D-96), pruned after every change
+        #: - which is also what empties it on New and Open, since nothing of
+        #: the old project is in the new one.
+        self._selection = Selection()
 
     # ------------------------------------------------------------- reading
 
     @property
     def project(self) -> Project:
         return self._project
+
+    @property
+    def selection(self) -> Selection:
+        return self._selection
 
     @property
     def path(self) -> Path | None:
@@ -158,5 +167,8 @@ class Document:
         self._changed()
 
     def _changed(self) -> None:
+        # Pruned first: a widget reading the selection during this notice
+        # must not find a clip the change has just taken away (D-96).
+        self._selection.prune(self._project)
         for callback in list(self._observers):
             callback()
