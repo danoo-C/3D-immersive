@@ -1,6 +1,7 @@
 # M3 · Phase 4 — Selection
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_4_selection.md](plans/phase_4_selection.md)
 
 ## Goal
 

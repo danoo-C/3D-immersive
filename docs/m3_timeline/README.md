@@ -14,7 +14,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [1 — The time axis, the ruler and the grid](phase_1_time_axis_and_ruler.md) | ✅ |
 | [2 — Channels](phase_2_channels.md) | ✅ |
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | ✅ |
-| [4 — Selection](phase_4_selection.md) | not started |
+| [4 — Selection](phase_4_selection.md) | in progress |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | not started |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | not started |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | not started |
