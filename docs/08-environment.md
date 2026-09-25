@@ -77,7 +77,10 @@ surface and the real launches. That is a fifth of the tests and most of the
 time, so run everything before trusting a change under `ui/`. The mark is
 enforced rather than remembered: `tests/test_markers.py` fails any test that
 reaches Qt without it, whether directly or through a helper, a fixture or an
-import.
+import. It also decides what is tidied up after a test. A `gui` test has its
+windows freed and its settings and themes wiped. Any other test is not
+tidied; instead it fails if it built the `QApplication`, left a window, or
+left a setting or a config directory behind.
 
 `QT_QPA_PLATFORM=offscreen` is set automatically by `tests/conftest.py`; it is
 shown here because you will want it for any ad-hoc Qt script on a headless

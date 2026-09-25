@@ -14,6 +14,9 @@ is how `theme.py` stays usable headless (D-81). A test reaches Qt if it, or
 a helper, class or fixture it uses, names something imported from such a
 module or imports one itself. Annotations are not uses: with postponed
 evaluation they never run.
+
+The other half is at the end: a test without the mark is not tidied up
+after, so `conftest.py` fails it if it leaves anything that needed tidying.
 """
 
 from __future__ import annotations
@@ -23,7 +26,10 @@ from collections.abc import Iterator
 from functools import cache
 from pathlib import Path
 
+import pytest
+
 import immersive
+from conftest import left_behind, tidied
 
 PACKAGE_ROOT = Path(immersive.__file__).parent
 TESTS = Path(__file__).parent
@@ -64,7 +70,7 @@ def imports_that_run(node: ast.AST) -> Iterator[Imports]:
             yield from imports_that_run(child)
 
 
-def loaded(node: Imports, known: set[str] | frozenset[str]) -> list[str]:
+def loaded(node: Imports, known: frozenset[str]) -> list[str]:
     """The modules one import statement loads, packages included."""
     if isinstance(node, ast.Import):
         names = [alias.name for alias in node.names]
@@ -408,3 +414,109 @@ def test_a_module_mark_covers_every_test() -> None:
     assert marked != SAMPLE
 
     assert unmarked_tests_that_reach_qt(marked, {"qt_thing"}) == []
+
+
+# --------------------------------------------------------------------------- #
+# a test without the mark is not tidied up after, so it must leave nothing
+# --------------------------------------------------------------------------- #
+
+TIDIERS = {"_no_window_outlives_its_test", "_empty_config"}
+
+
+@pytest.mark.gui
+def test_a_gui_test_is_tidied_up_after(request: pytest.FixtureRequest) -> None:
+    assert set(request.fixturenames) >= TIDIERS
+
+
+def test_any_other_test_is_not(request: pytest.FixtureRequest) -> None:
+    assert not set(request.fixturenames) & TIDIERS
+
+
+def config_location() -> Path:
+    from PySide6.QtCore import QStandardPaths
+
+    return Path(
+        QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppConfigLocation
+        )
+    )
+
+
+@pytest.mark.gui
+def test_a_setting_left_behind_fails_the_test_that_left_it(
+    request: pytest.FixtureRequest,
+) -> None:
+    """Driven as the fixture drives it for a test without the mark. This test
+    has the mark, so what it leaves is tidied up after it."""
+    from PySide6.QtCore import QSettings
+
+    check = tidied(request, marked=False)
+    next(check)
+    QSettings().setValue("left/by", "a test")
+
+    with pytest.raises(AssertionError) as failed:
+        next(check)
+
+    assert request.node.nodeid in str(failed.value), "names who left it"
+    assert "left behind settings - mark it gui" in str(failed.value)
+
+
+@pytest.mark.gui
+def test_a_test_that_built_the_application_is_named(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In this process the application was built long ago, so the check is
+    started with it hidden - as a first test in a fast-lane run would see."""
+    from PySide6.QtCore import QCoreApplication
+
+    from immersive.app import build_application
+
+    build_application([])
+    with monkeypatch.context() as hidden:
+        hidden.setattr(QCoreApplication, "instance", staticmethod(lambda: None))
+        check = tidied(request, marked=False)
+        next(check)
+
+    with pytest.raises(AssertionError, match="left behind a QApplication - "):
+        next(check)
+
+
+@pytest.mark.gui
+def test_a_test_that_leaves_nothing_passes(request: pytest.FixtureRequest) -> None:
+    from PySide6.QtWidgets import QWidget
+
+    from immersive.app import build_application
+
+    build_application([])
+    there_before = QWidget()
+    check = tidied(request, marked=False)
+    next(check)
+
+    with pytest.raises(StopIteration):
+        next(check)
+    del there_before
+
+
+@pytest.mark.gui
+def test_each_thing_a_test_can_leave_is_found() -> None:
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QWidget
+
+    from immersive.app import build_application
+
+    build_application([])
+    assert left_behind(True, set()) == [], "a gui test starts from nothing"
+
+    assert left_behind(False, set()) == ["a QApplication"]
+
+    window = QWidget()
+    assert left_behind(True, set()) == ["1 window"]
+    assert left_behind(True, {window}) == [], "a window from before is not its"
+    del window
+
+    QSettings().setValue("left/by", "a test")
+    assert left_behind(True, set()) == ["settings"]
+    QSettings().clear()
+
+    (config_location() / "themes").mkdir(parents=True)
+    assert left_behind(True, set()) == [f"a directory in {config_location()}"]

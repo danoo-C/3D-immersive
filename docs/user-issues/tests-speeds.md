@@ -1,6 +1,7 @@
 # Test speed — plan
 
-**Status:** steps 1–2 done, 3–6 proposed · **Written:** 2026-09-24 ·
+**Status:** steps 1–6 done; CI's parallel runs and *Keeping it fast* still
+open · **Written:** 2026-09-24 ·
 **Measured at:** `d005e34` on `m2-media`, WSL2, 12 logical CPUs, Python 3.13
 
 ## Progress
@@ -15,6 +16,27 @@ Both measured after landing, three parallel runs in a row, all green. The
 commands now live in [08-environment.md](../08-environment.md)'s *Checks*
 and the sweep practice in [09-workflow.md](../09-workflow.md); this document
 keeps only the argument and the remaining steps.
+
+Steps 3–6 were measured on 2026-09-25, on the same machine. The machine was
+faster that day, so these numbers compare with each other and not with the
+table above. Each step's tree ran against the same source, in rotation,
+four rounds per column; medians:
+
+| After | Serial | Parallel (8, `worksteal`) | Fast lane |
+|---|---|---|---|
+| Step 2 | 10.90 s | 4.67 s | 3.94 s |
+| ~~Step 3~~ | 10.74 s | 4.86 s | 3.89 s |
+| ~~Step 4~~ | 10.38 s | 4.72 s | 3.94 s |
+| ~~Step 5~~ | 10.63 s | 4.58 s | 3.50 s |
+| ~~Step 6~~ | **10.06 s** | 4.84 s | **3.36 s** |
+
+The serial and parallel columns move by up to two seconds between runs of
+the same tree, which is more than any one of these steps saves, so the rows
+in between are not each step's effect. Those effects were measured on the
+tests themselves and are recorded under each step. The fast lane is steadier:
+steps 5 and 6 show in it as 0.44 s and 0.14 s, matching what was measured
+per test. The parallel run did not move, because it is bound by each
+worker's startup, as step 2 found.
 
 This document owns one thing: the plan for making the test suite faster, and
 the measurements it is argued from. It is not part of the numbered canon. What
@@ -238,19 +260,34 @@ unchanged, and why is below.
 - [x] The thousand-edit test and the fresh-interpreter tests stay as they
       are: what makes them slow is what they test.
 
-### 6. Narrow the per-test fixtures to the tests that need them
+### ~~6. Narrow the per-test fixtures to the tests that need them~~ — done
 
 Two autouse fixtures run around *every* test: `_empty_config` empties
 settings and the config directory, and `_no_window_outlives_its_test` frees
 widgets. For the 877 headless tests that is about 1 ms each, **about 0.9 s**,
-spent tidying things they never touch.
+spent tidying things they never touch. *It was about a quarter of that.
+Measured one at a time, the two wipes cost 0.13 ms and pytest spends about
+0.05 ms on each autouse fixture, so about 0.23 ms for each headless test and
+0.2 s in all. Step 6 saved about 0.14 s of it, measured in the fast lane.*
 
-- [ ] Both apply only to tests marked `gui`, which step 3 makes safe to rely
+- [x] Both apply only to tests marked `gui`, which step 3 makes safe to rely
       on. The session-scoped redirect of the home directory stays for
       everything: it is a guard against accidents, and accidents are not
-      marked.
-- [ ] Last, because it is the smallest saving and the only step that relaxes
-      an isolation guarantee.
+      marked. *A single autouse fixture, `_tidied_as_marked`, asks for the
+      two by name when the test is marked. For any other test it checks
+      what they would have cleared, which costs about a third as much: a
+      test without the mark fails at teardown, naming itself, if it built
+      the `QApplication`, left a window, or left a setting or a config
+      directory behind.*
+- [x] Last, because it is the smallest saving and the only step that relaxes
+      an isolation guarantee. *Smaller than estimated, as above. It no
+      longer relaxes the guarantee, either. The guarantee used to be enforced
+      by cleaning up after every test; now it is enforced by failing the one
+      test that would have needed cleaning, which also says which test that
+      was. Eleven mutations, all killed: tidying for every test and for
+      none, each tidier dropped, each of the four checks dropped, windows
+      from before counted as the test's, the check made but not asserted,
+      and the application always taken as already there.*
 
 ## What this adds up to
 
@@ -259,9 +296,18 @@ spent tidying things they never touch.
 | Before this plan | 15.5 s | — | 4.1 s |
 | After steps 1–2 | **11.3 s** *(measured)* | **5.3 s** *(measured)* | 4.1 s |
 | After steps 1–6 | ~10.5 s *(estimated)* | ~5 s *(estimated)* | ~3 s *(estimated)* |
+| After steps 1–6, measured | about 8 % below step 2 | unchanged | **15 % below step 2** |
 
 The largest single saving is already known: step 2 plus step 1 take the full
 suite from 15.5 s to under 6 s, and nothing in either weakens a test.
+
+*Measured against step 2 on the same day, as tabled at the top: serial 10.90
+→ 10.06 s, fast lane 3.94 → 3.36 s. The parallel run, which is how the whole
+suite is actually run, did not move. Steps 3–6 were worth less time than
+estimated, and more in other ways. Step 3 found a test that had always run
+in the fast lane while building a `QApplication`. Step 4 made four tests
+deterministic. Step 6 fails a test that leaves Qt state behind, and names
+it, where the old fixtures would have quietly cleaned up after it.*
 
 ## Keeping it fast
 

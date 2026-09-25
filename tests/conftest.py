@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterator, Set
 from pathlib import Path
 
 import pytest
@@ -137,8 +137,90 @@ def _nothing_waits_for_a_person() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _tidied_as_marked(request: pytest.FixtureRequest) -> Iterator[None]:
+    """A `gui` test is tidied up after; any other test must need no tidying.
+
+    The two fixtures below undo what Qt leaves behind - windows, remembered
+    settings, installed themes - and until tests-speeds step 6 they ran
+    around every test. Four tests in five never touch Qt, so that was time
+    spent tidying nothing, and they now run only for tests marked `gui`.
+    `test_markers.py` is what makes the mark something to rely on.
+
+    What that gives up is checked instead of assumed. A test without the mark
+    fails at teardown if it built the `QApplication`, left a window alive,
+    or left a setting or a directory in the config location - each of which
+    would otherwise leak into whichever test ran next in that process, with
+    nothing to say where it came from. Checking costs a fraction of wiping,
+    and it names the test that did it.
+
+    The body is `tidied`, so that `test_markers.py` can drive it both ways.
+    """
+    yield from tidied(
+        request, marked=request.node.get_closest_marker("gui") is not None
+    )
+
+
+def tidied(request: pytest.FixtureRequest, *, marked: bool) -> Iterator[None]:
+    """The fixture above, as a generator a test can drive with either answer.
+
+    A marked test gets the two fixtures below through `getfixturevalue`
+    rather than as parameters, which would run them for every test. Asked
+    for in this order, they tear down in the reverse - settings first, then
+    windows - as they did when both were autouse.
+    """
+    from PySide6.QtCore import QCoreApplication
+    from PySide6.QtWidgets import QApplication
+
+    if marked:
+        request.getfixturevalue("_no_window_outlives_its_test")
+        request.getfixturevalue("_empty_config")
+        yield
+        return
+
+    instance = QCoreApplication.instance()
+    windows = (
+        set(QApplication.topLevelWidgets())
+        if isinstance(instance, QApplication)
+        else set()
+    )
+    yield
+    left = left_behind(instance is not None, windows)
+    assert not left, (
+        f"{request.node.nodeid} is not marked gui, and left behind "
+        + ", ".join(left)
+        + " - mark it gui, so it is tidied up after"
+    )
+
+
+def left_behind(had_application: bool, windows: Set[object]) -> list[str]:
+    """What a test that needs no Qt must not leave: exactly what the two
+    fixtures below would otherwise have cleared."""
+    from PySide6.QtCore import QCoreApplication, QSettings, QStandardPaths
+    from PySide6.QtWidgets import QApplication
+
+    found = []
+    instance = QCoreApplication.instance()
+    if instance is not None and not had_application:
+        found.append("a QApplication")
+    if isinstance(instance, QApplication):
+        alive = [w for w in QApplication.topLevelWidgets() if w not in windows]
+        if alive:
+            found.append(f"{len(alive)} window{'s' if len(alive) != 1 else ''}")
+    if QSettings().allKeys():
+        found.append("settings")
+    base = Path(
+        QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppConfigLocation
+        )
+    )
+    if base.is_dir() and any(child.is_dir() for child in base.iterdir()):
+        found.append(f"a directory in {base}")
+    return found
+
+
+@pytest.fixture
 def _no_window_outlives_its_test() -> Iterator[None]:
-    """Every parentless widget a test made is gone before the next test.
+    """Every parentless widget a `gui` test made is gone before the next test.
 
     `deleteLater()` only deletes when the event loop next turns, and nothing
     in a test turns it, so windows piled up for the whole session. That is
@@ -162,9 +244,9 @@ def _no_window_outlives_its_test() -> Iterator[None]:
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _empty_config() -> Iterator[None]:
-    """Every test starts with nothing remembered and no themes installed.
+    """Every `gui` test starts with nothing remembered and no themes installed.
 
     One config location is shared by the whole session (see above), so
     without this a test inherits whatever its predecessor chose or dropped
