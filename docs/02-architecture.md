@@ -83,6 +83,8 @@ src/immersive/
     theme.py             palette + qss
     theme_io.py          .3dimtheme parse, merge, report (D-77, M9)
     theme_menu.py        theme directory, View > Theme, persistence (M9)
+    time_axis.py         scroll and zoom, shared by the timeline and the curve
+                         editor, owned by neither - no Qt (D-94, M3)
     notices.py           the notice model - no Qt, so theme_io may use it (D-81)
     importer.py          preparing samples on workers (N-3, M2)
     explorer/            media pool tree (top) + params pane (bottom)

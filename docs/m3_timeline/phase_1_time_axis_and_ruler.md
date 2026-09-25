@@ -1,6 +1,7 @@
 # M3 · Phase 1 — The time axis, the ruler and the grid
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_1_time_axis_and_ruler.md](plans/phase_1_time_axis_and_ruler.md)
 
 ## Goal
 
