@@ -57,7 +57,7 @@ CHANNEL: Final = "channel"
 #: such call. Either way the rule is the same one: no group key that nothing
 #: reads, because a role that looks themeable and is not fails silently for
 #: whoever changes it.
-PAINTED: Final = frozenset({"waveform", "timeline"})
+PAINTED: Final = frozenset({"waveform", "timeline", "ruler"})
 
 
 # --------------------------------------------------------------------------- #

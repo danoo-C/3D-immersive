@@ -11,14 +11,17 @@ from dataclasses import replace
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QImage, QWheelEvent
+from PySide6.QtGui import QAction, QImage, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
 from immersive.core.document import Document
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme, theme_io
+from immersive.ui.main_window import MainWindow
 from immersive.ui.time_axis import TimeAxis
+from immersive.ui.timeline.grid import Unit
+from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.timeline.view import SCROLL_STEP, ZOOM_STEP, TimelineView
 
 pytestmark = pytest.mark.gui
@@ -119,18 +122,22 @@ def test_division_lines_follow_the_snap_setting() -> None:
     assert colour("grid.division") not in row(grabbed(off))
 
 
-def test_a_theme_change_repaints_every_colour() -> None:
-    view, _ = viewed(snapping=True)
-    before = row(grabbed(view))
+def loud() -> theme.Theme:
+    """The built-in with every token a colour unlike any other."""
     builtin = theme_io.builtin()
-    loud = replace(
+    return replace(
         builtin,
         tokens={
             name: "#" + "".join(f"{(n * k + c) % 256:02X}" for k, c in SPREAD)
             for n, name in enumerate(sorted(builtin.tokens))
         },
     )
-    theme.use(loud)
+
+
+def test_a_theme_change_repaints_every_colour() -> None:
+    view, _ = viewed(snapping=True)
+    before = row(grabbed(view))
+    theme.use(loud())
 
     view.retheme()
 
@@ -218,3 +225,139 @@ def test_the_wheel_alone_leaves_time_where_it_is() -> None:
     wheel(view, 300, dy=-120)
 
     assert (view.axis.offset, view.axis.scale) == (1000, SCALE)
+
+
+# --------------------------------------------------------------------------- #
+# the ruler and the playhead
+# --------------------------------------------------------------------------- #
+
+
+def paneled(scale: float = SCALE) -> TimelinePanel:
+    document = Document()
+    document.project.snap.enabled = False
+    panel = TimelinePanel(document, TimeAxis(scale))
+    panel.resize(WIDTH, HEIGHT + 60)
+    panel.show()
+    return panel
+
+
+def click(panel: TimelinePanel, x: float) -> None:
+    point = QPointF(x, 5)
+    event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        point,
+        panel.ruler.mapToGlobal(point),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(panel.ruler, event)
+
+
+def column(image: QImage, x: int) -> set[str]:
+    return {image.pixelColor(x, y).name().upper() for y in range(image.height())}
+
+
+def test_clicking_the_ruler_puts_the_playhead_under_the_click() -> None:
+    panel = paneled()
+    panel.axis.scroll_to(500)
+
+    click(panel, 123)
+
+    assert panel.playhead() == round(panel.axis.sample_at(123))
+    assert panel.playhead() == (500 + 123) * SCALE
+
+
+def test_the_playhead_is_drawn_in_both_widgets() -> None:
+    panel = paneled()
+    click(panel, 300)
+    playhead = colour("playhead")
+
+    assert at(grabbed(panel.view), 300) == playhead
+    assert playhead in column(panel.ruler.grab().toImage(), 300)
+    assert playhead not in column(panel.ruler.grab().toImage(), 250)
+
+
+def test_the_playhead_is_drawn_over_the_grid() -> None:
+    panel = paneled()
+    click(panel, 2 * BAR_PX)  # exactly on a bar line
+
+    assert at(grabbed(panel.view), 2 * BAR_PX) == colour("playhead")
+
+
+def test_switching_the_unit_changes_the_labels_and_not_the_grid() -> None:
+    panel = paneled()
+    lanes, labels = grabbed(panel.view), panel.ruler.grab().toImage()
+
+    panel.set_unit(Unit.TIME)
+
+    assert grabbed(panel.view) == lanes
+    assert panel.ruler.grab().toImage() != labels
+
+
+def test_the_ruler_draws_its_group() -> None:
+    panel = paneled()
+    image = panel.ruler.grab().toImage()
+    drawn = {
+        image.pixelColor(x, y).name().upper()
+        for x in range(image.width())
+        for y in range(image.height())
+    }
+    for key in ("background", "tick", "text"):
+        assert theme.group_color("ruler", key).upper() in drawn, key
+
+
+# --------------------------------------------------------------------------- #
+# in the window
+# --------------------------------------------------------------------------- #
+
+
+def test_the_window_has_the_timeline_in_place_of_its_placeholder() -> None:
+    window = MainWindow()
+    assert isinstance(window.timeline(), TimelinePanel)
+    assert window.timeline().axis is window.timeline().view.axis
+
+
+def test_the_ruler_units_are_one_checked_pair_in_the_view_menu() -> None:
+    window = MainWindow()
+    actions = {
+        action.text().replace("&", ""): action
+        for action in window.findChildren(QAction)
+        if action.text().startswith("Ruler")
+    }
+    bars, time = actions["Ruler: Bars / Beats"], actions["Ruler: Minutes / Seconds"]
+    assert bars.isEnabled() and time.isEnabled()
+    assert "M3" not in bars.toolTip() + time.toolTip()
+    assert bars.isChecked() and not time.isChecked()
+
+    time.trigger()
+
+    assert window.timeline().unit() is Unit.TIME
+    assert time.isChecked() and not bars.isChecked()
+
+
+def everything(image: QImage) -> set[str]:
+    return {
+        image.pixelColor(x, y).name().upper()
+        for x in range(image.width())
+        for y in range(image.height())
+    }
+
+
+def test_a_theme_switch_in_the_window_repaints_the_ruler_and_the_lanes() -> None:
+    """Through D-82's walk, and without the panel being built again."""
+    window = MainWindow()
+    window.resize(1500, 950)
+    window.show()
+    timeline = window.timeline()
+    before = everything(timeline.ruler.grab().toImage()) | everything(
+        grabbed(timeline.view)
+    )
+
+    window.apply_theme(loud())
+
+    assert window.timeline() is timeline
+    after = everything(timeline.ruler.grab().toImage()) | everything(
+        grabbed(timeline.view)
+    )
+    assert not before & after

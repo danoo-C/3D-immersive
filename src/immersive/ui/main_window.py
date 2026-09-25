@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QMouseEvent
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -45,6 +45,9 @@ from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
 from immersive.ui.theme_menu import ThemeMenu
+from immersive.ui.time_axis import TimeAxis
+from immersive.ui.timeline.grid import Unit
+from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.placeholder import Placeholder
 
@@ -171,6 +174,10 @@ class MainWindow(QMainWindow):
         #: time it finishes means the person opened another, and the samples
         #: must not land in it.
         self._importing_into: Project | None = None
+        #: Which span of the timeline is on show, and at what zoom (D-94).
+        #: Held here rather than by the timeline, because the curve editor at
+        #: M6 observes the same one and neither panel may own it.
+        self._axis = TimeAxis()
         #: Widgets that paint themselves from a token, and the token they use.
         #: Kept so a theme change can ask for the colour again (D-82).
         self._chips: list[tuple[QLabel, str]] = []
@@ -242,8 +249,19 @@ class MainWindow(QMainWindow):
         self._add(view_menu, "Focus &Front View", "2", arrives=_M5)
         self._add(view_menu, "Focus &3D View", "3", arrives=_M5)
         view_menu.addSeparator()
-        self._add(view_menu, "Ruler: &Bars / Beats", arrives=_M3)
-        self._add(view_menu, "Ruler: &Minutes / Seconds", arrives=_M3)
+        # One checked pair: the ruler counts in one unit at a time (F-19).
+        self._ruler_units = QActionGroup(self)
+        for text, unit in (
+            ("Ruler: &Bars / Beats", Unit.BARS),
+            ("Ruler: &Minutes / Seconds", Unit.TIME),
+        ):
+            action = self._add(view_menu, text)
+            action.setCheckable(True)
+            action.setChecked(unit is Unit.BARS)
+            self._ruler_units.addAction(action)
+            action.triggered.connect(
+                lambda _checked=False, unit=unit: self._timeline.set_unit(unit)
+            )
         view_menu.addSeparator()
         # M8 promotes this into Preferences; the menu is what M9 ships
         # (F-48). It lives under View because it changes how things look,
@@ -451,7 +469,8 @@ class MainWindow(QMainWindow):
 
         root = QSplitter(Qt.Orientation.Vertical)
         root.addWidget(upper)
-        root.addWidget(Placeholder("Timeline", "channels, clips, ruler, playhead"))
+        self._timeline = TimelinePanel(self._document, self._axis)
+        root.addWidget(self._timeline)
         root.setSizes([950 - _TIMELINE_H, _TIMELINE_H])
         root.setStretchFactor(0, 1)
 
@@ -573,6 +592,9 @@ class MainWindow(QMainWindow):
 
     def _report_audio_problem(self, message: str) -> None:
         self._notices.add(Severity.WARN, message)
+
+    def timeline(self) -> TimelinePanel:
+        return self._timeline
 
     def pool(self) -> MediaPool:
         return self._pool

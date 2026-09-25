@@ -52,6 +52,11 @@
       "background": "surface.panel",
       "text": "text.primary"
     },
+    "ruler": {
+      "background": "surface.raised",
+      "text": "text.secondary",
+      "tick": "text.disabled"
+    },
     "scrollbar": {
       "background": "surface.panel",
       "handle": "surface.hover",
@@ -81,7 +86,8 @@
       "background": "surface.panel",
       "grid": "border",
       "grid.beat": "surface.hover",
-      "grid.division": "surface.raised"
+      "grid.division": "surface.raised",
+      "playhead": "accent"
     },
     "toolbar": {
       "background": "surface.raised",

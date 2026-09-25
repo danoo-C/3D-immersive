@@ -637,7 +637,6 @@ def test_the_example_only_reports_groups_no_milestone_has_built_yet() -> None:
     problems = theme_io.loads(spec_example()).problems
 
     assert [problem.where for problem in problems] == [
-        "groups.timeline.playhead",
         "groups.timeline.loop.region",
         "groups.clip",
     ]

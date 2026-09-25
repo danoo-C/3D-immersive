@@ -51,6 +51,7 @@ class TimelineView(QGraphicsView):
         #: Set while the axis is being written into the scrollbar, so the
         #: scrollbar's own signal does not write it back.
         self._syncing = False
+        self._playhead = 0
 
         self.setScene(QGraphicsScene(self))
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -67,6 +68,11 @@ class TimelineView(QGraphicsView):
     @property
     def axis(self) -> TimeAxis:
         return self._axis
+
+    def set_playhead(self, sample: int) -> None:
+        """Where to draw the playhead. The panel decides where it is."""
+        self._playhead = sample
+        self.viewport().update()
 
     def retheme(self) -> None:
         """Nothing is baked in - colours are read when it paints - so repaint."""
@@ -145,3 +151,11 @@ class TimelineView(QGraphicsView):
             x = round(line.sample / scale)
             painter.setPen(pens[line.level])
             painter.drawLine(x, top, x, bottom)
+
+    def drawForeground(self, painter: QPainter, exposed: QRectF | QRect) -> None:
+        """The playhead, over everything the scene holds (04, *Timeline*)."""
+        rect = QRectF(exposed)
+        x = round(self._playhead / self._axis.scale)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(QColor(theme.group_color("timeline", "playhead")))
+        painter.drawLine(x, int(rect.top()) - 1, x, int(rect.bottom()) + 1)
