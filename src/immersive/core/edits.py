@@ -13,11 +13,13 @@ from __future__ import annotations
 import bisect
 from collections.abc import Sequence
 from dataclasses import fields, is_dataclass, replace
+from enum import StrEnum
 from typing import Any, TypeVar
 
 from immersive.core.commands import Command
 from immersive.core.model import (
     CLIP_PREFIX,
+    MIN_CLIP_LENGTH,
     Channel,
     Clip,
     Fade,
@@ -163,79 +165,328 @@ def _remaining(
     return pieces
 
 
-class DropClips(Command):
+def _settle(
+    existing: Sequence[Clip],
+    incoming: Sequence[tuple[Clip, _Placing]],
+    taken: set[str],
+) -> tuple[list[Clip], dict[int, tuple[Clip, _Placing]]]:
+    """A channel holding `existing` once `incoming` land at their placings,
+    and every overlap they make settled (D-95).
+
+    Each clip already there loses whatever the incoming ones cover: covered
+    entirely it is left out, overlapped at one end it is trimmed, and
+    reaching past both ends it is split, its head kept and a new clip minted
+    for its tail - placed at once, since nothing else holds it yet. A part
+    that loses its clip's start or end loses the fade that was there, and
+    every part still plays the samples it played before.
+
+    Returns the channel's clips as they will stand, sorted, and the new
+    placing of every existing clip that changes.
+    """
+    cuts = sorted((placing[0], placing[0] + placing[2]) for _, placing in incoming)
+    starts = {id(clip): placing[0] for clip, placing in incoming}
+    changed: dict[int, tuple[Clip, _Placing]] = {}
+    after: list[Clip] = [clip for clip, _ in incoming]
+    for clip in existing:
+        parts = _remaining(clip.start, clip.end, cuts)
+        if parts == [(clip.start, clip.end)]:
+            after.append(clip)
+            starts[id(clip)] = clip.start
+            continue
+        for index, (start, end) in enumerate(parts):
+            placing = _piece(clip, start, end)
+            if index == 0:
+                changed[id(clip)] = (clip, placing)
+                piece = clip
+            else:
+                piece = replace(clip, id=mint_id(CLIP_PREFIX, taken))
+                taken.add(piece.id)
+                _place(piece, placing)
+            after.append(piece)
+            starts[id(piece)] = start
+    return sorted(after, key=lambda clip: starts[id(clip)]), changed
+
+
+def _piece(of: Clip, start: int, end: int) -> _Placing:
+    """The part `[start, end)` of `of`, playing the samples it played there,
+    with each fade kept only where its edge is, and cut to fit."""
+    length = end - start
+    fade_in = (
+        replace(of.fade_in, length=min(of.fade_in.length, length))
+        if start == of.start
+        else Fade()
+    )
+    fade_out = (
+        replace(of.fade_out, length=min(of.fade_out.length, length))
+        if end == of.end
+        else Fade()
+    )
+    return (start, of.offset + (start - of.start), length, fade_in, fade_out)
+
+
+def _home(project: Project, clip: Clip) -> Channel:
+    """The channel holding `clip`, found by identity."""
+    for channel in project.channels:
+        if any(held is clip for held in channel.clips):
+            return channel
+    raise ValueError(f"{clip.id} is not on any channel of this project")
+
+
+class _Rearrangement(Command):
+    """Channels' clip lists, and clips' placings, as they were and as they
+    will be - worked out by a subclass at construction, applied whole.
+
+    So `do()` and `undo()` only apply one set or the other, and Redo applies
+    exactly what the first `do()` did.
+    """
+
+    def __init__(self) -> None:
+        self._lists: list[tuple[Channel, list[Clip], list[Clip]]] = []
+        self._placings: list[tuple[Clip, _Placing, _Placing]] = []
+
+    def _list(self, channel: Channel, after: list[Clip]) -> None:
+        self._lists.append((channel, list(channel.clips), after))
+
+    def _placing(self, clip: Clip, after: _Placing) -> None:
+        self._placings.append((clip, _placing(clip), after))
+
+    @property
+    def changes(self) -> bool:
+        """Whether doing it would change anything at all."""
+        return any(before != after for _, before, after in self._placings) or any(
+            [id(c) for c in before] != [id(c) for c in after]
+            for _, before, after in self._lists
+        )
+
+    def do(self) -> None:
+        for clip, _, after in self._placings:
+            _place(clip, after)
+        for channel, _, clips in self._lists:
+            channel.clips[:] = clips
+
+    def undo(self) -> None:
+        for clip, before, _ in self._placings:
+            _place(clip, before)
+        for channel, clips, _ in self._lists:
+            channel.clips[:] = clips
+
+
+class DropClips(_Rearrangement):
     """Put `clips` on `channel`, and settle every overlap they make (D-95).
 
     Clips on a channel never overlap (03, *Rules*), so a drop makes room for
-    itself. Each clip already there loses whatever the drop covers: covered
-    entirely it is removed, overlapped at one end it is trimmed, and reaching
-    past both ends of the drop it is split, its head kept and a new clip
-    minted for its tail. A part that loses its clip's start or end loses the
-    fade that was there. Every part still plays the samples it played before
-    - its offset moves with its start.
-
-    All of it is worked out here, against the channel as it stands, so `do()`
-    and `undo()` only apply one list of placements or the other, and Redo
-    applies exactly what the first `do()` did.
+    itself, as `_settle` says.
     """
 
     def __init__(
         self, project: Project, channel: Channel, clips: Sequence[Clip]
     ) -> None:
-        self.channel = channel
-        self.before = list(channel.clips)
-        self.placed_before = {id(clip): _placing(clip) for clip in channel.clips}
-
-        cuts = sorted((clip.start, clip.end) for clip in clips)
+        super().__init__()
         taken = all_ids(project) | {clip.id for clip in clips}
-        self.placed_after: dict[int, _Placing] = {}
-        after: list[Clip] = list(clips)
-        for existing in channel.clips:
-            parts = _remaining(existing.start, existing.end, cuts)
-            if parts == [(existing.start, existing.end)]:
-                after.append(existing)
+        after, changed = _settle(
+            channel.clips, [(clip, _placing(clip)) for clip in clips], taken
+        )
+        self._list(channel, after)
+        for clip, placing in changed.values():
+            self._placing(clip, placing)
+
+
+class MoveClips(_Rearrangement):
+    """Move `clips` by `delta` samples and `lanes` channels, together (D-97).
+
+    Every clip goes by the same offset, so the selection keeps its shape;
+    the offsets stop, for all of them at once, where the first clip would
+    pass the timeline's start or a clip would pass the first or last lane.
+    The moved clips are lifted first, so none trims itself or another of
+    them, and then land as a drop does, overwriting what they cover.
+
+    `delta` and `lanes` are what is left after that stopping, and
+    `placed()` is where each clip lands - what a drag draws while it lasts.
+    """
+
+    def __init__(
+        self, project: Project, clips: Sequence[Clip], delta: int, lanes: int = 0
+    ) -> None:
+        super().__init__()
+        channels = project.channels
+        homes = [_index_of(channels, _home(project, clip)) for clip in clips]
+        if clips:
+            delta = max(delta, -min(clip.start for clip in clips))
+            lanes = max(lanes, -min(homes))
+            lanes = min(lanes, len(channels) - 1 - max(homes))
+        self.delta, self.lanes = delta, lanes
+        self._placed = [
+            (clip, home + lanes, clip.start + delta)
+            for clip, home in zip(clips, homes, strict=True)
+        ]
+
+        moving = {id(clip) for clip in clips}
+        arriving: dict[int, list[tuple[Clip, _Placing]]] = {}
+        for clip, lane, start in self._placed:
+            placing = (start, clip.offset, clip.length, clip.fade_in, clip.fade_out)
+            arriving.setdefault(lane, []).append((clip, placing))
+            self._placing(clip, placing)
+        taken = all_ids(project)
+        for lane in sorted(set(homes) | set(arriving)):
+            channel = channels[lane]
+            staying = [clip for clip in channel.clips if id(clip) not in moving]
+            after, changed = _settle(staying, arriving.get(lane, []), taken)
+            self._list(channel, after)
+            for clip, placing in changed.values():
+                self._placing(clip, placing)
+
+    def placed(self) -> list[tuple[Clip, int, int]]:
+        """Each clip, the lane it lands in, and the sample it starts at."""
+        return list(self._placed)
+
+
+class Edge(StrEnum):
+    """Which end of a clip a trim moves."""
+
+    START = "start"
+    END = "end"
+
+
+def trimmed(project: Project, clip: Clip, edge: Edge, delta: int) -> _Placing:
+    """`clip` with its `edge` moved `delta` samples, as far as it can go
+    (D-98): no further than its sample reaches, than the next clip on its
+    channel, or than the timeline's start, and no shorter than
+    `MIN_CLIP_LENGTH` - or than it already is, if a file made it shorter.
+
+    Moving the start moves the offset with it, so what is left plays the
+    samples it played. A fade stays with its edge, cut to fit.
+    """
+    channel = _home(project, clip)
+    index = _index_of(channel.clips, clip)
+    shortest = min(MIN_CLIP_LENGTH, clip.length)
+    frames = next(
+        (m.frames for m in project.media_pool if m.id == clip.media_id),
+        clip.offset + clip.length,
+    )
+    if edge is Edge.END:
+        following = channel.clips[index + 1 :]
+        limit = following[0].start if following else None
+        longest = frames - clip.offset
+        if limit is not None:
+            longest = min(longest, limit - clip.start)
+        length = min(max(clip.length + delta, shortest), longest)
+        return _piece_to(clip, clip.start, length)
+    floor = max(-clip.offset, -clip.start)
+    if index > 0:
+        floor = max(floor, channel.clips[index - 1].end - clip.start)
+    delta = min(max(delta, floor), clip.length - shortest)
+    return _piece_to(clip, clip.start + delta, clip.length - delta)
+
+
+def _piece_to(of: Clip, start: int, length: int) -> _Placing:
+    """`of` running from `start` for `length`, its offset following its start
+    and its fades kept on their edges, cut to fit."""
+    return (
+        start,
+        of.offset + (start - of.start),
+        length,
+        replace(of.fade_in, length=min(of.fade_in.length, length)),
+        replace(of.fade_out, length=min(of.fade_out.length, length)),
+    )
+
+
+class TrimClips(_Rearrangement):
+    """Move the same edge of every one of `clips` by `delta`, each as far as
+    it can go (D-98). One command however many clips."""
+
+    def __init__(
+        self, project: Project, clips: Sequence[Clip], edge: Edge, delta: int
+    ) -> None:
+        super().__init__()
+        for clip in clips:
+            self._placing(clip, trimmed(project, clip, edge, delta))
+
+    def trims(self) -> list[tuple[Clip, int, int, int]]:
+        """Each clip, and the start, offset and length it will have."""
+        return [
+            (clip, after[0], after[1], after[2]) for clip, _, after in self._placings
+        ]
+
+
+class SplitClips(_Rearrangement):
+    """Split every one of `clips` that `at` is inside into two, where both
+    parts are at least `MIN_CLIP_LENGTH`; the rest are left alone.
+
+    The head keeps the clip and its fade in, the tail is a new clip with the
+    fade out, and together they play exactly the samples the clip played.
+    """
+
+    def __init__(self, project: Project, clips: Sequence[Clip], at: int) -> None:
+        super().__init__()
+        taken = all_ids(project)
+        self.tails: list[Clip] = []
+        by_channel: dict[int, tuple[Channel, list[tuple[Clip, Clip]]]] = {}
+        for clip in clips:
+            if not (clip.start + MIN_CLIP_LENGTH <= at <= clip.end - MIN_CLIP_LENGTH):
                 continue
-            for index, (start, end) in enumerate(parts):
-                piece = (
-                    existing
-                    if index == 0
-                    else replace(existing, id=mint_id(CLIP_PREFIX, taken))
+            tail = replace(clip, id=mint_id(CLIP_PREFIX, taken))
+            taken.add(tail.id)
+            _place(tail, _piece(clip, at, clip.end))
+            self._placing(clip, _piece(clip, clip.start, at))
+            self.tails.append(tail)
+            channel = _home(project, clip)
+            by_channel.setdefault(id(channel), (channel, []))[1].append((clip, tail))
+        for channel, pairs in by_channel.values():
+            tails = {id(head): tail for head, tail in pairs}
+            after: list[Clip] = []
+            for clip in channel.clips:
+                after.append(clip)
+                if id(clip) in tails:
+                    after.append(tails[id(clip)])
+            self._list(channel, after)
+
+
+class DuplicateClips(_Rearrangement):
+    """A copy of every one of `clips`, just after them all: each copy on its
+    own clip's channel, shifted by the length of the stretch they span, so
+    the copies sit end to end with the originals as they sat together.
+    They land as a drop does, and `copies` is them, in the order given."""
+
+    def __init__(self, project: Project, clips: Sequence[Clip]) -> None:
+        super().__init__()
+        self.copies: list[Clip] = []
+        if not clips:
+            return
+        shift = max(clip.end for clip in clips) - min(clip.start for clip in clips)
+        taken = all_ids(project)
+        arriving: dict[int, tuple[Channel, list[tuple[Clip, _Placing]]]] = {}
+        for clip in clips:
+            copy = replace(
+                clip,
+                id=mint_id(CLIP_PREFIX, taken),
+                start=clip.start + shift,
+                fade_in=replace(clip.fade_in),
+                fade_out=replace(clip.fade_out),
+            )
+            taken.add(copy.id)
+            self.copies.append(copy)
+            channel = _home(project, clip)
+            arriving.setdefault(id(channel), (channel, []))[1].append(
+                (copy, _placing(copy))
+            )
+        for channel, incoming in arriving.values():
+            after, changed = _settle(channel.clips, incoming, taken)
+            self._list(channel, after)
+            for clip, placing in changed.values():
+                self._placing(clip, placing)
+
+
+class RemoveClips(_Rearrangement):
+    """Take every one of `clips` off its channel, as one edit."""
+
+    def __init__(self, project: Project, clips: Sequence[Clip]) -> None:
+        super().__init__()
+        going = {id(clip) for clip in clips}
+        for channel in project.channels:
+            if any(id(clip) in going for clip in channel.clips):
+                self._list(
+                    channel, [clip for clip in channel.clips if id(clip) not in going]
                 )
-                taken.add(piece.id)
-                placing = self._piece(existing, start, end)
-                if piece is existing:
-                    self.placed_after[id(existing)] = placing
-                else:
-                    _place(piece, placing)
-                after.append(piece)
-        self.after = sorted(after, key=lambda clip: clip.start)
-
-    @staticmethod
-    def _piece(of: Clip, start: int, end: int) -> _Placing:
-        """The part `[start, end)` of `of`, playing the samples it played."""
-        length = end - start
-        fade_in = (
-            replace(of.fade_in, length=min(of.fade_in.length, length))
-            if start == of.start
-            else Fade()
-        )
-        fade_out = (
-            replace(of.fade_out, length=min(of.fade_out.length, length))
-            if end == of.end
-            else Fade()
-        )
-        return (start, of.offset + (start - of.start), length, fade_in, fade_out)
-
-    def do(self) -> None:
-        for clip in self.before:
-            if id(clip) in self.placed_after:
-                _place(clip, self.placed_after[id(clip)])
-        self.channel.clips[:] = self.after
-
-    def undo(self) -> None:
-        for clip in self.before:
-            _place(clip, self.placed_before[id(clip)])
-        self.channel.clips[:] = self.before
 
 
 class RemoveClip(Command):

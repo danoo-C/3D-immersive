@@ -199,6 +199,19 @@ another's time is a collision to resolve, not a reordering.
   A clip the drop covers entirely is removed, and one reaching past both ends
   of the drop is split around it, both outer parts staying where they were
   (D-95).
+- **A move lands as a drop does** (D-97). The moved clips are lifted first,
+  so none of them trims another, and then overwrite what they cover by the
+  rule above. Every one moves by the same time and the same number of
+  channels, stopping together at the first and last channel and at 0.
+- **A trim stops at the neighbour** (D-98): an edge goes out no further than
+  its sample reaches or than the next clip on its channel, and in no shorter
+  than `MIN_CLIP_LENGTH`, 64 samples. Moving the start moves the offset with
+  it, so the clip still plays the samples it played.
+- **A split** leaves the head as the clip and makes the tail a new one;
+  together they play exactly the samples the clip did. It is not made where
+  either part would be shorter than `MIN_CLIP_LENGTH`.
+- A fade stays on its edge through a trim or a split, cut to fit what is
+  left, and an edge a split or a drop made has none of its own.
 - `offset + length` must not exceed `MediaFile.frames`.
 - A channel with no keyframes for an axis uses its static `position` component.
   With one keyframe, that value holds for the whole timeline.

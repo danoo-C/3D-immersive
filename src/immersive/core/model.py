@@ -41,6 +41,10 @@ MEDIA_PREFIX = "m"
 CHANNEL_PREFIX = "c"
 CLIP_PREFIX = "k"
 
+#: The shortest a trim or a split leaves a clip: two of D-42's implicit
+#: 32-sample fades end to end, so the two never overlap (D-98).
+MIN_CLIP_LENGTH = 64
+
 _ID_PATTERN = re.compile(r"^[mck]-[0-9a-f]{8}$")
 _HEX_COLOUR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _DEFAULT_RNG = random.Random()

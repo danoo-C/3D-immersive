@@ -7,22 +7,31 @@ one, because the thing that breaks is never the shape you thought to check.
 from __future__ import annotations
 
 import copy
+import random
 from collections.abc import Callable
 
+import numpy as np
 import pytest
 
-from immersive.core.commands import Command, Compound
+from immersive.core.commands import Command, Compound, UndoStack
 from immersive.core.edits import (
     AddChannel,
     AddClip,
     DropClips,
+    DuplicateClips,
+    Edge,
     MoveChannel,
     MoveClip,
+    MoveClips,
     RemoveChannel,
     RemoveClip,
+    RemoveClips,
     SetAttribute,
+    SplitClips,
+    TrimClips,
 )
 from immersive.core.model import (
+    MIN_CLIP_LENGTH,
     Channel,
     Clip,
     Fade,
@@ -98,6 +107,22 @@ EDITS: dict[str, Build] = {
         p.channels[0].clips[0].fade_in, "shape", FadeShape.EQUAL_POWER
     ),
     "move a clip": lambda p: MoveClip(p.channels[0].clips[0], 36_000),
+    "move clips along their lane": lambda p: MoveClips(p, p.channels[0].clips, 1_000),
+    "move a clip onto its neighbour": lambda p: MoveClips(
+        p, [p.channels[0].clips[0]], 80_000
+    ),
+    "move a clip to another lane": lambda p: MoveClips(
+        p, [p.channels[0].clips[1]], 0, 1
+    ),
+    "trim a clip's end": lambda p: TrimClips(
+        p, [p.channels[0].clips[0]], Edge.END, -4_000
+    ),
+    "trim a clip's start": lambda p: TrimClips(
+        p, [p.channels[0].clips[1]], Edge.START, 4_000
+    ),
+    "split a clip": lambda p: SplitClips(p, [p.channels[0].clips[0]], 12_000),
+    "duplicate clips": lambda p: DuplicateClips(p, p.channels[0].clips),
+    "remove clips": lambda p: RemoveClips(p, p.channels[0].clips),
     "a compound of three": lambda p: Compound(
         [
             SetAttribute(p.channels[0], "name", "Renamed"),
@@ -493,4 +518,338 @@ def test_a_drop_below_the_last_lane_is_one_compound_with_its_new_channel() -> No
     command.do()
     assert spans(project.channels[1]) == [(0, 5_000)]
     command.undo()
+    assert project == before
+
+
+# --------------------------------------------------------------------------- #
+# moving clips (D-97)
+# --------------------------------------------------------------------------- #
+
+
+def lanes(*rows: list[Clip]) -> Project:
+    """A channel per row, over a sample long enough for anything."""
+    long = MediaFile(LONG, "long.wav", "long.wav", SAMPLE_RATE, 1, 10_000_000)
+    return Project(
+        media_pool=[long],
+        channels=[
+            Channel(f"c-0000000{n + 1}", f"C{n}", "#A855F7", clips=list(row))
+            for n, row in enumerate(rows)
+        ],
+    )
+
+
+def at(start: int, length: int, identifier: str, offset: int = 0) -> Clip:
+    return Clip(identifier, LONG, start, offset, length)
+
+
+def test_a_moved_clip_keeps_playing_its_own_samples() -> None:
+    clip = at(10_000, 5_000, "k-00000001", offset=700)
+    project = lanes([clip])
+    MoveClips(project, [clip], 3_000).do()
+    assert (clip.start, clip.offset, clip.length) == (13_000, 700, 5_000)
+
+
+def test_a_move_onto_a_neighbour_overwrites_it_as_a_drop_would() -> None:
+    mover, other = at(0, 10_000, "k-00000001"), at(20_000, 10_000, "k-00000002")
+    project = lanes([mover, other])
+
+    MoveClips(project, [mover], 15_000).do()
+
+    assert spans(project.channels[0]) == [(15_000, 25_000), (25_000, 30_000)]
+    assert project.channels[0].clips[1] is other
+    assert other.offset == 5_000, "what is left still plays what it played"
+    assert validate(project) == []
+
+
+def test_moved_clips_are_lifted_first_so_none_trims_another() -> None:
+    first, second = at(0, 10_000, "k-00000001"), at(10_000, 10_000, "k-00000002")
+    project = lanes([first, second])
+
+    MoveClips(project, [first, second], 4_000).do()
+
+    assert spans(project.channels[0]) == [(4_000, 14_000), (14_000, 24_000)]
+    assert (first.length, second.length, second.offset) == (10_000, 10_000, 0)
+
+
+def test_a_clip_moved_past_its_neighbour_leaves_the_lane_sorted() -> None:
+    mover, other = at(0, 10_000, "k-00000001"), at(20_000, 5_000, "k-00000002")
+    project = lanes([mover, other])
+    MoveClips(project, [mover], 40_000).do()
+    assert project.channels[0].clips == [other, mover]
+    assert validate(project) == []
+
+
+def test_a_move_across_lanes_takes_every_clip_the_same_number_of_lanes() -> None:
+    a, b = at(0, 5_000, "k-00000001"), at(8_000, 5_000, "k-00000002")
+    project = lanes([a], [b], [], [])
+
+    command = MoveClips(project, [a, b], 1_000, 2)
+    command.do()
+
+    assert [c.clips for c in project.channels] == [[], [], [a], [b]]
+    assert command.placed() == [(a, 2, 1_000), (b, 3, 9_000)]
+
+
+def test_the_lanes_stop_together_at_the_first_and_the_last() -> None:
+    a, b = at(0, 5_000, "k-00000001"), at(0, 5_000, "k-00000002")
+    project = lanes([], [a], [b])
+
+    up = MoveClips(project, [a, b], 0, -5)
+    assert (up.lanes, [lane for _, lane, _ in up.placed()]) == (-1, [0, 1])
+    down = MoveClips(project, [a, b], 0, 5)
+    assert (down.lanes, [lane for _, lane, _ in down.placed()]) == (0, [1, 2])
+
+
+def test_the_time_stops_together_at_the_start_of_the_timeline() -> None:
+    a, b = at(3_000, 1_000, "k-00000001"), at(10_000, 1_000, "k-00000002")
+    project = lanes([a, b])
+    command = MoveClips(project, [a, b], -8_000)
+    assert command.delta == -3_000
+    command.do()
+    assert spans(project.channels[0]) == [(0, 1_000), (7_000, 8_000)]
+
+
+def test_a_move_by_nothing_changes_nothing() -> None:
+    a = at(0, 1_000, "k-00000001")
+    project = lanes([a], [])
+    assert not MoveClips(project, [a], 0).changes
+    assert not MoveClips(project, [a], -5_000, -1).changes, "stopped at both"
+    assert MoveClips(project, [a], 1).changes
+    assert MoveClips(project, [a], 0, 1).changes
+
+
+# --------------------------------------------------------------------------- #
+# trimming clips (D-98)
+# --------------------------------------------------------------------------- #
+
+
+def trimmed_to(project: Project, clip: Clip, edge: Edge, delta: int) -> tuple[int, int]:
+    TrimClips(project, [clip], edge, delta).do()
+    return clip.start, clip.end
+
+
+def short_sample(frames: int) -> Project:
+    short = MediaFile("m-00000003", "s.wav", "s.wav", SAMPLE_RATE, 1, frames)
+    return Project(media_pool=[short], channels=[Channel("c-00000001", "A", "#A855F7")])
+
+
+def test_an_end_grows_as_far_as_its_sample_reaches_and_no_further() -> None:
+    project = short_sample(50_000)
+    clip = Clip("k-00000001", "m-00000003", 1_000, 10_000, 20_000)
+    project.channels[0].clips.append(clip)
+    assert trimmed_to(project, clip, Edge.END, 99_000) == (1_000, 41_000)
+
+
+def test_a_start_grows_back_to_its_sample_start_and_plays_what_it_played() -> None:
+    clip = at(50_000, 10_000, "k-00000001", offset=4_000)
+    project = lanes([clip])
+    before = {t: frame_at(clip, t) for t in (55_000, 59_999)}
+
+    assert trimmed_to(project, clip, Edge.START, -99_000) == (46_000, 60_000)
+    assert clip.offset == 0
+    assert {t: frame_at(clip, t) for t in before} == before
+
+
+def test_a_start_stops_at_the_start_of_the_timeline() -> None:
+    clip = at(2_000, 10_000, "k-00000001", offset=9_000)
+    project = lanes([clip])
+    assert trimmed_to(project, clip, Edge.START, -5_000) == (0, 12_000)
+    assert clip.offset == 7_000
+
+
+def test_a_trim_stops_at_the_neighbour_on_either_side() -> None:
+    left = at(0, 10_000, "k-00000001")
+    middle = at(20_000, 10_000, "k-00000002", offset=50_000)
+    right = at(40_000, 10_000, "k-00000003")
+    project = lanes([left, middle, right])
+
+    assert trimmed_to(project, middle, Edge.END, 50_000) == (20_000, 40_000)
+    assert trimmed_to(project, middle, Edge.START, -50_000) == (10_000, 40_000)
+    assert validate(project) == []
+
+
+def test_a_trim_stops_at_the_shortest_a_clip_may_be() -> None:
+    clip = at(0, 10_000, "k-00000001")
+    project = lanes([clip])
+    assert trimmed_to(project, clip, Edge.END, -20_000) == (0, MIN_CLIP_LENGTH)
+    other = at(20_000, 10_000, "k-00000002")
+    project.channels[0].clips.append(other)
+    assert trimmed_to(project, other, Edge.START, 20_000) == (
+        30_000 - MIN_CLIP_LENGTH,
+        30_000,
+    )
+
+
+def test_a_clip_a_file_made_shorter_than_that_is_not_grown_by_shrinking_it() -> None:
+    clip = at(0, 10, "k-00000001")
+    project = lanes([clip])
+    assert trimmed_to(project, clip, Edge.END, -5) == (0, 10)
+
+
+def test_several_clips_trim_each_as_far_as_it_can() -> None:
+    free = at(0, 10_000, "k-00000001")
+    blocked = at(0, 10_000, "k-00000002")
+    wall = at(12_000, 1_000, "k-00000003")
+    project = lanes([free], [blocked, wall])
+
+    TrimClips(project, [free, blocked], Edge.END, 5_000).do()
+
+    assert (free.end, blocked.end) == (15_000, 12_000)
+
+
+def test_a_trim_cuts_a_fade_to_fit_and_keeps_it_on_its_edge() -> None:
+    clip = Clip(
+        "k-00000001", LONG, 0, 0, 10_000, fade_in=Fade(4_000), fade_out=Fade(6_000)
+    )
+    project = lanes([clip])
+    TrimClips(project, [clip], Edge.END, -7_000).do()
+    assert (clip.fade_in.length, clip.fade_out.length) == (3_000, 3_000)
+
+
+# --------------------------------------------------------------------------- #
+# splitting, duplicating, removing
+# --------------------------------------------------------------------------- #
+
+
+def played(audio: np.ndarray, clip: Clip) -> np.ndarray:
+    """The samples `clip` plays, read from its decoded sample."""
+    return audio[clip.offset : clip.offset + clip.length]
+
+
+def test_a_split_plays_exactly_what_the_clip_played() -> None:
+    audio = np.random.default_rng(7).standard_normal(200_000).astype(np.float32)
+    clip = Clip(
+        "k-00000001", LONG, 30_000, 12_345, 100_000, fade_in=Fade(10), fade_out=Fade(20)
+    )
+    project = lanes([clip])
+    whole = played(audio, clip).copy()
+
+    command = SplitClips(project, [clip], 70_000)
+    command.do()
+
+    head, tail = project.channels[0].clips
+    assert head is clip and command.tails == [tail]
+    assert (head.start, head.end, tail.start, tail.end) == (
+        30_000,
+        70_000,
+        70_000,
+        130_000,
+    )
+    assert np.array_equal(
+        np.concatenate([played(audio, head), played(audio, tail)]), whole
+    )
+    assert tail.id != head.id
+    assert (head.fade_in, head.fade_out) == (Fade(10), Fade())
+    assert (tail.fade_in, tail.fade_out) == (Fade(), Fade(20))
+    assert validate(project) == []
+
+
+@pytest.mark.parametrize(
+    "at_",
+    [
+        29_999,
+        30_000,
+        30_000 + MIN_CLIP_LENGTH - 1,
+        130_000 - MIN_CLIP_LENGTH + 1,
+        130_000,
+    ],
+)
+def test_a_split_too_near_an_edge_or_outside_leaves_the_clip_alone(at_: int) -> None:
+    clip = at(30_000, 100_000, "k-00000001")
+    other = at(0, 200_000, "k-00000002")
+    project = lanes([clip], [other])
+
+    command = SplitClips(project, [clip, other], at_)
+    command.do()
+
+    assert project.channels[0].clips == [clip]
+    assert len(project.channels[1].clips) == 2, "the other clip still splits"
+
+
+def test_duplicates_go_just_after_the_selection_each_on_its_own_channel() -> None:
+    a, b = at(10_000, 5_000, "k-00000001"), at(12_000, 8_000, "k-00000002")
+    project = lanes([a], [b])
+
+    command = DuplicateClips(project, [a, b])
+    command.do()
+
+    a2, b2 = command.copies
+    assert project.channels[0].clips == [a, a2] and project.channels[1].clips == [b, b2]
+    assert (a2.start, b2.start) == (20_000, 22_000), "shifted by the span, 10 000"
+    assert {a2.id, b2.id}.isdisjoint({a.id, b.id}) and a2.id != b2.id
+    assert (a.start, b.start) == (10_000, 12_000)
+
+
+def test_duplicates_land_as_a_drop_does_and_own_their_fades() -> None:
+    a = Clip("k-00000001", LONG, 0, 0, 10_000, fade_in=Fade(100))
+    in_the_way = at(15_000, 10_000, "k-00000002")
+    project = lanes([a, in_the_way])
+
+    [copy_] = DuplicateClips(project, [a]).copies
+    DuplicateClips(project, [a]).do()
+
+    assert spans(project.channels[0]) == [
+        (0, 10_000),
+        (10_000, 20_000),
+        (20_000, 25_000),
+    ]
+    landed = project.channels[0].clips[1]
+    assert landed.fade_in == a.fade_in and landed.fade_in is not a.fade_in
+    assert copy_.fade_in is not a.fade_in
+
+
+def test_removing_clips_across_channels_is_one_edit() -> None:
+    a, b, c = at(0, 5, "k-00000001"), at(10, 5, "k-00000002"), at(0, 5, "k-00000003")
+    project = lanes([a, b], [c])
+    before = copy.deepcopy(project)
+    command = RemoveClips(project, [a, c])
+    command.do()
+    assert [ch.clips for ch in project.channels] == [[b], []]
+    command.undo()
+    assert project == before
+
+
+# --------------------------------------------------------------------------- #
+# every edit, many times over
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_any_run_of_edits_stays_valid_and_undoes_to_where_it_began(seed: int) -> None:
+    """Two hundred random edits through the stack, which refuses any that
+    leaves the project invalid - so a refusal here is an edit that broke a
+    rule it was meant to keep. Then every one undone."""
+    rng = random.Random(seed)
+    project = lanes(
+        [at(n * 30_000, 20_000, f"k-0000{n:04x}", offset=n * 1_000) for n in range(6)],
+        [at(n * 50_000, 40_000, f"k-0001{n:04x}") for n in range(4)],
+        [],
+    )
+    before = copy.deepcopy(project)
+    stack = UndoStack(project)
+    for _ in range(200):
+        clips = [c for channel in project.channels for c in channel.clips]
+        if not clips:
+            break
+        chosen = rng.sample(clips, rng.randint(1, min(3, len(clips))))
+        verb = rng.choice(["move", "trim", "split", "duplicate", "remove"])
+        if verb == "move":
+            command: Command = MoveClips(
+                project, chosen, rng.randint(-60_000, 60_000), rng.randint(-2, 2)
+            )
+        elif verb == "trim":
+            command = TrimClips(
+                project, chosen, rng.choice(list(Edge)), rng.randint(-30_000, 30_000)
+            )
+        elif verb == "split":
+            command = SplitClips(project, chosen, rng.randint(0, 400_000))
+        elif verb == "duplicate":
+            command = DuplicateClips(project, chosen)
+        else:
+            if rng.random() < 0.7:
+                continue
+            command = RemoveClips(project, chosen)
+        stack.push(command)
+    while stack.undo():
+        pass
     assert project == before
