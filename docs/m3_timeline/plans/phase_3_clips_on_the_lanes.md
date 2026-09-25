@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 3 — Clips on the lanes
 
-**Written:** 2026-09-26 · **Status:** in progress
+**Written:** 2026-09-26 · **Status:** ✅ complete
 
 ## Approach
 
@@ -182,4 +182,58 @@ tests/test_theme_io.py                      amended — the example
 
 ## Outcome
 
-Filled in at the end.
+Six steps in the planned order, all ten acceptance boxes ticked.
+Twenty-two mutations: thirteen named in advance, nine found on the way,
+all killed. 1574 tests.
+
+### What the plan got right
+
+**Placement in `core`, drawing in items, meaning in the view.** Every overlap
+case, every snap rule and every landing was settled by tests that open no
+window; the widgets' tests only check that what was decided is what is
+drawn and pushed.
+
+**Checking the device cache before relying on it.** The check found the
+first paint's exaggerated exposed rectangle, which would have made a long
+clip at a close zoom cost millions of columns.
+
+**Naming the waveform's cost as a risk.** It was the first suspect when
+five hundred clips were slow, and one of the two causes.
+
+### What the plan did not see
+
+**A seam between strips.** The envelope over a range was right on its own
+and wrong at its last column when drawn in strips.
+
+**That the stylesheet would choke on the first per-channel key.** It
+resolved every group's keys, painted ones included, and `channel` has no
+answer without a channel.
+
+**That every colour lookup ran an `import`.** Only the profile showed it,
+and it costs the application on every paint, not just the timeline.
+
+**That synthesised drag events crash when ignored.** The tests call the
+view's handlers directly.
+
+**That the line in `landing` counts.** The landing arithmetic moved out of
+the view into a Qt-free module during step 3, which the plan had put in the
+view; it is tested headless as the grid is.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| The landing worked out in the view | in `landing.py`, Qt-free, with the view reading events into it |
+| The waveform drawn line by line | drawn as one image per clip, the same pixels |
+| No change to `theme` beyond the per-channel function | `_default` imports once; painted groups left out of the stylesheet |
+| Thirteen mutations | twenty-two |
+
+### What phase 4 needs to know
+
+`view.clip_items()` returns the `ClipItem`s, each with its `clip`; an item
+is found by the clip's identity. Items are cached per device pixel, so
+anything that changes how a clip looks — being selected, at phase 4 — has to
+go through `present` or call `update()` on the item, or the cache shows the
+old look. The `clip` group's `selected.border` is `04`'s example's next key,
+and the spec-example test expects it to arrive then. A click on a clip
+reaches the scene; nothing handles it yet.

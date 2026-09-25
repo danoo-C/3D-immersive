@@ -13,7 +13,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 |---|---|
 | [1 — The time axis, the ruler and the grid](phase_1_time_axis_and_ruler.md) | ✅ |
 | [2 — Channels](phase_2_channels.md) | ✅ |
-| [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | in progress |
+| [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | ✅ |
 | [4 — Selection](phase_4_selection.md) | not started |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | not started |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | not started |
@@ -160,3 +160,14 @@ input group with it. Headers are rebuilt only when the list of channels
 changes, and compared by identity, because a reopened file's channels are
 equal to the ones on screen and not the same. Twenty-three mutations, all
 killed.
+
+**Phase 3.** Clips: dragged from the pool onto a lane, snapped to the grid
+and to any clip's edges, several end to end, and below the last lane into a
+new channel — each drop one Undo. A drop inside a longer clip splits it
+(D-95). A clip is its channel's colour with its own part of its sample
+drawn in it, grey and saying so when the sample is missing. M2's waveform
+drawing learned ranges, and a seam between strips was caught by a test
+before anything was drawn. Five hundred clips were measured: scrolling is
+inside a frame, and two causes of a slow cold repaint were found and fixed,
+one of them a lookup every paint in the application was paying. Twenty-two
+mutations, all killed.
