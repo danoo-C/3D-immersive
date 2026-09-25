@@ -375,7 +375,10 @@ who owns what. M9 is built *third*, before all of them:
 | window, panel, menu, toolbar, button, **tab**, splitter, scrollbar, status bar, tooltip, **focus** | M9 — the widgets that exist when the system is built. Tab and focus were missing from this row until M9 phase 1 went looking: the tab bar exists because of D-49 and the focus ring is required by *Accessibility and feel*, and the stylesheet has styled both since M0 |
 | notice line, notice count, notice list | M9 — it builds them (D-65) |
 | tree view, header, filter field, waveform thumbnail | M2 — built as `tree`, `header`, `filter` and the painted `waveform`. The filter is styled by its object name |
-| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file*; the channel header at phase 2 as `channel`, styled by object name, with the line between lanes as `timeline.separator`; the clip body at phase 3 as the painted `clip` group, the first with keys painted per channel |
+| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file*; the channel header at phase 2 as `channel`, styled by object name, with the line between lanes as `timeline.separator`; the clip body at phase 3 as the painted `clip` group, the first with keys painted per channel; the clip's selected border and the rubber
+band at phase 4 as `clip.selected.border` and `timeline.band`, and a
+selected header as `channel.selected.background` and
+`channel.selected.marker` |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
 | input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one |
@@ -410,6 +413,7 @@ their values:
 | `playhead` | `accent` | the playhead, over everything, in the lanes and across the ruler |
 | `separator` | `border` | the line under each lane |
 | `drop` | `accent` | the dashed outline of where a drop from the pool will land |
+| `band` | `accent` | the rubber band's outline, over a faint fill of the same |
 
 The clips', built at M3 as the worked example under *The file* named them.
 `body` and `waveform` are the reserved `channel` value — the first keys any
@@ -422,6 +426,7 @@ the built-in paints each in its channel's:
 | `waveform` | `channel` | the envelope, solid over the body |
 | `text` | `text.primary` | the clip's name |
 | `missing` | `text.disabled` | the body of a clip whose sample has gone, which also says so in text |
+| `selected.border` | `accent` | a 2 px border inside a selected clip — a shape as well as a colour |
 
 | `ruler` key | Default | For |
 |---|---|---|
@@ -584,6 +589,10 @@ however far the lanes are scrolled.
 - **The chip** is the channel's own colour, from the project. Clicking it
   offers the theme's channel palette. Dragging a header up or down reorders
   the channels, and a right-click offers Rename and Remove.
+- **Clicking a header** selects its channel, with the modifiers a clip
+  takes (*Selection*). A selected header wears a bar down its left edge as
+  well as a lighter background, and the bar's room is always there, so
+  selecting a header does not shift what is in it.
 
 The grid thins as the view zooms out rather than crowding: no two lines are
 drawn closer than a few pixels, the snap division goes first, then beats, and
@@ -678,7 +687,7 @@ do to you.
 | `Ctrl+S` / `Ctrl+O` / `Ctrl+N` | save / open / new |
 | `Ctrl+R` | render |
 | `1` `2` `3` | focus top / front / 3D view |
-| `B` | toggle HRTF bypass on the selected channel |
+| `B` | toggle HRTF bypass on the selected channels |
 
 This table is the specification, and where a toolkit default disagrees with it
 the table wins: `QKeySequence.StandardKey.Redo` resolves to `Ctrl+Y` on Linux
@@ -794,15 +803,53 @@ One kind of thing at a time, plural within that kind (D-57).
 |---|---|
 | Kinds | clips · keyframes · channels · media files |
 | Switching kind | clears the previous one — selecting a clip deselects every keyframe |
-| Plural | click, `Shift+click` for a range, `Ctrl+click` to toggle one |
-| Rubber band | drag on empty lane space in the timeline, or on empty space in the keyframe editor |
+| Plural | click, `Shift+click` for a range, `Ctrl+click` to toggle one, `Ctrl+Shift+click` to add a range |
+| Rubber band | drag on empty lane space in the timeline, or on empty space in the keyframe editor; with `Ctrl` or `Shift` it adds |
 | Across channels | yes, for clips and keyframes |
 | `Ctrl+A` | every clip on the focused channel; again for every clip in the project |
 | Clearing | click empty space, or `Esc` when the transport is stopped |
+| Where | a clip in the lanes, a channel by its header, a sample by its row in the pool |
 
 Mixing kinds was considered and rejected: `Delete` with a clip *and* a
 keyframe selected has no answer a modifier can rescue, and every edit verb in
 the application belongs to exactly one kind.
+
+**The range** runs from the *anchor* — the thing last clicked or
+Ctrl-clicked — to the thing clicked, and replaces the selection; with
+`Ctrl` it is added instead. For channels that is every header between the
+two. For clips it is the rule file managers teach, carried across the two
+dimensions a timeline has: every clip that overlaps the stretch of time from
+the earlier of the two to the later, on every lane from the anchor's to the
+clicked one's.
+
+**A press on a selected clip waits for the release.** A press on an
+unselected clip selects it at once. A press on one already selected leaves
+the selection alone, so that a drag from any selected clip can move them all,
+and only a release that never moved selects that clip alone. Every file
+manager and every DAW behaves this way; a click that changed its meaning when
+dragging arrived would be learnt twice.
+
+**The focused channel** that `Ctrl+A` reads is the one last clicked, by its
+header or by one of its clips. With none, the first `Ctrl+A` already selects
+every clip in the project. A line edit keeps `Ctrl+A` and `Esc` for itself:
+with a channel's name being edited they select its text and cancel the
+rename, and the selection is untouched.
+
+**`Esc`** is *Stop*, and clears the selection when the transport is already
+stopped. Until the transport exists (M3 phase 9) it always is: Stop is
+disabled, a disabled action's shortcut does not fire, and `Esc` reaches the
+window, which clears the selection. Phase 9's Stop keeps that rule.
+
+**`B`** toggles HRTF bypass on every selected channel as one edit: if any is
+off they all go on, and if all are on they all go off, so a mixed selection
+comes out of one press agreeing. With no channel selected it is disabled, and
+its tooltip says to select one.
+
+**What marks a selection** is a shape as well as a colour (*Accessibility
+and feel*): a 2 px border inside a clip, a bar down a header's left edge, the
+highlighted row in the pool. The pool's tree keeps a selection of its own
+because Qt insists on one; it is kept in step with the document's both ways,
+and never decides anything by itself.
 
 The parameters pane follows the selection. With several things of one kind
 selected it shows the fields they have in common, and a field whose value

@@ -7,7 +7,7 @@ from collections.abc import Iterator
 
 import pytest
 from PySide6.QtCore import QEvent, QItemSelectionModel, QPointF, Qt
-from PySide6.QtGui import QAction, QImage, QMouseEvent
+from PySide6.QtGui import QAction, QImage, QKeyEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -246,6 +246,24 @@ def test_escape_in_the_rename_field_cancels_the_rename_and_not_the_selection() -
 
     assert window.document().selection.clips() == [grid[0][0]]
     assert window.timeline().headers.headers()[0].renaming() is None
+
+
+def test_the_rename_field_claims_ctrl_a_before_select_all_can() -> None:
+    """A shortcut fires only when nothing focused claims its key first, and
+    offscreen no window is active for one to fire in - so what is held here
+    is the claim: with a name being edited, Ctrl+A is the field's."""
+    window, grid = window_with_clips()
+    window.document().selection.select(Kind.CLIPS, [grid[0][0]])
+    field = window.timeline().headers.headers()[0].rename()
+    override = QKeyEvent(QEvent.Type.ShortcutOverride, Qt.Key.Key_A, CTRL)
+    override.ignore()
+
+    QApplication.sendEvent(field, override)
+    QTest.keyClick(field, Qt.Key.Key_A, CTRL)
+
+    assert override.isAccepted()
+    assert field.selectedText() == field.text() != ""
+    assert window.document().selection.clips() == [grid[0][0]]
 
 
 # --------------------------------------------------------------------------- #
