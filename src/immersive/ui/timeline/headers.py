@@ -61,6 +61,7 @@ from immersive.core.selection import Kind
 from immersive.ui import theme
 from immersive.ui.timeline.grid import snap_text
 from immersive.ui.timeline.metrics import LANE_HEIGHT
+from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.timeline.view import TimelineView
 from immersive.ui.widgets.numeric import NumericField
 
@@ -218,8 +219,13 @@ class ChannelHeader(QFrame):
         self.silenced = QLabel(SILENCED)
         self.silenced.setObjectName("ChannelQuiet")
         self.silenced.setToolTip("Another channel is soloed, so this one is not heard")
-        self.snap = QLabel()
+        # A button, not a label: it opens the menu that sets the channel's
+        # override, and takes focus from the keyboard like any control.
+        self.snap = QToolButton()
         self.snap.setObjectName("ChannelSnap")
+        self.snap.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.snap.setMenu(QMenu(self.snap))
+        self.snap.menu().aboutToShow.connect(self.snap_menu)
 
         self.gain = NumericField(
             channel.gain_db,
@@ -274,6 +280,18 @@ class ChannelHeader(QFrame):
     def _set(self, field: str, value: object) -> None:
         if getattr(self.channel, field) != value:
             self._document.push(SetAttribute(self.channel, field, value))
+
+    def snap_menu(self) -> QMenu:
+        """The indicator's menu, filled for the channel as it is now: Follow
+        Project, Off, the divisions and Triplet (F-18)."""
+        project = self._document.project
+        override = self.channel.snap_override
+        return fill_snap_menu(
+            self.snap.menu(),
+            override if override is not None else project.snap,
+            lambda chosen: self._set("snap_override", chosen),
+            following=override is None,
+        )
 
     # --------------------------------------------------------- renaming
 
@@ -367,10 +385,13 @@ class ChannelHeader(QFrame):
         self.snap.setText(snap_text(snap).removeprefix("Snap ") if own else "snap")
         self.snap.setProperty("overriding", own)
         self.snap.setToolTip(
-            f"This channel snaps to {snap_text(snap).removeprefix('Snap ')}, "
-            "overriding the project"
-            if own
-            else f"Snaps as the project does: {snap_text(project.snap)}"
+            (
+                f"This channel snaps to {snap_text(snap).removeprefix('Snap ')}, "
+                "overriding the project"
+                if own
+                else f"Snaps as the project does: {snap_text(project.snap)}"
+            )
+            + "\nClick to choose this channel's own"
         )
         # A dynamic property only reaches the stylesheet when re-polished.
         self.snap.style().unpolish(self.snap)

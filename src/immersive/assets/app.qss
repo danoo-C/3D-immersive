@@ -177,12 +177,17 @@ QFrame#ChannelHeader[selected="true"] {
     background-color: $channel_selected_background;
     border-left-color: $channel_selected_marker;
 }
-QLabel#ChannelName, QLabel#ChannelSnap[overriding="true"] { color: $channel_name; }
-QLabel#ChannelQuiet, QLabel#ChannelSnap[overriding="false"] {
+QLabel#ChannelName, QToolButton#ChannelSnap[overriding="true"] { color: $channel_name; }
+QLabel#ChannelQuiet, QToolButton#ChannelSnap[overriding="false"] {
     color: $channel_quiet;
     font-size: 11px;
 }
 QFrame#ChannelHeader QToolButton { padding: 1px 6px; }
+/* The snap indicator reads as text in the header, and is a button only to
+   the pointer and the keyboard: no frame, no arrow, its focus ring kept. */
+QFrame#ChannelHeader QToolButton#ChannelSnap { background: transparent; padding: 0 2px; }
+QFrame#ChannelHeader QToolButton#ChannelSnap:!focus { border: 1px solid transparent; }
+QToolButton#ChannelSnap::menu-indicator { image: none; width: 0; }
 QToolButton#AddChannel { border-radius: 0; border-width: 0 0 1px 0; padding: 0 8px; }
 QToolButton#Mute:checked {
     background-color: $channel_mute_background;

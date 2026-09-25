@@ -51,7 +51,7 @@ from immersive.core.edits import (
 from immersive.core.io import project_io
 from immersive.core.io.media import Refused
 from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, find_audio
-from immersive.core.model import MediaFile, Project
+from immersive.core.model import MediaFile, Project, SnapSetting
 from immersive.core.relink import relink
 from immersive.core.selection import Kind
 from immersive.ui import icons, theme, theme_io, theme_menu
@@ -63,6 +63,7 @@ from immersive.ui.theme_menu import ThemeMenu
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit, snap_text
 from immersive.ui.timeline.panel import TimelinePanel
+from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.placeholder import Placeholder
 
@@ -404,11 +405,20 @@ class MainWindow(QMainWindow):
         bar.addWidget(self._position)
         bar.addSeparator()
         # The open project's tempo, signature and snap, read back after every
-        # change the document reports. Readouts until phase 5 makes the snap
-        # a control and phase 7 the other two.
+        # change the document reports. The tempo and signature are readouts
+        # until phase 7 makes them controls; the snap is one already - a
+        # button, drawn as one, whose menu chooses the division (F-16).
         self._bpm_chip = self._chip("")
         self._signature_chip = self._chip("")
-        self._snap_chip = self._chip("")
+        self._snap_chip = QToolButton()
+        self._snap_chip.setObjectName("SnapChip")
+        self._snap_chip.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._snap_chip.setMenu(QMenu(self._snap_chip))
+        self._snap_chip.menu().aboutToShow.connect(self.snap_menu)
+        self._snap_chip.setToolTip(
+            "Snap — the grid a drag lands on, and whether it snaps at all\n"
+            "Hold Alt while dragging to place exactly."
+        )
         bar.addWidget(self._bpm_chip)
         bar.addWidget(self._signature_chip)
         bar.addSeparator()
@@ -1039,6 +1049,17 @@ class MainWindow(QMainWindow):
                 ]
             )
         )
+
+    def snap_menu(self) -> QMenu:
+        """The snap chip's menu, filled for the project's setting as it is
+        now; each choice is one command."""
+        project = self._document.project
+
+        def choose(chosen: SnapSetting | None) -> None:
+            if chosen is not None and chosen != project.snap:
+                self._document.push(SetAttribute(project, "snap", chosen))
+
+        return fill_snap_menu(self._snap_chip.menu(), project.snap, choose)
 
     def split_clips(self) -> None:
         """S: every selected clip under the playhead in two, as one edit;

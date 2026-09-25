@@ -6,7 +6,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import numpy as np
@@ -15,14 +15,14 @@ import soundfile
 from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt
 from PySide6.QtGui import QAction, QKeyEvent, QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMenu, QToolButton
 
 from immersive.app import build_application
 from immersive.core.document import Document
 from immersive.core.edits import AddChannel, AddMedia, DropClips
-from immersive.core.model import Clip, MediaFile, new_channel
+from immersive.core.model import Channel, Clip, MediaFile, SnapSetting, new_channel
 from immersive.core.selection import Kind
-from immersive.core.time import SAMPLE_RATE
+from immersive.core.time import SAMPLE_RATE, Division
 from immersive.ui import theme
 from immersive.ui.main_window import MainWindow
 from immersive.ui.time_axis import TimeAxis
@@ -507,3 +507,115 @@ def test_no_sample_is_written_through_a_session_of_every_edit(tmp_path: Path) ->
     assert {
         path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths
     } == hashes
+
+
+# --------------------------------------------------------------------------- #
+# choosing the snap
+# --------------------------------------------------------------------------- #
+
+
+def pick(menu_of: Callable[[], QMenu], text: str) -> None:
+    """Fill a menu as opening it would, and choose `text` from it."""
+    [chosen] = [a for a in menu_of().actions() if a.text().startswith(text)]
+    chosen.trigger()
+
+
+def checked(menu_of: Callable[[], QMenu]) -> list[str]:
+    return [a.text() for a in menu_of().actions() if a.isChecked()]
+
+
+def override_of(channel: Channel) -> SnapSetting | None:
+    return channel.snap_override
+
+
+def test_the_chip_offers_every_division_triplet_and_off() -> None:
+    window, _ = window_with_clips()
+    texts = [a.text() for a in window.snap_menu().actions() if a.text()]
+    assert texts == ["Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "Triplet"]
+    assert checked(window.snap_menu) == ["1/16"]
+
+
+def test_each_choice_from_the_chip_is_one_command_and_the_chip_says_so() -> None:
+    window, _ = window_with_clips()
+    document = window.document()
+    stacked = len(document._stack)
+    chip = window.findChild(QToolButton, "SnapChip")
+    assert chip is not None
+
+    pick(window.snap_menu, "1/8")
+    assert document.project.snap == SnapSetting(True, Division.EIGHTH, False)
+    pick(window.snap_menu, "Triplet")
+    assert chip.text() == "Snap 1/8T"
+    pick(window.snap_menu, "Off")
+    assert document.project.snap == SnapSetting(False, Division.EIGHTH, True)
+    assert (chip.text(), checked(window.snap_menu)) == ("Snap off", ["Off", "Triplet"])
+    pick(window.snap_menu, "1/4")
+    assert document.project.snap == SnapSetting(True, Division.QUARTER, True)
+    assert len(document._stack) == stacked + 4
+
+    pick(window.snap_menu, "1/4")
+    assert len(document._stack) == stacked + 4, "the setting it already has"
+    document.undo()
+    assert chip.text() == "Snap off"
+
+
+def test_a_header_sets_and_clears_its_channels_override() -> None:
+    window, _ = window_with_clips()
+    document = window.document()
+    header = window.timeline().headers.headers()[0]
+    channel = header.channel
+    assert checked(header.snap_menu) == ["Follow Project  (Snap 1/16)"]
+
+    pick(header.snap_menu, "1/32")
+    assert override_of(channel) == SnapSetting(True, Division.THIRTY_SECOND, False)
+    assert document.project.snap == SnapSetting(), "the project's is untouched"
+    assert (header.snap.text(), header.snap.property("overriding")) == ("1/32", True)
+    assert checked(header.snap_menu) == ["1/32"]
+
+    pick(header.snap_menu, "Off")
+    assert override_of(channel) == SnapSetting(False, Division.THIRTY_SECOND, False)
+    assert header.snap.text() == "off"
+
+    pick(header.snap_menu, "Follow Project")
+    assert override_of(channel) is None
+    assert (header.snap.text(), header.snap.property("overriding")) == ("snap", False)
+    document.undo()
+    assert header.snap.text() == "off"
+
+
+def windowed() -> tuple[MainWindow, TimelinePanel, list[list[Clip]]]:
+    window, grid = window_with_clips()
+    panel = window.timeline()
+    panel.view.axis.zoom_about(0, SCALE / panel.view.axis.scale)
+    assert panel.view.axis.scale == pytest.approx(SCALE)
+    QApplication.processEvents()
+    return window, panel, grid
+
+
+def test_a_drag_snaps_by_what_the_chip_and_the_header_chose() -> None:
+    window, panel, grid = windowed()
+    clip = grid[0][0]
+    window.document().selection.select(Kind.CLIPS, [clip])
+
+    drag(panel, at(0, 0.5), at(0, 0.8))  # 0.3 s is 14 400: a sixteenth is 12 000
+    assert clip.start == 12_000
+    pick(window.snap_menu, "1/4")
+    drag(panel, at(0, 0.75), at(0, 1.05))  # 26 400: a quarter is 24 000
+    assert clip.start == 24_000
+    pick(panel.headers.headers()[0].snap_menu, "Off")
+    drag(panel, at(0, 1.0), at(0, 1.3))
+    assert clip.start == 24_000 + 14_400, "this channel no longer snaps"
+
+
+def test_both_menus_are_filled_as_they_open() -> None:
+    """The tests above fill each menu by calling for it; this is what makes
+    opening it do the same."""
+    window, _ = window_with_clips()
+    chip = window.findChild(QToolButton, "SnapChip")
+    indicator = window.timeline().headers.headers()[0].snap
+    for button in (chip, indicator):
+        assert button is not None
+        menu = button.menu()
+        assert menu is not None and not menu.actions()
+        menu.aboutToShow.emit()
+        assert "Triplet" in [a.text() for a in menu.actions()]
