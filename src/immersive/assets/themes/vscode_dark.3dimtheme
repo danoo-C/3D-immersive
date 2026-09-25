@@ -34,6 +34,12 @@
       "solo.background": "accent.text",
       "solo.text": "surface.window"
     },
+    "clip": {
+      "body": "channel",
+      "missing": "text.disabled",
+      "text": "text.primary",
+      "waveform": "channel"
+    },
     "filter": {
       "background": "surface.window",
       "border": "border",

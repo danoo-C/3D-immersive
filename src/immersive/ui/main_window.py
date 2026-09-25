@@ -479,7 +479,7 @@ class MainWindow(QMainWindow):
 
         root = QSplitter(Qt.Orientation.Vertical)
         root.addWidget(upper)
-        self._timeline = TimelinePanel(self._document, self._axis)
+        self._timeline = TimelinePanel(self._document, self._axis, self._store)
         root.addWidget(self._timeline)
         root.setSizes([950 - _TIMELINE_H, _TIMELINE_H])
         root.setStretchFactor(0, 1)
@@ -654,6 +654,7 @@ class MainWindow(QMainWindow):
                 trouble,
             )
         self._pool.tree.viewport().update()
+        self._timeline.media_changed()
 
     def import_files(self) -> bool:
         """File > Import Audio. Several files, prepared on workers."""
@@ -705,6 +706,7 @@ class MainWindow(QMainWindow):
                     self._document.project, [entry for entry, _ in admission.admitted]
                 )
             )
+            self._timeline.media_changed()
 
         detail = [str(refusal) for refusal in admission.refused] + [
             f"{path.name}: already in the pool" for path in admission.already

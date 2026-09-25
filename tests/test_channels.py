@@ -24,8 +24,8 @@ from immersive.ui import theme
 from immersive.ui.main_window import MainWindow
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.headers import DRAG_THRESHOLD, SILENCED, ChannelHeader
+from immersive.ui.timeline.metrics import LANE_HEIGHT
 from immersive.ui.timeline.panel import TimelinePanel
-from immersive.ui.timeline.view import LANE_HEIGHT
 
 pytestmark = pytest.mark.gui
 

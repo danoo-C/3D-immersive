@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
 from immersive.core.document import Document
 from immersive.core.edits import AddChannel
+from immersive.core.media_store import MediaStore
 from immersive.core.model import new_channel
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
@@ -47,7 +48,11 @@ class TimelinePanel(Panel):
     """Channels, clips, ruler and playhead - the ruler and the grid so far."""
 
     def __init__(
-        self, document: Document, axis: TimeAxis, parent: QWidget | None = None
+        self,
+        document: Document,
+        axis: TimeAxis,
+        store: MediaStore | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__("Timeline", parent)
         self._document = document
@@ -55,7 +60,9 @@ class TimelinePanel(Panel):
         self._playhead = 0
 
         self.ruler = Ruler(document, axis)
-        self.view = TimelineView(document, axis)
+        self.view = TimelineView(
+            document, axis, store.peaks if store is not None else None
+        )
         self.headers = ChannelHeaders(document, self.view)
         # The corner holds Add channel, so it is in reach however far the
         # lanes are scrolled.
@@ -99,6 +106,10 @@ class TimelinePanel(Panel):
         """The view and the ruler read the tempo when they paint, and repaint
         on their own; what is left is how far there is to scroll."""
         self._axis.set_extent(extent_for(self._document.project.length))
+
+    def media_changed(self) -> None:
+        """The session's samples changed - peaks arrived, or went."""
+        self.view.media_changed()
 
     def add_channel(self) -> None:
         """A new channel below the last, named and coloured in turn."""

@@ -57,7 +57,7 @@ CHANNEL: Final = "channel"
 #: such call. Either way the rule is the same one: no group key that nothing
 #: reads, because a role that looks themeable and is not fails silently for
 #: whoever changes it.
-PAINTED: Final = frozenset({"waveform", "timeline", "ruler"})
+PAINTED: Final = frozenset({"waveform", "timeline", "ruler", "clip"})
 
 
 # --------------------------------------------------------------------------- #
@@ -370,6 +370,23 @@ def group_color(group: str, key: str, theme: Theme | None = None) -> str:
     return (theme or active()).value(group, key)
 
 
+def channel_group_color(
+    group: str, key: str, channel_colour: str, theme: Theme | None = None
+) -> str:
+    """`group_color`, for a key a theme may paint in each channel's own colour.
+
+    The reserved `channel` value resolves to `channel_colour` - the channel's
+    colour from the project - and anything else resolves as `group_color`
+    would. It is what keeps 04's colour thread, a channel's header, clips and
+    curves all one colour, while still letting a theme paint every clip body
+    one grey if that is what it wants.
+    """
+    chosen = theme or active()
+    if chosen.groups[group][key] == CHANNEL:
+        return channel_colour
+    return chosen.value(group, key)
+
+
 def channel_color(index: int, theme: Theme | None = None) -> str:
     """Colour for the channel at `index`, wrapping round the palette."""
     return (theme or active()).channel(index)
@@ -412,10 +429,14 @@ def stylesheet(theme: Theme | None = None) -> str:
     what `app.py` wants.
     """
     built = theme or active()
+    # Painted groups have no placeholders - their widgets read them when they
+    # paint (D-92) - and one of them may hold the reserved `channel` value,
+    # which has no answer without a channel to resolve it against.
     return _template().substitute(
         {
             f"{group}.{key}".replace(".", "_"): built.value(group, key)
             for group, values in built.groups.items()
+            if group not in PAINTED
             for key in values
         }
     )

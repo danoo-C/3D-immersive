@@ -27,7 +27,9 @@ from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QWidget
 from immersive.core.document import Document
 from immersive.ui import theme
 from immersive.ui.time_axis import TimeAxis
+from immersive.ui.timeline.clips import ClipItem, Peaks
 from immersive.ui.timeline.grid import Level, grid_lines, tempo_of
+from immersive.ui.timeline.metrics import LANE_HEIGHT
 
 #: How far one wheel notch zooms. Five notches is about a factor of three.
 ZOOM_STEP = 1.25
@@ -38,19 +40,26 @@ SCROLL_STEP = 60
 #: What Qt counts one wheel notch as.
 NOTCH = 120
 
-#: A lane's height, and so a header's: room for the header's two rows.
-LANE_HEIGHT = 56
-
 
 class TimelineView(QGraphicsView):
     """The timeline's lanes, drawn against the shared axis."""
 
     def __init__(
-        self, document: Document, axis: TimeAxis, parent: QWidget | None = None
+        self,
+        document: Document,
+        axis: TimeAxis,
+        peaks: Peaks | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._document = document
         self._axis = axis
+        self._peaks: Peaks = peaks or (lambda _media_id: None)
+        #: One item per clip, by the clip's identity; see `_lay_out`.
+        self._items: dict[int, ClipItem] = {}
+        #: The scale the items were last laid out at: a zoom lays them out
+        #: again, and a scroll, which changes only the offset, does not.
+        self._laid_out_at: float | None = None
         #: Set while the axis is being written into the scrollbar, so the
         #: scrollbar's own signal does not write it back.
         self._syncing = False
@@ -81,28 +90,85 @@ class TimelineView(QGraphicsView):
         self.viewport().update()
 
     def retheme(self) -> None:
-        """Nothing is baked in - colours are read when it paints - so repaint."""
+        """Nothing is baked in - colours are read when they paint - so repaint.
+
+        The clips too, one by one: each keeps what it last painted in Qt's
+        cache, and a repaint of the viewport alone would show it again.
+        """
+        for item in self._items.values():
+            item.update()
         self.viewport().update()
+
+    def clip_items(self) -> list[ClipItem]:
+        return list(self._items.values())
+
+    def media_changed(self) -> None:
+        """Peaks arrived, or a sample went missing or came back: every clip
+        is shown again, and draws what it now has."""
+        self._lay_out()
+        for item in self._items.values():
+            item.update()
 
     # ------------------------------------------------------------- the axis
 
     def _axis_changed(self) -> None:
         self._syncing = True
         try:
-            # As tall as the lanes, so the vertical scrollbar reaches the last
-            # one. The grid is background, drawn across the whole view, so an
-            # empty project still shows it.
-            lanes = len(self._document.project.channels) * LANE_HEIGHT
-            self.setSceneRect(QRectF(0, 0, self._axis.span(), max(lanes, 1)))
+            # As tall as the lanes and one more, so the vertical scrollbar
+            # reaches past the last, where a drop makes a new channel. The
+            # grid is background, drawn across the whole view.
+            lanes = (len(self._document.project.channels) + 1) * LANE_HEIGHT
+            self.setSceneRect(QRectF(0, 0, self._axis.span(), lanes))
             self.horizontalScrollBar().setValue(self._axis.offset)
         finally:
             self._syncing = False
+        if self._axis.scale != self._laid_out_at:
+            self._lay_out()
         self.viewport().update()
 
     def _project_changed(self) -> None:
-        """Channels come and go, and the tempo draws the grid: lay out and
-        repaint on every change the document reports."""
+        """Channels and clips come and go, and the tempo draws the grid: lay
+        out and repaint on every change the document reports."""
+        self._lay_out()
         self._axis_changed()
+
+    def _lay_out(self) -> None:
+        """Bring the items into line with the project's clips, at the axis's
+        scale.
+
+        Kept by identity, as the headers keep channels: an item still
+        belonging to its clip is shown again, which repaints it only if what
+        it draws has changed; a new clip gets a new item; a gone clip's item
+        leaves the scene.
+        """
+        project = self._document.project
+        media = {entry.id: entry for entry in project.media_pool}
+        scale = self._axis.scale
+        seen: set[int] = set()
+        for lane, channel in enumerate(project.channels):
+            for clip in channel.clips:
+                item = self._items.get(id(clip))
+                if item is not None and item.clip is not clip:
+                    # An id Python reused for a different clip.
+                    self.scene().removeItem(item)
+                    item = None
+                if item is None:
+                    item = ClipItem(self._peaks)
+                    self.scene().addItem(item)
+                    self._items[id(clip)] = item
+                sample = media.get(clip.media_id)
+                item.present(
+                    clip,
+                    colour=channel.color,
+                    name=sample.name if sample is not None else clip.media_id,
+                    missing=sample is None or sample.missing,
+                    lane=lane,
+                    scale=scale,
+                )
+                seen.add(id(clip))
+        for key in [key for key in self._items if key not in seen]:
+            self.scene().removeItem(self._items.pop(key))
+        self._laid_out_at = scale
 
     def _scrolled(self, value: int) -> None:
         if not self._syncing:

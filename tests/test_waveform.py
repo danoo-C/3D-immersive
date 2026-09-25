@@ -19,7 +19,7 @@ from PySide6.QtGui import QImage
 from immersive.app import build_application
 from immersive.core.io.peaks import BUCKET, RATIO, Level, Pyramid, build
 from immersive.ui import theme, theme_io
-from immersive.ui.widgets.waveform import Waveform, level_for
+from immersive.ui.widgets.waveform import Waveform, envelope, level_for
 
 pytestmark = pytest.mark.gui
 
@@ -224,3 +224,56 @@ def test_a_paint_reads_between_one_and_four_buckets_a_column(
         assert width <= level.buckets <= RATIO * width
     else:
         assert level is pyramid.levels[0], "a short sample in a wide widget"
+
+
+# --------------------------------------------------------------------------- #
+# part of a sample
+# --------------------------------------------------------------------------- #
+
+
+def half_silent(frames: int = 48_000) -> Pyramid:
+    """Silence for the first half, full-scale noise for the second."""
+    audio = np.zeros((frames, 1), dtype=np.float32)
+    rng = np.random.default_rng(3)
+    audio[frames // 2 :, 0] = rng.uniform(-1, 1, frames - frames // 2)
+    return build(audio)
+
+
+def test_a_range_reads_only_its_own_frames() -> None:
+    pyramid = half_silent()
+    quiet_low, quiet_high = envelope(pyramid, 100, start=0, frames=20_000)
+    loud_low, loud_high = envelope(pyramid, 100, start=30_000, frames=18_000)
+
+    assert np.all(quiet_low == 0) and np.all(quiet_high == 0)
+    assert np.all(loud_high > 0.5) and np.all(loud_low < -0.5)
+
+
+def test_the_last_column_of_a_range_stops_where_the_range_does() -> None:
+    """reduceat reads to the end of the array past its last index; a range
+    ending in the silence must not borrow the noise after it."""
+    pyramid = half_silent()
+    low, high = envelope(pyramid, 7, start=0, frames=23_000)
+    assert np.all(low == 0) and np.all(high == 0)
+
+
+@pytest.mark.parametrize("columns", [range(0, 10), range(37, 61), range(90, 100)])
+def test_a_strip_of_columns_is_those_columns_of_the_whole(columns: range) -> None:
+    """Strips painted as a view scrolls must meet without a seam."""
+    pyramid = build(sine(48_000))
+    whole = envelope(pyramid, 100, start=5_000, frames=40_000)
+    strip = envelope(pyramid, 100, start=5_000, frames=40_000, columns=columns)
+
+    assert np.array_equal(strip[0], whole[0][columns.start : columns.stop])
+    assert np.array_equal(strip[1], whole[1][columns.start : columns.stop])
+
+
+def test_the_whole_sample_is_still_the_default() -> None:
+    pyramid = build(sine(48_000))
+    assert all(
+        np.array_equal(a, b)
+        for a, b in zip(
+            envelope(pyramid, 64),
+            envelope(pyramid, 64, start=0, frames=48_000),
+            strict=True,
+        )
+    )

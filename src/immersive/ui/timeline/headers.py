@@ -59,7 +59,8 @@ from immersive.core.edits import MoveChannel, RemoveChannel, SetAttribute
 from immersive.core.model import Channel, Project, audible, effective_snap
 from immersive.ui import theme
 from immersive.ui.timeline.grid import snap_text
-from immersive.ui.timeline.view import LANE_HEIGHT, TimelineView
+from immersive.ui.timeline.metrics import LANE_HEIGHT
+from immersive.ui.timeline.view import TimelineView
 from immersive.ui.widgets.numeric import NumericField
 
 #: The headers column's width, and so the corner's above it.
