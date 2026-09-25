@@ -1,6 +1,7 @@
 # M3 · Phase 5 — Editing clips, and snapping
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_5_editing_and_snapping.md](plans/phase_5_editing_and_snapping.md)
 
 ## Goal
 

@@ -15,7 +15,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [2 — Channels](phase_2_channels.md) | ✅ |
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | ✅ |
 | [4 — Selection](phase_4_selection.md) | ✅ |
-| [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | not started |
+| [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | in progress |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | not started |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | not started |
 | [8 — The engine, flat](phase_8_flat_engine.md) | not started |
