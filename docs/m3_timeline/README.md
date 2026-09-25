@@ -12,7 +12,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | Phase | Status |
 |---|---|
 | [1 — The time axis, the ruler and the grid](phase_1_time_axis_and_ruler.md) | ✅ |
-| [2 — Channels](phase_2_channels.md) | not started |
+| [2 — Channels](phase_2_channels.md) | in progress |
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | not started |
 | [4 — Selection](phase_4_selection.md) | not started |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | not started |

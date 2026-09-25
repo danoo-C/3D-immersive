@@ -1,6 +1,7 @@
 # M3 · Phase 2 — Channels
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_2_channels.md](plans/phase_2_channels.md)
 
 ## Goal
 
