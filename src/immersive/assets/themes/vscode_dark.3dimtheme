@@ -108,6 +108,7 @@
     },
     "timeline": {
       "background": "surface.panel",
+      "drop": "accent",
       "grid": "border",
       "grid.beat": "surface.hover",
       "grid.division": "surface.raised",

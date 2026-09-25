@@ -135,7 +135,7 @@ def test_the_theme_modules_import_no_qt() -> None:
 
 
 #: `ui/` modules that are arithmetic and must stay testable with no window.
-HEADLESS_UI = ("time_axis.py", "timeline/grid.py", "units.py")
+HEADLESS_UI = ("time_axis.py", "timeline/grid.py", "timeline/landing.py", "units.py")
 
 
 def test_the_timeline_arithmetic_imports_no_qt() -> None:

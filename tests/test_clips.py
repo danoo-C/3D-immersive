@@ -3,13 +3,15 @@ it again. Marked gui. Built as a panel on its own, over real samples."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QByteArray, QMimeData, QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QImage
 from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
@@ -19,6 +21,7 @@ from immersive.core.media_store import MediaStore, Prepared, prepare
 from immersive.core.model import Clip, new_channel, new_clip_id
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
+from immersive.ui.explorer.media_pool import MIME
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.clips import (
     BODY_ALPHA,
@@ -335,3 +338,170 @@ def test_a_clip_far_wider_than_the_view_draws_only_what_is_on_screen(
     width = arrangement.panel.view.viewport().width()
     assert drawn, "it drew its waveform"
     assert max(drawn) <= width + 2
+
+
+# --------------------------------------------------------------------------- #
+# dropping from the pool, through the view
+# --------------------------------------------------------------------------- #
+
+
+def pool_drag(*media_ids: str) -> QMimeData:
+    """What the pool puts in a drag (04, *Media pool*)."""
+    data = QMimeData()
+    data.setData(MIME, QByteArray(json.dumps(list(media_ids)).encode("utf-8")))
+    return data
+
+
+def drag_over(
+    arrangement: Arrangement,
+    data: QMimeData,
+    x: float,
+    y: float,
+    modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+) -> bool:
+    """Enter and move over the lanes; whether the view would take it.
+
+    The view's handlers are called directly rather than through
+    `QApplication.sendEvent`: Qt passes an ignored drag event on up the
+    parent chain expecting a real drag in progress, and with only a
+    synthesised event there, that crashed the interpreter.
+    """
+    view = arrangement.panel.view
+    point = QPoint(round(x), round(y))
+    actions = Qt.DropAction.CopyAction
+    buttons = Qt.MouseButton.LeftButton
+    view.dragEnterEvent(QDragEnterEvent(point, actions, data, buttons, modifiers))
+    move = QDragMoveEvent(point, actions, data, buttons, modifiers)
+    view.dragMoveEvent(move)
+    return move.isAccepted()
+
+
+def drop_at(
+    arrangement: Arrangement,
+    data: QMimeData,
+    x: float,
+    y: float,
+    modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+) -> bool:
+    drag_over(arrangement, data, x, y, modifiers)
+    event = QDropEvent(
+        QPointF(x, y),
+        Qt.DropAction.CopyAction,
+        data,
+        Qt.MouseButton.LeftButton,
+        modifiers,
+    )
+    arrangement.panel.view.dropEvent(event)
+    return event.isAccepted()
+
+
+def mid(lane: int) -> float:
+    return lane * LANE_HEIGHT + LANE_HEIGHT / 2
+
+
+def test_a_row_dropped_on_a_lane_lands_snapped_in_one_command(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    document = arrangement.document
+    before = document.can_undo
+
+    assert drop_at(arrangement, pool_drag(arrangement.media.id), 110, mid(1))
+
+    [clip] = document.project.channels[1].clips
+    assert clip.start == 54_000, "52 800 under the pointer, snapped to 1/16"
+    assert clip.length == arrangement.media.frames
+    document.undo()
+    assert document.project.channels[1].clips == []
+    assert document.can_undo == before
+
+
+def test_alt_drops_exactly_under_the_pointer(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    drop_at(
+        arrangement,
+        pool_drag(arrangement.media.id),
+        110,
+        mid(0),
+        Qt.KeyboardModifier.AltModifier,
+    )
+    assert arrangement.document.project.channels[0].clips[0].start == 52_800
+
+
+def test_below_the_last_lane_a_drop_makes_a_channel_and_one_undo_removes_it(
+    tmp_path: Path,
+) -> None:
+    arrangement = Arrangement(tmp_path, channels=2)
+    document = arrangement.document
+    media = arrangement.media.id
+
+    drop_at(arrangement, pool_drag(media, media), 0, mid(4))
+
+    assert len(document.project.channels) == 3
+    assert [clip.start for clip in document.project.channels[2].clips] == [
+        0,
+        arrangement.media.frames,
+    ]
+    assert len(arrangement.panel.headers.headers()) == 3
+    document.undo()
+    assert len(document.project.channels) == 2
+
+
+def test_a_drop_over_a_clip_trims_it(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    under = arrangement.drop(0, 0)  # two seconds
+
+    drop_at(arrangement, pool_drag(arrangement.media.id), 100, mid(0))  # at 1 s
+
+    assert under.length == SAMPLE_RATE, "trimmed to where the drop begins"
+    assert len(arrangement.document.project.channels[0].clips) == 2
+
+
+def test_shift_over_an_occupied_span_is_refused_before_the_release(
+    tmp_path: Path,
+) -> None:
+    arrangement = Arrangement(tmp_path)
+    arrangement.drop(0, 0)
+    document = arrangement.document
+    before = document.can_undo
+    shift = Qt.KeyboardModifier.ShiftModifier
+
+    assert not drag_over(
+        arrangement, pool_drag(arrangement.media.id), 100, mid(0), shift
+    )
+    assert arrangement.panel.view.landing() is None
+    assert not drop_at(arrangement, pool_drag(arrangement.media.id), 100, mid(0), shift)
+    assert len(document.project.channels[0].clips) == 1
+    assert document.can_undo == before
+    # Over empty space, Shift has nothing to refuse.
+    assert drag_over(arrangement, pool_drag(arrangement.media.id), 100, mid(1), shift)
+
+
+def test_a_drag_of_anything_else_is_not_taken(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    text = QMimeData()
+    text.setText("hello")
+
+    assert not drag_over(arrangement, text, 100, mid(0))
+    assert not drag_over(arrangement, pool_drag("m-deadbeef"), 100, mid(0))
+
+
+def test_the_outline_shows_where_it_will_land_until_the_drag_leaves(
+    tmp_path: Path,
+) -> None:
+    arrangement = Arrangement(tmp_path)
+    view = arrangement.panel.view
+
+    drag_over(arrangement, pool_drag(arrangement.media.id), 110, mid(1))
+    landing = view.landing()
+    assert landing is not None and (landing.lane, landing.start) == (1, 54_000)
+    drop = theme.group_color("timeline", "drop").upper()
+    image = arrangement.grab()
+    x = round(54_000 / SCALE)
+    assert drop in {
+        image.pixelColor(x, y).name().upper()
+        for y in range(LANE_HEIGHT, 2 * LANE_HEIGHT)
+    }
+
+    from PySide6.QtGui import QDragLeaveEvent
+
+    view.dragLeaveEvent(QDragLeaveEvent())
+    assert view.landing() is None

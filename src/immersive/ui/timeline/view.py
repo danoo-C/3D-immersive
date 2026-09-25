@@ -20,15 +20,30 @@ repaint reaches them because they have nothing to re-read.
 
 from __future__ import annotations
 
+import json
+
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QResizeEvent, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QResizeEvent,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QWidget
 
 from immersive.core.document import Document
 from immersive.ui import theme
+from immersive.ui.explorer.media_pool import MIME
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.clips import ClipItem, Peaks
 from immersive.ui.timeline.grid import Level, grid_lines, tempo_of
+from immersive.ui.timeline.landing import Landing, dropped, landing
 from immersive.ui.timeline.metrics import LANE_HEIGHT
 
 #: How far one wheel notch zooms. Five notches is about a factor of three.
@@ -60,6 +75,10 @@ class TimelineView(QGraphicsView):
         #: The scale the items were last laid out at: a zoom lays them out
         #: again, and a scroll, which changes only the offset, does not.
         self._laid_out_at: float | None = None
+        #: Where a drag from the pool would land, while one is over the lanes.
+        self._landing: Landing | None = None
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         #: Set while the axis is being written into the scrollbar, so the
         #: scrollbar's own signal does not write it back.
         self._syncing = False
@@ -101,6 +120,10 @@ class TimelineView(QGraphicsView):
 
     def clip_items(self) -> list[ClipItem]:
         return list(self._items.values())
+
+    def landing(self) -> Landing | None:
+        """Where the drag over the lanes would land now, if one is."""
+        return self._landing
 
     def media_changed(self) -> None:
         """Peaks arrived, or a sample went missing or came back: every clip
@@ -243,6 +266,65 @@ class TimelineView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
+    # ------------------------------------------------ dropping from the pool
+
+    def _landing_of(self, event: QDropEvent) -> Landing | None:
+        """What dropping `event` here would do: the pool's samples, at the
+        lane and sample under the pointer, as `landing` works it out."""
+        data = event.mimeData()
+        if not data.hasFormat(MIME):
+            return None
+        try:
+            ids = json.loads(bytes(data.data(MIME).data()).decode("utf-8"))
+        except ValueError:
+            return None
+        if not isinstance(ids, list):
+            return None
+        point = self.mapToScene(event.position().toPoint())
+        modifiers = event.modifiers()
+        return landing(
+            self._document.project,
+            [str(each) for each in ids],
+            point.x(),
+            point.y(),
+            self._axis.scale,
+            exact=bool(modifiers & Qt.KeyboardModifier.AltModifier),
+            refuse_overlap=bool(modifiers & Qt.KeyboardModifier.ShiftModifier),
+        )
+
+    def _hover(self, event: QDragMoveEvent) -> None:
+        """Show where it would land, or refuse it - so the pointer says no
+        before the release, rather than accepting and doing nothing."""
+        where = self._landing_of(event)
+        self._landing = where if where is not None and not where.refused else None
+        if self._landing is None:
+            event.ignore()
+        else:
+            event.acceptProposedAction()
+        self.viewport().update()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        self._hover(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        self._hover(event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self._landing = None
+        self.viewport().update()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        """One command, whatever the drop does (F-4)."""
+        where = self._landing_of(event)
+        self._landing = None
+        self.viewport().update()
+        if where is None or where.refused:
+            event.ignore()
+            return
+        project = self._document.project
+        self._document.push(dropped(project, where, theme.active().channels))
+        event.acceptProposedAction()
+
     # ----------------------------------------------------------- painting
 
     def drawBackground(self, painter: QPainter, exposed: QRectF | QRect) -> None:
@@ -280,8 +362,20 @@ class TimelineView(QGraphicsView):
                 painter.drawLine(left, y, right, y)
 
     def drawForeground(self, painter: QPainter, exposed: QRectF | QRect) -> None:
-        """The playhead, over everything the scene holds (04, *Timeline*)."""
+        """Where a drag would land, and the playhead, over everything the
+        scene holds (04, *Timeline*)."""
         rect = QRectF(exposed)
+        if self._landing is not None:
+            scale = self._axis.scale
+            pen = QPen(QColor(theme.group_color("timeline", "drop")))
+            pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            top = self._landing.lane * LANE_HEIGHT + 1
+            for sample, start in self._landing.placed:
+                painter.drawRect(
+                    QRectF(start / scale, top, sample.frames / scale, LANE_HEIGHT - 3)
+                )
         x = round(self._playhead / self._axis.scale)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setPen(QColor(theme.group_color("timeline", "playhead")))
