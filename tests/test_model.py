@@ -33,6 +33,7 @@ from immersive.core.model import (
     all_ids,
     audible,
     mint_id,
+    new_channel,
     new_channel_id,
     new_clip_id,
     new_media_id,
@@ -420,3 +421,73 @@ def test_changing_any_single_field_breaks_equality(what: str) -> None:
     changed = _rich_project()
     MUTATIONS[what](changed)
     assert changed != _rich_project(), f"changing {what} did not break equality"
+
+
+# --------------------------------------------------------------------------- #
+# the next channel
+# --------------------------------------------------------------------------- #
+
+PALETTE = ["#A855F7", "#22D3EE", "#F59E0B", "#34D399",
+           "#F472B6", "#60A5FA", "#FB923C", "#A3E635"]  # fmt: skip
+
+
+def with_colours(*colours: str) -> Project:
+    return Project(
+        channels=[
+            Channel(f"c-0000000{n}", f"Channel {n}", colour)
+            for n, colour in enumerate(colours, start=1)
+        ]
+    )
+
+
+def test_the_first_channel_takes_the_first_colour_and_is_channel_1() -> None:
+    channel = new_channel(Project(), PALETTE)
+    assert (channel.name, channel.color) == ("Channel 1", "#A855F7")
+
+
+def test_a_new_channel_takes_the_colour_after_the_last_channels() -> None:
+    project = with_colours("#A855F7", "#22D3EE")
+    assert new_channel(project, PALETTE).color == "#F59E0B"
+
+
+def test_the_colours_wrap_after_the_eighth() -> None:
+    project = with_colours(*PALETTE)
+    assert new_channel(project, PALETTE).color == "#A855F7"
+
+
+def test_deleting_a_channel_does_not_repeat_its_neighbours_colour() -> None:
+    """The mutation this is for: the colour counted from the number of
+    channels. Three channels with the third deleted would hand out the third
+    colour again, beside the second - two neighbours of one colour."""
+    project = with_colours("#A855F7", "#22D3EE", "#F59E0B", "#34D399")
+    del project.channels[1]  # purple, amber, green are left
+    assert new_channel(project, PALETTE).color == "#F472B6"
+
+
+def test_a_last_colour_from_outside_the_palette_starts_at_the_count() -> None:
+    project = with_colours("#A855F7", "#123456")
+    assert new_channel(project, PALETTE).color == "#F59E0B"
+
+
+def test_the_palette_is_matched_whatever_the_case() -> None:
+    project = with_colours("#a855f7")
+    assert new_channel(project, PALETTE).color == "#22D3EE"
+
+
+def test_a_taken_name_is_skipped() -> None:
+    project = with_colours("#A855F7", "#22D3EE")
+    project.channels[0].name = "Channel 3"
+    assert new_channel(project, PALETTE).name == "Channel 4"
+
+
+def test_a_new_channel_has_an_id_the_project_does_not() -> None:
+    project = with_colours("#A855F7")
+    channel = new_channel(project, PALETTE)
+    assert channel.id not in all_ids(project)
+    project.channels.append(channel)
+    assert validate(project) == []
+
+
+def test_an_empty_palette_is_refused() -> None:
+    with pytest.raises(ValueError, match="at least one colour"):
+        new_channel(Project(), [])

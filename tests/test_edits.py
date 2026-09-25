@@ -15,6 +15,7 @@ from immersive.core.commands import Command, Compound
 from immersive.core.edits import (
     AddChannel,
     AddClip,
+    MoveChannel,
     MoveClip,
     RemoveChannel,
     RemoveClip,
@@ -70,6 +71,8 @@ EDITS: dict[str, Build] = {
     "add a channel in the middle": lambda p: AddChannel(p, a_channel(), index=1),
     "remove the first channel": lambda p: RemoveChannel(p, p.channels[0]),
     "remove the last channel": lambda p: RemoveChannel(p, p.channels[-1]),
+    "move a channel down": lambda p: MoveChannel(p, p.channels[0], 1),
+    "move a channel up": lambda p: MoveChannel(p, p.channels[1], 0),
     "add a clip between two others": lambda p: AddClip(p.channels[0], a_clip()),
     "add a clip before the first": lambda p: AddClip(p.channels[0], a_clip(start=0)),
     "add a clip to an empty channel": lambda p: AddClip(p.channels[1], a_clip()),
@@ -159,6 +162,53 @@ def test_removing_a_channel_picks_by_identity_not_by_equality() -> None:
 
     assert len(project.channels) == 1
     assert project.channels[0] is first
+
+
+def four() -> Project:
+    return Project(channels=[a_channel(f"c-0000000{n}") for n in range(1, 5)])
+
+
+def ids(project: Project) -> list[str]:
+    return [channel.id[-1] for channel in project.channels]
+
+
+@pytest.mark.parametrize(
+    ("moving", "to", "order"),
+    [
+        (0, 3, "2341"),
+        (3, 0, "4123"),
+        (1, 2, "1324"),
+        (2, 1, "1324"),
+        (0, 1, "2134"),
+    ],
+)
+def test_a_moved_channel_lands_where_asked_and_undo_puts_it_back(
+    moving: int, to: int, order: str
+) -> None:
+    project = four()
+    command = MoveChannel(project, project.channels[moving], to)
+
+    command.do()
+    assert "".join(ids(project)) == order
+    command.undo()
+    assert "".join(ids(project)) == "1234"
+
+
+def test_moving_a_channel_onto_its_own_place_changes_nothing() -> None:
+    project = four()
+    command = MoveChannel(project, project.channels[2], 2)
+    command.do()
+    assert "".join(ids(project)) == "1234"
+    command.undo()
+    assert "".join(ids(project)) == "1234"
+
+
+def test_a_move_outside_the_list_is_refused_at_construction() -> None:
+    project = four()
+    with pytest.raises(IndexError):
+        MoveChannel(project, project.channels[0], 4)
+    with pytest.raises(IndexError):
+        MoveChannel(project, project.channels[0], -1)
 
 
 def test_removing_something_that_is_not_there_says_so_at_construction() -> None:

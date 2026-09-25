@@ -255,6 +255,36 @@ def new_clip_id(project: Project, rng: random.Random | None = None) -> str:
     return mint_id(CLIP_PREFIX, all_ids(project), rng)
 
 
+def new_channel(
+    project: Project, palette: Sequence[str], rng: random.Random | None = None
+) -> Channel:
+    """The channel Add Channel makes: named and coloured in turn.
+
+    Its colour is the palette colour after the last channel's own, wrapping
+    after the end, so the turn follows the project rather than a counter kept
+    beside it that Undo would also have to put back. A last colour not in the
+    palette - picked by hand, or from another theme's palette - starts the
+    turn at the channel count instead. The palette is the active theme's
+    (D-75), passed in, so nothing here knows about themes.
+
+    The name is `Channel N`, N one more than the count and raised past any
+    name already taken.
+    """
+    if not palette:
+        raise ValueError("a palette needs at least one colour")
+    taken = {channel.name for channel in project.channels}
+    number = len(project.channels) + 1
+    while f"Channel {number}" in taken:
+        number += 1
+
+    colours = [colour.upper() for colour in palette]
+    last = project.channels[-1].color.upper() if project.channels else None
+    turn = (
+        colours.index(last) + 1 if last in colours else len(project.channels)
+    ) % len(palette)
+    return Channel(new_channel_id(project, rng), f"Channel {number}", palette[turn])
+
+
 # --------------------------------------------------------------------------- #
 # derived facts
 # --------------------------------------------------------------------------- #

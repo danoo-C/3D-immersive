@@ -74,6 +74,32 @@ class RemoveChannel(Command):
         self.project.channels.insert(self.index, self.channel)
 
 
+class MoveChannel(Command):
+    """Put a channel at `index` in the order, counted as the list will stand
+    once it is there.
+
+    A channel's place in the list is its order (D-61), so a reorder is one
+    removal and one insertion, and Undo is the same two the other way round.
+    The channel is found by identity, for the reason `_index_of` gives.
+    """
+
+    def __init__(self, project: Project, channel: Channel, index: int) -> None:
+        if not 0 <= index < len(project.channels):
+            raise IndexError(f"index {index} is outside 0..{len(project.channels) - 1}")
+        self.project = project
+        self.channel = channel
+        self.origin = _index_of(project.channels, channel)
+        self.index = index
+
+    def do(self) -> None:
+        del self.project.channels[self.origin]
+        self.project.channels.insert(self.index, self.channel)
+
+    def undo(self) -> None:
+        del self.project.channels[self.index]
+        self.project.channels.insert(self.origin, self.channel)
+
+
 class AddClip(Command):
     """Place a clip on a channel, keeping `clips` sorted by start.
 
