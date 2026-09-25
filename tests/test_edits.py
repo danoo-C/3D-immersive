@@ -15,6 +15,7 @@ from immersive.core.commands import Command, Compound
 from immersive.core.edits import (
     AddChannel,
     AddClip,
+    DropClips,
     MoveChannel,
     MoveClip,
     RemoveChannel,
@@ -24,6 +25,7 @@ from immersive.core.edits import (
 from immersive.core.model import (
     Channel,
     Clip,
+    Fade,
     FadeShape,
     MediaFile,
     Position,
@@ -71,6 +73,15 @@ EDITS: dict[str, Build] = {
     "add a channel in the middle": lambda p: AddChannel(p, a_channel(), index=1),
     "remove the first channel": lambda p: RemoveChannel(p, p.channels[0]),
     "remove the last channel": lambda p: RemoveChannel(p, p.channels[-1]),
+    "drop a clip on an empty channel": lambda p: DropClips(
+        p, p.channels[1], [a_clip()]
+    ),
+    "drop a clip over another": lambda p: DropClips(
+        p, p.channels[0], [a_clip(start=12_000)]
+    ),
+    "drop a clip inside another": lambda p: DropClips(
+        p, p.channels[0], [Clip("k-00000009", MEDIA, 100_000, 0, 4_000)]
+    ),
     "move a channel down": lambda p: MoveChannel(p, p.channels[0], 1),
     "move a channel up": lambda p: MoveChannel(p, p.channels[1], 0),
     "add a clip between two others": lambda p: AddClip(p.channels[0], a_clip()),
@@ -316,3 +327,170 @@ def test_nothing_merges_by_default() -> None:
     )
     add_channel = AddChannel(project, a_channel())
     assert add_channel.merge_with(AddClip(channel, a_clip())) is False
+
+
+# --------------------------------------------------------------------------- #
+# dropping clips, and what they land on (D-95)
+# --------------------------------------------------------------------------- #
+
+LONG = "m-00000002"
+
+
+def a_lane(*clips: Clip) -> tuple[Project, Channel]:
+    """A channel holding `clips`, over a sample long enough for anything."""
+    long = MediaFile(LONG, "long.wav", "long.wav", SAMPLE_RATE, 1, 10_000_000)
+    channel = Channel("c-00000001", "A", "#A855F7", clips=list(clips))
+    return Project(media_pool=[long], channels=[channel]), channel
+
+
+def existing(start: int = 96_000, length: int = 96_000, offset: int = 1_000) -> Clip:
+    return Clip(
+        "k-00000001",
+        LONG,
+        start,
+        offset,
+        length,
+        fade_in=Fade(2_000),
+        fade_out=Fade(3_000),
+    )
+
+
+def dropped(start: int, length: int, identifier: str = "k-000000d1") -> Clip:
+    return Clip(identifier, LONG, start, 0, length)
+
+
+def spans(channel: Channel) -> list[tuple[int, int]]:
+    return [(clip.start, clip.end) for clip in channel.clips]
+
+
+def frame_at(clip: Clip, t: int) -> int:
+    """Which frame of its sample `clip` plays at timeline time `t`."""
+    return clip.offset + (t - clip.start)
+
+
+def test_a_drop_on_an_empty_channel_just_lands() -> None:
+    project, channel = a_lane()
+    DropClips(project, channel, [dropped(48_000, 10_000)]).do()
+    assert spans(channel) == [(48_000, 58_000)]
+
+
+def test_a_clip_the_drop_covers_is_removed() -> None:
+    project, channel = a_lane(existing())
+    DropClips(project, channel, [dropped(90_000, 200_000)]).do()
+    assert spans(channel) == [(90_000, 290_000)]
+    assert validate(project) == []
+
+
+def test_a_clip_overlapped_at_its_head_is_trimmed_and_plays_what_it_played() -> None:
+    original = existing()
+    project, channel = a_lane(original)
+    before = {t: frame_at(original, t) for t in (120_000, 150_000, 191_999)}
+
+    DropClips(project, channel, [dropped(48_000, 72_000)]).do()  # to 120 000
+
+    assert spans(channel) == [(48_000, 120_000), (120_000, 192_000)]
+    kept = channel.clips[1]
+    assert kept is original
+    assert {t: frame_at(kept, t) for t in before} == before
+    assert kept.fade_in == Fade(), "its start went, and the fade that was there"
+    assert kept.fade_out == Fade(3_000)
+    assert validate(project) == []
+
+
+def test_a_clip_overlapped_at_its_tail_is_trimmed() -> None:
+    original = existing()
+    project, channel = a_lane(original)
+
+    DropClips(project, channel, [dropped(150_000, 100_000)]).do()
+
+    assert spans(channel) == [(96_000, 150_000), (150_000, 250_000)]
+    assert (original.offset, original.fade_in, original.fade_out) == (
+        1_000,
+        Fade(2_000),
+        Fade(),
+    )
+
+
+def test_a_clip_reaching_past_both_ends_is_split_around_the_drop() -> None:
+    original = existing()
+    project, channel = a_lane(original)
+
+    DropClips(project, channel, [dropped(120_000, 24_000)]).do()
+
+    assert spans(channel) == [(96_000, 120_000), (120_000, 144_000), (144_000, 192_000)]
+    head, _, tail = channel.clips
+    assert head is original
+    assert tail.id not in {original.id, "k-000000d1"}
+    assert frame_at(tail, 144_000) == 1_000 + 48_000, "the tail plays its own part"
+    assert (head.fade_in, head.fade_out) == (Fade(2_000), Fade())
+    assert (tail.fade_in, tail.fade_out) == (Fade(), Fade(3_000))
+    assert validate(project) == []
+
+
+def test_a_fade_longer_than_what_is_left_is_cut_to_fit() -> None:
+    original = existing()
+    project, channel = a_lane(original)
+
+    DropClips(
+        project, channel, [dropped(97_000, 94_000)]
+    ).do()  # leaves 1 000 each side
+
+    head, _, tail = channel.clips
+    assert head.fade_in.length == 1_000
+    assert tail.fade_out.length == 1_000
+
+
+def test_a_drop_across_several_clips_settles_each() -> None:
+    a = Clip("k-00000001", LONG, 0, 0, 50_000)
+    b = Clip("k-00000002", LONG, 60_000, 0, 20_000)
+    c = Clip("k-00000003", LONG, 90_000, 0, 50_000)
+    project, channel = a_lane(a, b, c)
+
+    DropClips(
+        project,
+        channel,
+        [dropped(40_000, 30_000, "k-000000d1"), dropped(70_000, 30_000, "k-000000d2")],
+    ).do()
+
+    assert spans(channel) == [
+        (0, 40_000),
+        (40_000, 70_000),
+        (70_000, 100_000),
+        (100_000, 140_000),
+    ]
+    assert [clip.id for clip in channel.clips] == [
+        "k-00000001",
+        "k-000000d1",
+        "k-000000d2",
+        "k-00000003",
+    ]
+    assert validate(project) == []
+
+
+def test_undo_puts_every_clip_back_as_it_was_and_redo_does_it_again() -> None:
+    project, channel = a_lane(
+        existing(), Clip("k-00000002", LONG, 300_000, 5, 10_000, fade_in=Fade(7))
+    )
+    before = copy.deepcopy(project)
+    command = DropClips(project, channel, [dropped(120_000, 190_000)])
+
+    command.do()
+    once = copy.deepcopy(project)
+    command.undo()
+    assert project == before
+    command.do()
+    assert project == once
+
+
+def test_a_drop_below_the_last_lane_is_one_compound_with_its_new_channel() -> None:
+    project, _ = a_lane()
+    fresh = Channel("c-00000002", "B", "#22D3EE")
+    before = copy.deepcopy(project)
+    command = Compound(
+        [AddChannel(project, fresh), DropClips(project, fresh, [dropped(0, 5_000)])]
+    )
+
+    command.do()
+    assert spans(project.channels[1]) == [(0, 5_000)]
+    command.undo()
+    assert project == before

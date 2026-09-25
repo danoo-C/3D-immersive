@@ -12,11 +12,20 @@ from __future__ import annotations
 
 import bisect
 from collections.abc import Sequence
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from typing import Any, TypeVar
 
 from immersive.core.commands import Command
-from immersive.core.model import Channel, Clip, MediaFile, Project
+from immersive.core.model import (
+    CLIP_PREFIX,
+    Channel,
+    Clip,
+    Fade,
+    MediaFile,
+    Project,
+    all_ids,
+    mint_id,
+)
 
 _T = TypeVar("_T")
 
@@ -120,6 +129,113 @@ class AddClip(Command):
 
     def undo(self) -> None:
         del self.channel.clips[self.index]
+
+
+#: What a clip's placement is, for putting it back: where it starts, where
+#: in its sample, how long, and its two fades.
+_Placing = tuple[int, int, int, Fade, Fade]
+
+
+def _placing(clip: Clip) -> _Placing:
+    return (clip.start, clip.offset, clip.length, clip.fade_in, clip.fade_out)
+
+
+def _place(clip: Clip, placing: _Placing) -> None:
+    clip.start, clip.offset, clip.length, clip.fade_in, clip.fade_out = placing
+
+
+def _remaining(
+    start: int, end: int, cuts: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """The parts of `[start, end)` that none of `cuts` covers, in order."""
+    pieces = [(start, end)]
+    for cut_start, cut_end in cuts:
+        kept = []
+        for piece_start, piece_end in pieces:
+            if cut_end <= piece_start or piece_end <= cut_start:
+                kept.append((piece_start, piece_end))
+                continue
+            if piece_start < cut_start:
+                kept.append((piece_start, cut_start))
+            if cut_end < piece_end:
+                kept.append((cut_end, piece_end))
+        pieces = kept
+    return pieces
+
+
+class DropClips(Command):
+    """Put `clips` on `channel`, and settle every overlap they make (D-95).
+
+    Clips on a channel never overlap (03, *Rules*), so a drop makes room for
+    itself. Each clip already there loses whatever the drop covers: covered
+    entirely it is removed, overlapped at one end it is trimmed, and reaching
+    past both ends of the drop it is split, its head kept and a new clip
+    minted for its tail. A part that loses its clip's start or end loses the
+    fade that was there. Every part still plays the samples it played before
+    - its offset moves with its start.
+
+    All of it is worked out here, against the channel as it stands, so `do()`
+    and `undo()` only apply one list of placements or the other, and Redo
+    applies exactly what the first `do()` did.
+    """
+
+    def __init__(
+        self, project: Project, channel: Channel, clips: Sequence[Clip]
+    ) -> None:
+        self.channel = channel
+        self.before = list(channel.clips)
+        self.placed_before = {id(clip): _placing(clip) for clip in channel.clips}
+
+        cuts = sorted((clip.start, clip.end) for clip in clips)
+        taken = all_ids(project) | {clip.id for clip in clips}
+        self.placed_after: dict[int, _Placing] = {}
+        after: list[Clip] = list(clips)
+        for existing in channel.clips:
+            parts = _remaining(existing.start, existing.end, cuts)
+            if parts == [(existing.start, existing.end)]:
+                after.append(existing)
+                continue
+            for index, (start, end) in enumerate(parts):
+                piece = (
+                    existing
+                    if index == 0
+                    else replace(existing, id=mint_id(CLIP_PREFIX, taken))
+                )
+                taken.add(piece.id)
+                placing = self._piece(existing, start, end)
+                if piece is existing:
+                    self.placed_after[id(existing)] = placing
+                else:
+                    _place(piece, placing)
+                after.append(piece)
+        self.after = sorted(after, key=lambda clip: clip.start)
+
+    @staticmethod
+    def _piece(of: Clip, start: int, end: int) -> _Placing:
+        """The part `[start, end)` of `of`, playing the samples it played."""
+        length = end - start
+        fade_in = (
+            replace(of.fade_in, length=min(of.fade_in.length, length))
+            if start == of.start
+            else Fade()
+        )
+        fade_out = (
+            replace(of.fade_out, length=min(of.fade_out.length, length))
+            if end == of.end
+            else Fade()
+        )
+        return (start, of.offset + (start - of.start), length, fade_in, fade_out)
+
+    def do(self) -> None:
+        for clip in self.before:
+            if id(clip) in self.placed_after:
+                _place(clip, self.placed_after[id(clip)])
+        self.channel.clips[:] = self.after
+
+    def undo(self) -> None:
+        for clip in self.before:
+            _place(clip, self.placed_before[id(clip)])
+        self.channel.clips[:] = self.before
 
 
 class RemoveClip(Command):
