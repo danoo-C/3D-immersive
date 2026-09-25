@@ -150,18 +150,35 @@ no test depends on another's leftovers.
       is ticked, since Windows and macOS start processes more slowly and
       schedule threads differently.
 
-### 3. A fast lane, and a `gui` marker that can be trusted
+### ~~3. A fast lane, and a `gui` marker that can be trusted~~ — done
 
-**Measured: `pytest -m "not gui"` runs 877 tests in 4.1 s.**
+**Measured: `pytest -m "not gui"` runs 877 tests in 4.1 s** before;
+**884 in 3.8–4.4 s** after landing.
 
 That is the inner loop for anything in `core/` or `audio/`. It is only
 trustworthy if every test that builds a `QApplication` or a widget carries the
 `gui` marker. Today that holds because it has been done by hand.
 
-- [ ] A test that fails if any test module that imports `PySide6` has no
+- [x] A test that fails if any test module that imports `PySide6` has no
       `gui` mark, at module level or on each test that needs it. The rule is
-      then enforced rather than remembered.
-- [ ] `08`'s *Checks* names the fast lane and says what it leaves out.
+      then enforced rather than remembered. *Landed as
+      `tests/test_markers.py`, with "imports `PySide6`" read as "reaches
+      Qt": a test reaches it if the test, or a helper, class or fixture it
+      uses, names something imported from a package module that imports
+      PySide6 when it is imported — directly or through another — or imports
+      one itself. Its first run found two. `test_stylesheet_parses` builds a
+      `QApplication` and shows a widget, so the fast lane has always run it;
+      it is now marked. A flags test named `immersive.app` only to patch
+      `run` out of it, and now patches it by name. The rule costs 0.1 s,
+      nearly all of it parsing 17 000 lines of source.*
+- [x] `08`'s *Checks* names the fast lane and says what it leaves out.
+- [x] *Thirteen mutations, all killed: a mark dropped from a module, from one
+      test, and from the stylesheet test; and ten against the detector — no
+      transitive step, packages' `__init__` not run, annotations counted as
+      uses, fixtures asked for by name ignored, local imports ignored,
+      `conftest.py` ignored, `TYPE_CHECKING` followed, deferred imports
+      followed, the module mark not read, and a module's autouse fixtures
+      ignored.*
 
 ### 4. Gates instead of sleeps
 

@@ -58,6 +58,7 @@ but nothing can be heard. WSL counts as Linux here.
 .venv/bin/ruff format --check .  # formatting
 .venv/bin/mypy                   # types
 QT_QPA_PLATFORM=offscreen .venv/bin/pytest -n 8 --dist worksteal   # everything, in parallel
+.venv/bin/pytest -m "not gui"    # the fast lane: nothing that needs Qt
 ```
 
 **Run the whole suite in parallel.** Eight workers with work-stealing took
@@ -65,6 +66,18 @@ it from 11.3 s to under 6 s where it was measured. More workers than that was
 slower, because each pays about two seconds to start. A plain `pytest` still
 runs serially — deliberately not in `addopts` — so a single test under a
 debugger behaves as it always has. CI runs `-n auto`, sized to the runner.
+
+**The fast lane is for work in `core/` and `audio/`.** `-m "not gui"` runs
+every test that needs no Qt — the model, curves, time and undo, both file
+formats, decoding, hashing and peaks, the theme system, and audition against
+its stand-in — in about four seconds, serially. It leaves out every test
+marked `gui`: anything that builds a `QApplication`, a widget or a window,
+which is the main window, the pool, the waveform, theme switching, the notice
+surface and the real launches. That is a fifth of the tests and most of the
+time, so run everything before trusting a change under `ui/`. The mark is
+enforced rather than remembered: `tests/test_markers.py` fails any test that
+reaches Qt without it, whether directly or through a helper, a fixture or an
+import.
 
 `QT_QPA_PLATFORM=offscreen` is set automatically by `tests/conftest.py`; it is
 shown here because you will want it for any ad-hoc Qt script on a headless

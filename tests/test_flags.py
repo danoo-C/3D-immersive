@@ -63,7 +63,9 @@ def test_main_hands_the_flags_to_the_application(
         received.update(flags, argv=argv)
         return 0
 
-    monkeypatch.setattr(app, "run", run)
+    # By name rather than through `app`: nothing here reaches Qt, and naming
+    # the module would say it does (test_markers.py).
+    monkeypatch.setattr("immersive.app.run", run)
 
     assert (
         __main__.main(["--device", "Headphones", "--block", "1024", "-style", "x"]) == 0

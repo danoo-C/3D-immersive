@@ -59,6 +59,7 @@ def test_stylesheet_substitutes_every_placeholder() -> None:
     assert theme.color("surface.window") in qss
 
 
+@pytest.mark.gui
 def test_stylesheet_parses(capfd: pytest.CaptureFixture[str]) -> None:
     """Qt must accept the QSS, not merely receive it.
 
