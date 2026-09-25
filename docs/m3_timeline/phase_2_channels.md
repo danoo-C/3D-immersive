@@ -52,6 +52,10 @@ palette → M8, the first milestone with dialogs.
       (F-42).
 - [ ] A saved project reopened shows the same channels in the same order,
       with the same colours, names and states.
+- [ ] With more channels than fit, the wheel scrolls through them, and a
+      middle-button drag pans them up and down as well as along time; the
+      headers stay put sideways and follow the lanes up and down, and the
+      ruler stays put up and down and follows them sideways.
 - [ ] `channel header` and the input-field group are in `04` and the bundled
       theme, and no widget in the timeline names a hex.
 - [ ] A screenshot of a project with channels in every state is taken and

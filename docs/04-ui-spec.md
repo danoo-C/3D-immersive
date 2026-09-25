@@ -540,6 +540,10 @@ where a drag will land.
 - Playhead in `accent`, always drawn over everything.
 - Loop region set by dragging in the ruler.
 - Scroll = vertical, Shift+scroll = horizontal, Ctrl+scroll = zoom about cursor.
+  A trackpad's or a tilt wheel's sideways movement scrolls along time with no
+  key held, and a **middle-button drag pans both ways**, the lanes following
+  the hand — the gesture pro tools give a mouse with only an up-and-down
+  wheel, which otherwise needs Shift for every move through time.
 
 Implemented on `QGraphicsView` with cached waveform pixmaps per clip and
 level-of-detail on zoom — at a few hundred clips a naive repaint will not hold

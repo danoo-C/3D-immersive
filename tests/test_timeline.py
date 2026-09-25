@@ -499,3 +499,87 @@ def test_ruler_ticks_are_longest_at_bars_and_shortest_at_divisions() -> None:
 
     bar, beat, division = length(BAR_PX), length(BAR_PX + 50), length(BAR_PX + 25)
     assert bar > beat > division > 0
+
+
+# --------------------------------------------------------------------------- #
+# the middle button
+# --------------------------------------------------------------------------- #
+
+
+def mouse(
+    view: TimelineView,
+    kind: QEvent.Type,
+    x: float,
+    button: Qt.MouseButton = Qt.MouseButton.MiddleButton,
+) -> None:
+    point = QPointF(x, 40)
+    held = Qt.MouseButton.NoButton if kind is QEvent.Type.MouseButtonRelease else button
+    event = QMouseEvent(
+        kind,
+        point,
+        view.viewport().mapToGlobal(point),
+        Qt.MouseButton.NoButton if kind is QEvent.Type.MouseMove else button,
+        held,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(view.viewport(), event)
+
+
+def drag(
+    view: TimelineView,
+    path: list[float],
+    button: Qt.MouseButton = Qt.MouseButton.MiddleButton,
+) -> None:
+    mouse(view, QEvent.Type.MouseButtonPress, path[0], button)
+    for x in path[1:]:
+        mouse(view, QEvent.Type.MouseMove, x, button)
+    mouse(view, QEvent.Type.MouseButtonRelease, path[-1], button)
+
+
+def test_a_middle_drag_pans_the_lanes_with_the_hand() -> None:
+    """Dragging left brings later time into view, as a hand dragging paper
+    would - and the scrollbar, and so the ruler, go with it."""
+    view, _ = viewed()
+    view.axis.scroll_to(1000)
+
+    drag(view, [400, 350, 301.6, 300])
+
+    assert view.axis.offset == 1100
+    assert view.horizontalScrollBar().value() == 1100
+
+
+def test_a_long_pan_does_not_drift_from_the_hand() -> None:
+    view, _ = viewed()
+    view.axis.scroll_to(1000)
+
+    drag(view, [400] + [400 - 0.4 * step for step in range(1, 251)] + [300])
+
+    assert view.axis.offset == 1100
+
+
+def test_a_pan_stops_at_the_start_of_the_timeline() -> None:
+    view, _ = viewed()
+    view.axis.scroll_to(50)
+
+    drag(view, [100, 700])
+
+    assert view.axis.offset == 0
+
+
+def test_only_the_middle_button_pans() -> None:
+    view, _ = viewed()
+    view.axis.scroll_to(1000)
+
+    drag(view, [400, 300], button=Qt.MouseButton.LeftButton)
+
+    assert view.axis.offset == 1000
+
+
+def test_the_hand_shows_while_panning_and_goes_after() -> None:
+    view, _ = viewed()
+    mouse(view, QEvent.Type.MouseButtonPress, 400)
+    assert view.viewport().cursor().shape() is Qt.CursorShape.ClosedHandCursor
+
+    mouse(view, QEvent.Type.MouseButtonRelease, 400)
+
+    assert view.viewport().cursor().shape() is Qt.CursorShape.ArrowCursor

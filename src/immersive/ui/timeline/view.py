@@ -20,8 +20,8 @@ repaint reaches them because they have nothing to re-read.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QResizeEvent, QWheelEvent
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QWidget
 
 from immersive.core.document import Document
@@ -52,6 +52,9 @@ class TimelineView(QGraphicsView):
         #: scrollbar's own signal does not write it back.
         self._syncing = False
         self._playhead = 0
+        #: Where a middle-button pan began, and the axis offset and vertical
+        #: scroll it began from; `None` when no pan is under way.
+        self._pan: tuple[QPointF, int, int] | None = None
 
         self.setScene(QGraphicsScene(self))
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -123,6 +126,46 @@ class TimelineView(QGraphicsView):
             event.accept()
         else:
             super().wheelEvent(event)
+
+    # ------------------------------------------------- the middle button
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """A middle-button drag pans both ways, the lanes following the hand.
+
+        It is how a mouse with no sideways wheel scrolls through time without
+        holding a key - the gesture pro audio tools give it - and, with
+        channels, through them at the same time.
+        """
+        if event.button() is Qt.MouseButton.MiddleButton:
+            self._pan = (
+                event.position(),
+                self._axis.offset,
+                self.verticalScrollBar().value(),
+            )
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._pan is not None:
+            # Measured from where the drag began rather than added up move by
+            # move, so a long drag cannot drift from the hand by rounding.
+            start, offset, vertical = self._pan
+            moved = event.position() - start
+            self._axis.scroll_to(offset - round(moved.x()))
+            self.verticalScrollBar().setValue(vertical - round(moved.y()))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() is Qt.MouseButton.MiddleButton and self._pan is not None:
+            self._pan = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     # ----------------------------------------------------------- painting
 

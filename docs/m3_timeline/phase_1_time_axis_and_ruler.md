@@ -115,3 +115,12 @@ through numpy takes 0.09 s, and still kills the mutation it was written for.
 The phase adds 297 tests that run in 0.88 s together. The suite is 1417
 tests: 11 s serially, 4.3 s in parallel, and 3.3 s in the fast lane, measured
 on WSL2.
+
+**Added after the phase was complete: a middle-button drag pans.** Asked for
+on first use, because a mouse with only an up-and-down wheel needed Shift
+for every move through time — the wheel alone scrolls the channels, which
+is the convention in pro audio tools and the one `04` specifies, and with
+no channels yet it did nothing at all. The drag is measured from where it
+began rather than added up move by move, so a long one cannot drift from
+the hand. It pans time now, and the channels too once phase 2 gives it
+lanes to move.
