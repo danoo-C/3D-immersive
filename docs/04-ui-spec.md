@@ -375,7 +375,7 @@ who owns what. M9 is built *third*, before all of them:
 | window, panel, menu, toolbar, button, **tab**, splitter, scrollbar, status bar, tooltip, **focus** | M9 — the widgets that exist when the system is built. Tab and focus were missing from this row until M9 phase 1 went looking: the tab bar exists because of D-49 and the focus ring is required by *Accessibility and feel*, and the stylesheet has styled both since M0 |
 | notice line, notice count, notice list | M9 — it builds them (D-65) |
 | tree view, header, filter field, waveform thumbnail | M2 — built as `tree`, `header`, `filter` and the painted `waveform`. The filter is styled by its object name |
-| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file*; the channel header at phase 2 as `channel`, styled by object name, with the line between lanes as `timeline.separator` |
+| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file*; the channel header at phase 2 as `channel`, styled by object name, with the line between lanes as `timeline.separator`; the clip body at phase 3 as the painted `clip` group, the first with keys painted per channel |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
 | input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one |
@@ -409,6 +409,19 @@ their values:
 | `grid.division` | `surface.raised` | the snap division — the faintest, and only while snapping is on |
 | `playhead` | `accent` | the playhead, over everything, in the lanes and across the ruler |
 | `separator` | `border` | the line under each lane |
+| `drop` | `accent` | the dashed outline of where a drop from the pool will land |
+
+The clips', built at M3 as the worked example under *The file* named them.
+`body` and `waveform` are the reserved `channel` value — the first keys any
+widget paints per channel — so a theme may paint every clip one colour, and
+the built-in paints each in its channel's:
+
+| `clip` key | Default | For |
+|---|---|---|
+| `body` | `channel` | the clip, translucent over its lane |
+| `waveform` | `channel` | the envelope, solid over the body |
+| `text` | `text.primary` | the clip's name |
+| `missing` | `text.disabled` | the body of a clip whose sample has gone, which also says so in text |
 
 | `ruler` key | Default | For |
 |---|---|---|
@@ -431,6 +444,17 @@ thumbnail. Filter box at the top.
 - Double-click auditions the sample (non-spatial, straight to the output).
 - Drag a row onto a timeline channel to create a clip.
 - Drag onto empty timeline space to create a new channel holding it.
+
+A drop lands on the lane under the pointer, at the sample under it snapped
+to the grid and to every clip's edges on any channel (F-13, F-17), by that
+channel's own snap setting (F-18), or exactly where it was dropped while
+`Alt` is held. Several rows dropped together go end to end from there, in
+the order the pool lists them, and below the last lane one new channel holds
+them all. A dashed outline shows where it will land before the release. A
+drop over existing clips trims them to make room, removes those it covers,
+and splits one it lands inside (D-95); with Shift held, a drop that would
+overlap is refused, and the pointer says so before the release. Each drop is
+one Undo, the new channel included.
 - Missing files show in `warn` with a relink action.
 
 The folders mirror those beneath what was imported: the deepest folder every
@@ -568,6 +592,11 @@ division is drawn only while snapping is on, because it is there to show
 where a drag will land.
 
 - Clips render name + waveform; waveform detail drops out as you zoom out.
+  A clip is its channel's colour, translucent over the lane, with its part
+  of its sample drawn solid over that — a trimmed clip shows its own frames,
+  not its sample's start. Narrower than a few pixels it is its body alone,
+  and its name ends in an ellipsis until even that would not fit. A clip
+  whose sample is missing is grey and says *⚠ missing* in its name strip.
 - Drag body to move; drag either edge to trim; `S` splits at playhead.
 - **Shift+drag** moves the clip *and* its channel's automation (D-7).
 - Snap honours the channel override, and holding `Alt` bypasses snap entirely.
