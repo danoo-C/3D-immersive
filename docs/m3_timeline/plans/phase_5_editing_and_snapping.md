@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 5 — Editing clips, and snapping
 
-**Written:** 2026-09-26 · **Status:** in progress
+**Written:** 2026-09-26 · **Status:** ✅ complete
 
 ## Approach
 
@@ -203,4 +203,59 @@ tests/test_layering.py                      amended — dragging.py is headless
 
 ## Outcome
 
-Filled in at the end.
+Six steps in the planned order, all nine acceptance boxes ticked. Sixty
+mutations: fifteen of the sixteen named in advance and forty-five found on
+the way, all killed. 1717 tests.
+
+### What the plan got right
+
+**Deciding the two open questions before any code.** Every test of a move
+and a trim was written against D-97 and D-98, and nothing had to be
+reworked when the view arrived.
+
+**A preview rather than a live edit.** The view builds the release's own
+command at every movement. The preview and the push cannot disagree, and
+`Esc` needed no undo.
+
+**The rules in `core`, the pointer in a Qt-free module.** 22 tests of
+snapping and edge zones run without a window, and the window's tests only
+check that a drag reaches them.
+
+### What the plan did not see
+
+**That `Fade` is mutable.** A duplicate made with `replace` would have
+shared its fades with the original, so editing one clip's fade would have
+edited both. Each copy gets fades of its own, and a mutation holds it.
+
+**That making the snap a button moves the window's first focus.** The
+chip became the first focusable widget and opened with the accent ring.
+Only the grab showed it.
+
+**Two weak tests and one redundant line.** A Ctrl-toggled clip's drag was
+tested with nothing else selected, so the mutation could not move anything
+either way. A lane's colour during a drag was not tested. Clearing the
+release's select-one-clip flag at drag start was a second guard: the
+release already checks for a drag first. That line went.
+
+**One named mutation had no line to mutate.** *Each clip snapped
+separately*: the view works out one offset from the grabbed clip and the
+command applies it to all, so there is no per-clip snapping to break. It
+was not run.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| `test_edits.py`, `test_dragging.py`, `test_editing.py`, `test_layering.py` | and `test_timeline.py`, whose readout test read only labels and the chip is a button now |
+| The chip's look not considered | a button with a drop-down arrow, out of the focus chain |
+| Sixteen mutations | sixty |
+
+### What phase 6 needs to know
+
+`DuplicateClips` already copies clips with fresh ids and fades of their
+own, and lands them as a drop does. Paste is the same landing at the
+playhead on the focused channel (F-50), so `_settle` in `edits.py` is the
+function to reuse. `view.focused()` is the channel last clicked.
+`view.dragging()` says whether a drag is under way. A `Ctrl`+press toggles
+a clip, so a `Ctrl`+drag to copy would have to begin from a press that
+toggled nothing out; today it drags nothing.

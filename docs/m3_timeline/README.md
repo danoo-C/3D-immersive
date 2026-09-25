@@ -15,7 +15,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [2 — Channels](phase_2_channels.md) | ✅ |
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | ✅ |
 | [4 — Selection](phase_4_selection.md) | ✅ |
-| [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | in progress |
+| [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | ✅ |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | not started |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | not started |
 | [8 — The engine, flat](phase_8_flat_engine.md) | not started |
@@ -181,3 +181,13 @@ which until phase 9 it always is; `B` bypasses the selected channels as one
 edit. A selected clip wears a border and a selected header a bar, so
 neither is marked by colour alone. Twenty-seven mutations, all killed; two
 survived at first, both ranges tested in a way that could only grow.
+
+**Phase 5.** Editing: a selection moved by its body, across lanes too,
+overwriting what it lands on (D-97); trimmed from either edge, stopping at
+the neighbour and at its sample's ends (D-98); split at the playhead,
+duplicated after itself, and deleted, each one Undo. A drag edits nothing
+until the release and is drawn meanwhile by the command the release will
+push, so `Esc` has nothing to undo. Every edge snaps to the grid and to
+other clips' edges by the channel it lands in, or not at all with `Alt`.
+The snap chip and each header's indicator choose the setting from a menu.
+No sample file is written. Sixty mutations, all killed.
