@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePath
 
 from PySide6.QtCore import (
     QByteArray,
+    QItemSelectionModel,
     QMimeData,
     QModelIndex,
     QPersistentModelIndex,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
 from immersive.core.document import Document
 from immersive.core.media_store import MediaStore
 from immersive.core.model import MediaFile
+from immersive.core.selection import Kind
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
 from immersive.ui.widgets.placeholder import Panel
@@ -178,6 +180,13 @@ class MediaPool(Panel):
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.tree.doubleClicked.connect(self._double_clicked)
+        #: Set while the tree's selection is being set from the document's,
+        #: so setting it does not echo back as a choice the person made.
+        self._syncing = False
+        selection_model = self.tree.selectionModel()
+        assert selection_model is not None
+        selection_model.selectionChanged.connect(self._picked)
+        document.selection.observe(self._show_selection)
 
         self.body().addWidget(self.filter)
         self.body().addWidget(self.tree, 1)
@@ -206,15 +215,60 @@ class MediaPool(Panel):
     # --------------------------------------------------------------- building
 
     def rebuild(self) -> None:
-        """Every row again, from the document as it is now."""
-        self.model.removeRows(0, self.model.rowCount())
-        pool = self._document.project.media_pool
-        root = _common_folder([Path(media.path).parent for media in pool])
-        folders: dict[tuple[str, ...], QStandardItem] = {}
-        for media in pool:
-            parent = self._folder(folders, _parts(Path(media.path).parent, root))
-            parent.appendRow(self._row(media))
-        self.tree.expandAll()
+        """Every row again, from the document as it is now - and the rows
+        that are selected, selected again."""
+        self._syncing = True
+        try:
+            self.model.removeRows(0, self.model.rowCount())
+            pool = self._document.project.media_pool
+            root = _common_folder([Path(media.path).parent for media in pool])
+            folders: dict[tuple[str, ...], QStandardItem] = {}
+            for media in pool:
+                parent = self._folder(folders, _parts(Path(media.path).parent, root))
+                parent.appendRow(self._row(media))
+            self.tree.expandAll()
+        finally:
+            self._syncing = False
+        self._show_selection()
+
+    # ------------------------------------------------------------- selection
+
+    def _picked(self, *_: object) -> None:
+        """The person chose rows: the document's selection becomes those
+        samples, which clears any clips or channels (D-57)."""
+        if self._syncing:
+            return
+        selection_model = self.tree.selectionModel()
+        assert selection_model is not None
+        ids = {index.data(ID_ROLE) for index in selection_model.selectedRows(NAME)}
+        chosen = [
+            media for media in self._document.project.media_pool if media.id in ids
+        ]
+        selection = self._document.selection
+        if chosen:
+            selection.select(Kind.MEDIA, chosen)
+        elif selection.kind is Kind.MEDIA:
+            selection.clear()
+
+    def _show_selection(self) -> None:
+        """Select the rows of the samples the document's selection holds,
+        and no others."""
+        wanted = {media.id for media in self._document.selection.media()}
+        selection_model = self.tree.selectionModel()
+        assert selection_model is not None
+        self._syncing = True
+        try:
+            selection_model.clearSelection()
+            for item in _items(self.model.invisibleRootItem()):
+                if item.data(ID_ROLE) in wanted:
+                    index = self.proxy.mapFromSource(item.index())
+                    selection_model.select(
+                        index,
+                        QItemSelectionModel.SelectionFlag.Select
+                        | QItemSelectionModel.SelectionFlag.Rows,
+                    )
+        finally:
+            self._syncing = False
 
     def _folder(
         self, folders: dict[tuple[str, ...], QStandardItem], parts: tuple[str, ...]
@@ -289,3 +343,14 @@ def _parts(folder: Path, root: Path | None) -> tuple[str, ...]:
     if root is None:
         return PurePath(folder).parts
     return folder.relative_to(root).parts
+
+
+def _items(parent: QStandardItem | None) -> Iterator[QStandardItem]:
+    """Every first-column item beneath `parent`, depth first."""
+    if parent is None:
+        return
+    for row in range(parent.rowCount()):
+        child = parent.child(row, NAME)
+        if child is not None:
+            yield child
+            yield from _items(child)

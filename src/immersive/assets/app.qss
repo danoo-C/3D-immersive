@@ -171,6 +171,11 @@ QLineEdit#NumericField:focus, QLineEdit#ChannelRename:focus {
 QFrame#ChannelHeader {
     background-color: $channel_background;
     border-bottom: 1px solid $channel_border;
+    border-left: 3px solid transparent;
+}
+QFrame#ChannelHeader[selected="true"] {
+    background-color: $channel_selected_background;
+    border-left-color: $channel_selected_marker;
 }
 QLabel#ChannelName, QLabel#ChannelSnap[overriding="true"] { color: $channel_name; }
 QLabel#ChannelQuiet, QLabel#ChannelSnap[overriding="false"] {

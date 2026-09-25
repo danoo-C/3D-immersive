@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
 from immersive.core.document import Document
 from immersive.core.edits import MoveChannel, RemoveChannel, SetAttribute
 from immersive.core.model import Channel, Project, audible, effective_snap
+from immersive.core.selection import Kind
 from immersive.ui import theme
 from immersive.ui.timeline.grid import snap_text
 from immersive.ui.timeline.metrics import LANE_HEIGHT
@@ -337,7 +338,9 @@ class ChannelHeader(QFrame):
     def _remove(self) -> None:
         self._document.push(RemoveChannel(self._document.project, self.channel))
 
-    def show_channel(self, project: Project, *, silenced: bool) -> None:
+    def show_channel(
+        self, project: Project, *, silenced: bool, selected: bool = False
+    ) -> None:
         """Read the channel back into every control, committing nothing."""
         channel = self.channel
         self.chip.set_colour(channel.color)
@@ -352,6 +355,12 @@ class ChannelHeader(QFrame):
         ):
             button.setChecked(on)
         self.silenced.setVisible(silenced)
+        if self.property("selected") != selected:
+            # Marked by a bar down its left edge as well as a colour, and the
+            # bar's room is always there, so selecting does not shift it.
+            self.setProperty("selected", selected)
+            self.style().unpolish(self)
+            self.style().polish(self)
 
         own = channel.snap_override is not None
         snap = effective_snap(project, channel)
@@ -388,7 +397,10 @@ class ChannelHeaders(QWidget):
         self._press: tuple[ChannelHeader, QPointF] | None = None
         view.verticalScrollBar().valueChanged.connect(self._place)
         view.verticalScrollBar().rangeChanged.connect(self._place)
+        #: Where a Shift+click's range of channels runs from.
+        self._anchor: Channel | None = None
         document.observe(self.sync)
+        document.selection.observe(self.sync)
         self.sync()
 
     def headers(self) -> list[ChannelHeader]:
@@ -415,7 +427,11 @@ class ChannelHeaders(QWidget):
         soloing = any(channel.solo for channel in channels)
         for header, heard in zip(self._headers, audible(channels), strict=True):
             silenced = soloing and not heard and not header.channel.mute
-            header.show_channel(project, silenced=silenced)
+            header.show_channel(
+                project,
+                silenced=silenced,
+                selected=header.channel in self._document.selection,
+            )
         self._place()
 
     def _place(self) -> None:
@@ -456,12 +472,38 @@ class ChannelHeaders(QWidget):
         if kind is QEvent.Type.MouseButtonRelease and self._press is not None:
             self._press = None
             if self._dragging is None:
+                self._click(watched, event.modifiers())
                 return False
             header, _ = self._dragging
             self._dragging = None
             self._drop(header)
             return True
         return False
+
+    def _click(self, header: ChannelHeader, modifiers: Qt.KeyboardModifier) -> None:
+        """A header clicked, not dragged: its channel selected as a clip
+        would be - alone, Ctrl to toggle, Shift for the range from the last
+        one clicked, Ctrl+Shift to add that range (04, *Selection*)."""
+        channels = self._document.project.channels
+        selection = self._document.selection
+        channel = header.channel
+        self._view.focus(channel)
+        ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        indices = {id(c): i for i, c in enumerate(channels)}
+        if shift and self._anchor is not None and id(self._anchor) in indices:
+            low, high = sorted((indices[id(self._anchor)], indices[id(channel)]))
+            span = channels[low : high + 1]
+            if ctrl:
+                selection.add(Kind.CHANNELS, span)
+            else:
+                selection.select(Kind.CHANNELS, span)
+            return
+        self._anchor = channel
+        if ctrl:
+            selection.toggle(Kind.CHANNELS, channel)
+        else:
+            selection.select(Kind.CHANNELS, [channel])
 
     def _drop(self, header: ChannelHeader) -> None:
         """Put the dragged channel at the lane its header's middle is over."""

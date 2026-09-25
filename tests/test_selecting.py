@@ -6,18 +6,20 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, QPointF, Qt
 from PySide6.QtGui import QAction, QImage, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
 from immersive.core.document import Document
-from immersive.core.edits import AddChannel, AddMedia, DropClips
+from immersive.core.edits import AddChannel, AddMedia, DropClips, SetAttribute
+from immersive.core.media_store import MediaStore
 from immersive.core.model import Clip, MediaFile, new_channel
 from immersive.core.selection import Kind
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
+from immersive.ui.explorer.media_pool import ID_ROLE, MediaPool
 from immersive.ui.main_window import MainWindow
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.clips import TOP
@@ -313,3 +315,201 @@ def test_a_drag_from_a_clip_is_not_a_band() -> None:
     band(panel, at(0, 0.5), at(1, 2.5))
     assert panel.view.band() is None
     assert selected(panel) == [grid[0][0]]
+
+
+# --------------------------------------------------------------------------- #
+# channels
+# --------------------------------------------------------------------------- #
+
+
+def header_click(
+    panel: TimelinePanel, index: int, modifiers: Qt.KeyboardModifier = NONE
+) -> None:
+    header = panel.headers.headers()[index]
+    point = QPointF(60, 12)  # on the name, which leaves clicks to the header
+    left = Qt.MouseButton.LeftButton
+    for kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+        QApplication.sendEvent(
+            header,
+            QMouseEvent(
+                kind,
+                point,
+                header.mapToGlobal(point),
+                left,
+                left
+                if kind is QEvent.Type.MouseButtonPress
+                else Qt.MouseButton.NoButton,
+                modifiers,
+            ),
+        )
+
+
+def channels(panel: TimelinePanel) -> list[int]:
+    project = panel._document.project
+    return [project.channels.index(c) for c in panel._document.selection.channels()]
+
+
+def test_a_header_click_selects_its_channel_as_a_clip_click_would() -> None:
+    panel, _ = paneled(lanes=4)
+    header_click(panel, 1)
+    assert channels(panel) == [1]
+    header_click(panel, 3, CTRL)
+    assert channels(panel) == [1, 3]
+    header_click(panel, 1, CTRL)
+    assert channels(panel) == [3]
+    header_click(panel, 0)
+    header_click(panel, 3, CTRL)
+    header_click(panel, 2, SHIFT)
+    assert channels(panel) == [2, 3], "Shift replaces, from the last one clicked"
+    header_click(panel, 0, CTRL | SHIFT)
+    assert channels(panel) == [2, 3, 0, 1], "Ctrl+Shift adds the range"
+
+
+def test_selecting_a_channel_clears_the_clips_and_the_reverse() -> None:
+    panel, grid = paneled()
+    click(panel, at(0, 0.5))
+    header_click(panel, 2)
+    assert selected(panel) == [] and channels(panel) == [2]
+
+    click(panel, at(1, 2.5))
+    assert channels(panel) == [] and selected(panel) == [grid[1][1]]
+    assert panel.headers.headers()[2].property("selected") is False
+
+
+def test_a_header_dragged_is_reordered_and_not_selected() -> None:
+    panel, _ = paneled()
+    header = panel.headers.headers()[0]
+    left = Qt.MouseButton.LeftButton
+    grabbed = QPointF(60, 12)
+    for kind, point, held in (
+        (QEvent.Type.MouseButtonPress, grabbed, left),
+        (QEvent.Type.MouseMove, grabbed + QPointF(0, 70), left),
+        (QEvent.Type.MouseButtonRelease, grabbed, Qt.MouseButton.NoButton),
+    ):
+        QApplication.sendEvent(
+            header,
+            QMouseEvent(
+                kind,
+                point,
+                header.mapToGlobal(point),
+                Qt.MouseButton.NoButton if kind is QEvent.Type.MouseMove else left,
+                held,
+                NONE,
+            ),
+        )
+    assert panel._document.project.channels[1] is header.channel
+    assert channels(panel) == []
+
+
+def test_a_selected_header_wears_a_bar_as_well_as_a_colour() -> None:
+    panel, _ = paneled()
+    header_click(panel, 1)
+    selected_header, other = panel.headers.headers()[1], panel.headers.headers()[0]
+    marker = theme.group_color("channel", "selected.marker").upper()
+
+    assert selected_header.property("selected") is True
+    assert selected_header.grab().toImage().pixelColor(1, 30).name().upper() == marker
+    assert other.grab().toImage().pixelColor(1, 30).name().upper() != marker
+
+
+# --------------------------------------------------------------------------- #
+# B
+# --------------------------------------------------------------------------- #
+
+
+def test_b_bypasses_every_selected_channel_as_one_edit() -> None:
+    window, _ = window_with_clips()
+    document = window.document()
+    first, second = document.project.channels
+    [bypass] = [
+        a for a in window.findChildren(QAction) if a.text().startswith("Toggle HRTF")
+    ]
+    assert not bypass.isEnabled(), "nothing selected, nothing to toggle"
+    assert "Select a channel" in bypass.toolTip()
+
+    document.push(SetAttribute(second, "hrtf_bypass", True))
+    document.selection.select(Kind.CHANNELS, [first, second])
+    assert bypass.isEnabled() and "M3" not in bypass.toolTip()
+
+    bypass.trigger()
+    assert (first.hrtf_bypass, second.hrtf_bypass) == (True, True), "any off: all on"
+    bypass.trigger()
+    assert (first.hrtf_bypass, second.hrtf_bypass) == (False, False), "all on: all off"
+    document.undo()
+    assert (first.hrtf_bypass, second.hrtf_bypass) == (True, True), "one edit"
+
+    document.selection.select(Kind.CLIPS, [first.clips[0]])
+    assert not bypass.isEnabled()
+
+
+# --------------------------------------------------------------------------- #
+# the pool's rows
+# --------------------------------------------------------------------------- #
+
+
+def pooled() -> tuple[MediaPool, TimelinePanel, list[list[Clip]]]:
+    panel, grid = paneled()
+    pool = MediaPool(panel._document, MediaStore())
+    pool.resize(300, 300)
+    pool.show()
+    return pool, panel, grid
+
+
+def pool_selected(pool: MediaPool) -> set[str]:
+    model = pool.tree.selectionModel()
+    return {index.data(ID_ROLE) for index in model.selectedRows(0)}
+
+
+def pick_row(pool: MediaPool) -> None:
+    [row] = [
+        pool.proxy.index(r, 0)
+        for r in range(pool.proxy.rowCount())
+        if pool.proxy.index(r, 0).data(ID_ROLE) == MEDIA.id
+    ]
+    pool.tree.selectionModel().select(
+        row,
+        QItemSelectionModel.SelectionFlag.ClearAndSelect
+        | QItemSelectionModel.SelectionFlag.Rows,
+    )
+
+
+def test_a_pool_row_is_the_media_selection_and_clears_the_clips() -> None:
+    pool, panel, _ = pooled()
+    click(panel, at(0, 0.5))
+
+    pick_row(pool)
+
+    selection = panel._document.selection
+    assert selection.kind is Kind.MEDIA
+    assert selection.media() == panel._document.project.media_pool
+    assert selected(panel) == []
+
+
+def test_a_clip_clicked_clears_the_pools_row() -> None:
+    pool, panel, _ = pooled()
+    pick_row(pool)
+    assert pool_selected(pool) == {MEDIA.id}
+
+    click(panel, at(0, 0.5))
+
+    assert pool_selected(pool) == set()
+
+
+def test_the_pool_keeps_its_row_selected_across_a_rebuild() -> None:
+    pool, panel, _ = pooled()
+    pick_row(pool)
+    document = panel._document
+
+    document.push(
+        AddChannel(document.project, new_channel(document.project, ["#123456"]))
+    )
+
+    assert pool_selected(pool) == {MEDIA.id}
+    assert document.selection.kind is Kind.MEDIA
+
+
+def test_a_media_selection_made_elsewhere_shows_in_the_pool() -> None:
+    pool, panel, _ = pooled()
+    document = panel._document
+    document.selection.select(Kind.MEDIA, document.project.media_pool)
+    assert pool_selected(pool) == {MEDIA.id}

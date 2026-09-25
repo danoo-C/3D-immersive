@@ -39,13 +39,15 @@ from PySide6.QtWidgets import (
 
 from immersive import __version__
 from immersive.audio.audition import Audition
+from immersive.core.commands import Compound
 from immersive.core.document import Document
-from immersive.core.edits import AddMedia
+from immersive.core.edits import AddMedia, SetAttribute
 from immersive.core.io import project_io
 from immersive.core.io.media import Refused
 from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, find_audio
 from immersive.core.model import MediaFile, Project
 from immersive.core.relink import relink
+from immersive.core.selection import Kind
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.explorer.media_pool import MediaPool
 from immersive.ui.importer import Importer
@@ -199,7 +201,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._build_layout())
         self._build_statusbar()
         self._document.observe(self._document_changed)
+        self._document.selection.observe(self._selection_changed)
         self._document_changed()
+        self._selection_changed()
         # Last, because it may report - and the notice centre it reports to
         # is built by _build_statusbar.
         self.restore_theme()
@@ -292,7 +296,8 @@ class MainWindow(QMainWindow):
         self._add(transport_menu, "&Return to Start", "Return", arrives=_M3)
         self._add(transport_menu, "Toggle &Loop", "L", arrives=_M3)
         transport_menu.addSeparator()
-        self._add(transport_menu, "Toggle HRTF &Bypass on Channel", "B", arrives=_M3)
+        self._bypass = self._add(transport_menu, "Toggle HRTF &Bypass on Channel", "B")
+        self._bypass.triggered.connect(self.toggle_bypass)
 
         render_menu = self._menu(bar, "&Render")
         self._add(render_menu, "&Render Mix…", "Ctrl+R", arrives=_M7)
@@ -1007,6 +1012,33 @@ class MainWindow(QMainWindow):
             label.setStyleSheet(f"color: {theme.color(token)}; padding: 0 8px;")
         for label in (self._xruns, self._version):
             label.setStyleSheet(f"color: {theme.color('text.disabled')};")
+
+    def toggle_bypass(self) -> None:
+        """B: HRTF bypass on every selected channel, as one edit. If any is
+        off they all go on; if all are on they all go off - so one press
+        never leaves the selection split."""
+        channels = self._document.selection.channels()
+        if not channels:
+            return
+        on = not all(channel.hrtf_bypass for channel in channels)
+        self._document.push(
+            Compound(
+                [
+                    SetAttribute(channel, "hrtf_bypass", on)
+                    for channel in channels
+                    if channel.hrtf_bypass != on
+                ]
+            )
+        )
+
+    def _selection_changed(self) -> None:
+        """What acts on the selection is enabled exactly when it can act."""
+        able = self._document.selection.kind is Kind.CHANNELS
+        self._bypass.setEnabled(able)
+        summary = self._bypass.toolTip().partition("\n")[0]
+        self._bypass.setToolTip(
+            summary if able else f"{summary}\nSelect a channel first."
+        )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Esc clears the selection while the transport is stopped (04,
