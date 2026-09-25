@@ -206,18 +206,36 @@ too short on a loaded CI runner, and a sleep can. *0.4 s, measured on the
 four tests. The whole serial suite moves by about 0.2 s from one run to the
 next, which hides most of that in a single run.*
 
-### 5. Trim the slowest tests without weakening them
+### ~~5. Trim the slowest tests without weakening them~~ — done
 
-- [ ] **The convex-hull property** (589 ms). Evaluate the 5 000 curves with
+**Measured: the convex-hull property 530 → 132 ms.** The backend load is
+unchanged, and why is below.
+
+- [x] **The convex-hull property** (589 ms). Evaluate the 5 000 curves with
       numpy rather than one `value_at` call at a time, or keep the loop and
       spend the 5 000 samples where the hull is tight. The mutation this test
       was written to catch — a solver that reads the wrong keyframe — must
-      still be caught; re-run it.
-- [ ] **The backend load** (222 ms). `load_backend()` caches its answer for
+      still be caught; re-run it. *Neither, as it turned out: 1 000 curves
+      where there were 5 000. Numpy would test a second evaluator rather than
+      `Curve`, which evaluates one scalar at a time. Measuring the mutations
+      showed that the count was a cost rather than a margin. Of the ways to
+      read the wrong keyframe, the hull can only see a handle's control
+      point taken from the other keyframe. Each such mutation leaves the hull
+      on about one curve in sixteen, first at the eighth curve or sooner, so
+      a thousand curves still catch each about sixty times. Three other ways
+      of reading the wrong keyframe stay inside the hull, and no number of
+      curves would catch them. The sweep shows other tests in `test_curves.py`
+      do. Seven mutations, all killed; the four the hull can see are still
+      killed by this test.*
+- [ ] ~~**The backend load** (222 ms). `load_backend()` caches its answer for
       the process, since a missing PortAudio will not appear mid-session.
       This is the only change here that touches application behaviour, and
-      it does so harmlessly.
-- [ ] The thousand-edit test and the fresh-interpreter tests stay as they
+      it does so harmlessly.~~ *Not done: it would save nothing. Counted over
+      a whole run, `load_backend()` is called for real exactly once, by the
+      test that exists to call it, and that first call is the one a cache
+      cannot skip. The test is slow for the same reason the thousand-edit
+      test is.*
+- [x] The thousand-edit test and the fresh-interpreter tests stay as they
       are: what makes them slow is what they test.
 
 ### 6. Narrow the per-test fixtures to the tests that need them

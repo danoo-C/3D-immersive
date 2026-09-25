@@ -284,9 +284,16 @@ def test_every_value_stays_inside_the_convex_hull_of_its_control_points() -> Non
 
     This replaces an earlier line that asked for the value to stay between the
     two keyframes; see the amendment note in the phase doc.
+
+    A thousand curves, down from five thousand, because the count was a cost
+    rather than a margin. Either handle's control point taken from the other
+    keyframe - the wrong-keyframe mutations the hull can see - leaves it on
+    about one curve in sixteen, and the first of these curves is at most the
+    eighth. A thousand still catches each about sixty times, in a quarter of
+    the time (tests-speeds.md, step 5).
     """
     rng = random.Random(6)
-    for _ in range(5_000):
+    for _ in range(1_000):
         left = Keyframe(
             0,
             rng.uniform(-9, 9),
