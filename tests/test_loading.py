@@ -7,6 +7,7 @@ phase 7, it plays nothing.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -26,6 +27,10 @@ from immersive.ui.main_window import MainWindow
 from immersive.ui.notices import Severity
 
 pytestmark = pytest.mark.gui
+
+#: As in test_import.py: never reached when the code is right, and a bound on
+#: how long a broken build takes to fail.
+GATE_TIMEOUT = 10.0
 
 
 @pytest.fixture
@@ -67,14 +72,19 @@ def saved_with_samples(window: MainWindow, tmp_path: Path, count: int = 3) -> Pa
     return project
 
 
-def counting(monkeypatch: pytest.MonkeyPatch, delay: float = 0.0) -> list[Path]:
+def counting(
+    monkeypatch: pytest.MonkeyPatch, gate: threading.Event | None = None
+) -> list[Path]:
+    """Count what the workers prepare, and optionally hold each file at
+    `gate` until the test opens it - so a load is still running for exactly
+    as long as the test needs."""
     calls: list[Path] = []
     real: Callable[[Path], Prepared | Refused] = importer.prepare
 
     def prepare(path: Path) -> Prepared | Refused:
         calls.append(path)
-        if delay:
-            time.sleep(delay)
+        if gate is not None:
+            gate.wait(GATE_TIMEOUT)
         return real(path)
 
     monkeypatch.setattr(importer, "prepare", prepare)
@@ -178,11 +188,13 @@ def test_a_load_does_not_land_in_a_project_opened_meanwhile(
     window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = saved_with_samples(window, tmp_path)
-    counting(monkeypatch, delay=0.1)
+    gate = threading.Event()
+    counting(monkeypatch, gate)
     window.open_project(project)
     ids = [media.id for media in window.document().project.media_pool]
 
     window.new_project()
+    gate.set()
     finish(window)
 
     assert not any(media_id in window.store() for media_id in ids)

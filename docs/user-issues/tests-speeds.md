@@ -180,19 +180,31 @@ trustworthy if every test that builds a `QApplication` or a widget carries the
       followed, the module mark not read, and a module's autouse fixtures
       ignored.*
 
-### 4. Gates instead of sleeps
+### ~~4. Gates instead of sleeps~~ — done
+
+**Measured: the four tests took 0.54 s together, and take 0.14 s.**
 
 The four sleeping tests stand in for slow workers with `time.sleep`. Replace
 the sleep with a `threading.Event` the stand-in waits on and the test sets
 once it has seen what it needed: that a timer ticked, or that the second
 import was refused.
 
-- [ ] No test in `test_import.py` or `test_loading.py` calls `time.sleep`.
-- [ ] The N-3 test still fails if preparing is moved onto the UI thread. The
-      mutation from M2 phase 6's sweep is re-run to prove it.
+- [x] No test in `test_import.py` or `test_loading.py` calls `time.sleep`.
+      *A gated worker waits at most ten seconds before going on regardless.
+      A correct build never waits that long, because each test opens its
+      gate as soon as it has seen what it came for. The limit only bounds
+      how long a broken build takes to fail.*
+- [x] The N-3 test still fails if preparing is moved onto the UI thread. The
+      mutation from M2 phase 6's sweep is re-run to prove it. *It fails, and
+      now says why: the import is over before the window has turned, because
+      the UI thread waited at the gate itself. Three more mutations, one per
+      other gated test, all killed: two imports at once, and an import or a
+      load landing in a project opened meanwhile.*
 
 This is worth about 0.5 s. It is worth more as determinism: a gate cannot be
-too short on a loaded CI runner, and a sleep can.
+too short on a loaded CI runner, and a sleep can. *0.4 s, measured on the
+four tests. The whole serial suite moves by about 0.2 s from one run to the
+next, which hides most of that in a single run.*
 
 ### 5. Trim the slowest tests without weakening them
 

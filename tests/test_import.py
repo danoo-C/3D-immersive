@@ -6,6 +6,7 @@ worker outlives the window it reports to.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -25,6 +26,11 @@ from immersive.ui.main_window import MainWindow
 from immersive.ui.notices import Severity
 
 pytestmark = pytest.mark.gui
+
+#: How long a gated worker waits before going on regardless. Never reached
+#: when the code is right, because each test opens its gate as soon as it has
+#: seen what it came for; it bounds how long a broken build takes to fail.
+GATE_TIMEOUT = 10.0
 
 
 @pytest.fixture
@@ -60,16 +66,22 @@ def folder_of(root: Path, count: int, *, seed: int = 0) -> Path:
     return root
 
 
-def counting_prepare(monkeypatch: pytest.MonkeyPatch, delay: float = 0.0) -> list[Path]:
+def counting_prepare(
+    monkeypatch: pytest.MonkeyPatch, gate: threading.Event | None = None
+) -> list[Path]:
     """Replace the workers' `prepare` with one that counts, and optionally
-    sleeps first - sleeping releases the GIL, as decoding does."""
+    holds every file at `gate` until the test opens it.
+
+    A gate rather than a sleep: the import runs for exactly as long as the
+    test needs it to, which a sleep can only guess at and a loaded machine
+    can outlast. Waiting releases the GIL, as decoding does."""
     calls: list[Path] = []
     real: Callable[[Path], Prepared | Refused] = importer.prepare
 
     def prepare(path: Path) -> Prepared | Refused:
         calls.append(path)
-        if delay:
-            time.sleep(delay)
+        if gate is not None:
+            gate.wait(GATE_TIMEOUT)
         return real(path)
 
     monkeypatch.setattr(importer, "prepare", prepare)
@@ -117,20 +129,27 @@ def test_redo_decodes_nothing(
 def test_the_window_keeps_turning_while_an_import_runs(
     window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """N-3, asserted as a timer that goes on firing on the UI thread, not as
-    an import that merely finishes. Preparing on the UI thread would starve
-    the timer for the whole import."""
-    counting_prepare(monkeypatch, delay=0.15)
+    """N-3, asserted as a timer that goes on firing on the UI thread while an
+    import is held open, not as an import that merely finishes. Preparing on
+    the UI thread would wait at the gate itself, and the timer with it."""
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
     ticks: list[float] = []
     timer = QTimer()
     timer.timeout.connect(lambda: ticks.append(time.monotonic()))
     timer.start(10)
 
     window.import_paths(sorted(folder_of(tmp_path / "kit", 4).glob("*.wav")))
+    deadline = time.monotonic() + GATE_TIMEOUT / 2
+    while len(ticks) < 5 and window.importing() and time.monotonic() < deadline:
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+    held_open, seen = window.importing(), len(ticks)
+    gate.set()
     finish(window)
     timer.stop()
 
-    assert len(ticks) >= 5, ticks
+    assert held_open, "the import was over before the window had turned"
+    assert seen >= 5, ticks
     assert len(pool_names(window)) == 4
 
 
@@ -248,21 +267,27 @@ def test_import_files_uses_the_dialog_and_a_cancel_imports_nothing(
 def test_one_import_at_a_time(
     window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    counting_prepare(monkeypatch, delay=0.1)
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
     window.import_paths([sample(tmp_path / "a.wav", 4)])
 
-    assert not window.import_paths([sample(tmp_path / "b.wav", 5)])
+    second = window.import_paths([sample(tmp_path / "b.wav", 5)])
+    gate.set()
     finish(window)
+
+    assert not second
     assert pool_names(window) == ["a.wav"]
 
 
 def test_an_import_does_not_land_in_a_project_opened_meanwhile(
     window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    counting_prepare(monkeypatch, delay=0.1)
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
     window.import_paths([sample(tmp_path / "a.wav", 6)])
 
     window.new_project()  # nothing unsaved, so nothing is asked
+    gate.set()
     finish(window)
 
     assert pool_names(window) == []
