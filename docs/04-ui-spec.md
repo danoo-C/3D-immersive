@@ -583,7 +583,9 @@ however far the lanes are scrolled.
   channel silenced by another's solo says *silenced* beside its name; a muted
   one does not, because its M already says why it is quiet.
 - **The snap indicator** reads `snap` while the channel follows the project,
-  and the division — `1/8`, `1/4T`, `off` — while it overrides it.
+  and the division — `1/8`, `1/4T`, `off` — while it overrides it. Clicking
+  it offers the channel's own: *Follow Project*, *Off*, the six divisions
+  and *Triplet*.
 - **The name** is renamed by double-clicking it, and ends in an ellipsis
   rather than running into the controls beside it.
 - **The chip** is the channel's own colour, from the project. Clicking it
@@ -606,9 +608,33 @@ where a drag will land.
   not its sample's start. Narrower than a few pixels it is its body alone,
   and its name ends in an ellipsis until even that would not fit. A clip
   whose sample is missing is grey and says *⚠ missing* in its name strip.
-- Drag body to move; drag either edge to trim; `S` splits at playhead.
+- **Drag a selected clip's body to move the selection**, across lanes as
+  well as along them: every clip by the same time and the same number of
+  lanes, stopping together at the first and last lane and at 0. What they
+  land on is overwritten as a drop overwrites it (D-97).
+- **Drag within a few pixels of an edge to trim** — at most a third of the
+  clip, so a narrow one can still be moved; the pointer shows an edge before
+  the press. Every selected clip's same edge moves by the same amount, each
+  as far as it can: no further than its sample or the next clip on its
+  channel, and no shorter than 64 samples (D-98).
+- **A drag edits nothing until the release.** While it lasts the clips are
+  drawn where the release will put them, in the colour of the lane they will
+  land in; the release is one Undo, and `Esc` before it puts everything back.
+- `S` splits every selected clip under the playhead, and the tails join the
+  selection. `Ctrl+D` copies the selection to just after itself and selects
+  the copies, so pressing it again carries the run on. `Delete` removes the
+  selection. Each is one Undo, and each is enabled only while clips are
+  selected.
 - **Shift+drag** moves the clip *and* its channel's automation (D-7).
-- Snap honours the channel override, and holding `Alt` bypasses snap entirely.
+- **A drag snaps** to the grid and to other clips' edges, nearest wins
+  (F-17). A trim snaps the edge it moves. A move snaps the grabbed clip's
+  start to either, or its end to a clip edge, whichever is nearer, so a clip
+  butts against a neighbour from either side. The setting is the channel's
+  the clip lands in — its override, or the project's — and holding `Alt`
+  bypasses snap entirely.
+- **The snap chip** in the toolbar chooses the project's setting: *Off*, the
+  divisions from 1/1 to 1/32, and *Triplet*. *Off* keeps the division, so
+  turning snapping back on returns to it. Each choice is one Undo.
 - Playhead in `accent`, always drawn over everything.
 - Loop region set by dragging in the ruler.
 - Scroll = vertical, Shift+scroll = horizontal, Ctrl+scroll = zoom about cursor.
@@ -676,10 +702,10 @@ do to you.
 | `Esc` | stop |
 | `Enter` | return playhead to start |
 | `L` | toggle loop |
-| `S` | split selected clip at playhead |
+| `S` | split the selected clips at the playhead |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | cut / copy / paste clips |
-| `Ctrl+D` | duplicate selection |
+| `Ctrl+D` | duplicate the selection, just after itself |
 | `Ctrl+A` | select all clips on the focused channel |
 | `Delete` | delete selection |
 | `Alt` (held) | bypass snap |

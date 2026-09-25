@@ -412,6 +412,9 @@ class MainWindow(QMainWindow):
         self._signature_chip = self._chip("")
         self._snap_chip = QToolButton()
         self._snap_chip.setObjectName("SnapChip")
+        # Like the buttons the toolbar makes for its actions: out of the
+        # focus chain, so the window does not open with a ring around it.
+        self._snap_chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._snap_chip.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._snap_chip.setMenu(QMenu(self._snap_chip))
         self._snap_chip.menu().aboutToShow.connect(self.snap_menu)

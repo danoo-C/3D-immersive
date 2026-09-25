@@ -530,6 +530,9 @@ def override_of(channel: Channel) -> SnapSetting | None:
 
 def test_the_chip_offers_every_division_triplet_and_off() -> None:
     window, _ = window_with_clips()
+    chip = window.findChild(QToolButton, "SnapChip")
+    assert chip is not None
+    assert chip.focusPolicy() is Qt.FocusPolicy.NoFocus, "as the toolbar's own are"
     texts = [a.text() for a in window.snap_menu().actions() if a.text()]
     assert texts == ["Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "Triplet"]
     assert checked(window.snap_menu) == ["1/16"]
