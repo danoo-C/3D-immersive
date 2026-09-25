@@ -109,6 +109,7 @@
     },
     "timeline": {
       "background": "surface.panel",
+      "band": "accent",
       "drop": "accent",
       "grid": "border",
       "grid.beat": "surface.hover",

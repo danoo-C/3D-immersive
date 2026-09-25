@@ -244,3 +244,72 @@ def test_escape_in_the_rename_field_cancels_the_rename_and_not_the_selection() -
 
     assert window.document().selection.clips() == [grid[0][0]]
     assert window.timeline().headers.headers()[0].renaming() is None
+
+
+# --------------------------------------------------------------------------- #
+# the rubber band
+# --------------------------------------------------------------------------- #
+
+
+def band(
+    panel: TimelinePanel,
+    start: QPointF,
+    end: QPointF,
+    modifiers: Qt.KeyboardModifier = NONE,
+    *,
+    release: bool = True,
+) -> None:
+    mouse(panel, QEvent.Type.MouseButtonPress, start, modifiers)
+    middle = (start + end) / 2
+    mouse(panel, QEvent.Type.MouseMove, middle, modifiers)
+    mouse(panel, QEvent.Type.MouseMove, end, modifiers)
+    if release:
+        mouse(panel, QEvent.Type.MouseButtonRelease, end, modifiers)
+
+
+def test_a_band_across_two_lanes_selects_what_it_touches_and_nothing_else() -> None:
+    panel, grid = paneled()
+    # From empty space before lane 0's 2 s clip, into lane 1's 2 s clip.
+    band(panel, at(0, 1.5), at(1, 2.2))
+
+    assert selected(panel) == [grid[0][1], grid[1][1]]
+    assert panel.view.band() is None, "gone after the release"
+
+
+def test_a_band_that_touches_nothing_clears() -> None:
+    panel, _ = paneled()
+    click(panel, at(0, 0.5))
+    band(panel, at(0, 1.1), at(1, 1.9))
+    assert selected(panel) == []
+
+
+def test_ctrl_band_adds_to_what_was_selected() -> None:
+    panel, grid = paneled()
+    click(panel, at(2, 4.5))
+    band(panel, at(0, 1.5), at(1, 2.2), CTRL)
+
+    assert selected(panel) == [grid[2][2], grid[0][1], grid[1][1]]
+
+
+def test_the_band_is_drawn_while_it_is_dragged() -> None:
+    panel, _ = paneled()
+    band(panel, at(0, 1.2), at(2, 1.8), release=False)
+
+    drawn = panel.view.band()
+    assert drawn is not None and drawn.width() > 50
+    image = panel.view.viewport().grab().toImage()
+    outline = theme.group_color("timeline", "band").upper()
+    x = round(drawn.left())
+    assert outline in {
+        image.pixelColor(x, y).name().upper()
+        for y in range(LANE_HEIGHT, 2 * LANE_HEIGHT)
+    }
+    mouse(panel, QEvent.Type.MouseButtonRelease, at(2, 1.8))
+
+
+def test_a_drag_from_a_clip_is_not_a_band() -> None:
+    """Phase 5 moves clips from a drag that starts on one."""
+    panel, grid = paneled()
+    band(panel, at(0, 0.5), at(1, 2.5))
+    assert panel.view.band() is None
+    assert selected(panel) == [grid[0][0]]

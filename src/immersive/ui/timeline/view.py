@@ -60,6 +60,9 @@ NOTCH = 120
 #: How far a press has to move before it is a drag rather than a click.
 DRAG_THRESHOLD = 4
 
+#: How much of its outline's colour the rubber band is filled with.
+BAND_FILL = 0.12
+
 
 class TimelineView(QGraphicsView):
     """The timeline's lanes, drawn against the shared axis."""
@@ -93,6 +96,10 @@ class TimelineView(QGraphicsView):
         #: The channel last clicked, through its header or one of its clips -
         #: what Ctrl+A selects first.
         self._focused: Channel | None = None
+        #: A rubber band being dragged, in scene coordinates, and the clips
+        #: that were selected when it began if it adds to them.
+        self._band: QRectF | None = None
+        self._band_keeps: list[Clip] = []
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         #: Set while the axis is being written into the scrollbar, so the
@@ -196,6 +203,47 @@ class TimelineView(QGraphicsView):
             self._alone_on_release = clip
         else:
             selection.select(Kind.CLIPS, [clip])
+
+    def band(self) -> QRectF | None:
+        """The rubber band being dragged, in scene coordinates, if one is."""
+        return self._band
+
+    def _banding(self, event: QMouseEvent) -> bool:
+        """A left drag from empty lane space: select every clip the band
+        touches, across channels, as it is dragged. With Ctrl or Shift it
+        adds to what was selected when the drag began."""
+        assert self._press is not None
+        moved = event.position() - self._press
+        if self._band is None:
+            if abs(moved.x()) + abs(moved.y()) < DRAG_THRESHOLD:
+                return False
+            adds = event.modifiers() & (
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+            )
+            self._band_keeps = self._document.selection.clips() if adds else []
+        corner = self.mapToScene(self._press.toPoint())
+        here = self.mapToScene(event.position().toPoint())
+        self._band = QRectF(corner, here).normalized()
+        touched = {
+            id(item.clip)
+            for item in self._items.values()
+            if item.sceneBoundingRect().intersects(self._band)
+        }
+        project = self._document.project
+        self._document.selection.select(
+            Kind.CLIPS,
+            [
+                *self._band_keeps,
+                *(
+                    clip
+                    for channel in project.channels
+                    for clip in channel.clips
+                    if id(clip) in touched
+                ),
+            ],
+        )
+        self.viewport().update()
+        return True
 
     def landing(self) -> Landing | None:
         """Where the drag over the lanes would land now, if one is."""
@@ -335,6 +383,14 @@ class TimelineView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if (
+            self._press is not None
+            and self._alone_on_release is None
+            and self._clip_at(self._press) is None
+            and self._banding(event)
+        ):
+            event.accept()
+            return
         if self._pan is not None:
             # Measured from where the drag began rather than added up move by
             # move, so a long drag cannot drift from the hand by rounding.
@@ -354,7 +410,10 @@ class TimelineView(QGraphicsView):
             modifiers = event.modifiers() & (
                 Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
             )
-            if clicked and self._alone_on_release is not None:
+            if self._band is not None:
+                self._band = None
+                self.viewport().update()
+            elif clicked and self._alone_on_release is not None:
                 self._document.selection.select(Kind.CLIPS, [self._alone_on_release])
             elif clicked and empty and not modifiers:
                 self._document.selection.clear()
@@ -471,6 +530,14 @@ class TimelineView(QGraphicsView):
         """Where a drag would land, and the playhead, over everything the
         scene holds (04, *Timeline*)."""
         rect = QRectF(exposed)
+        if self._band is not None:
+            outline = QColor(theme.group_color("timeline", "band"))
+            fill = QColor(outline)
+            fill.setAlphaF(BAND_FILL)
+            painter.setPen(outline)
+            painter.setBrush(fill)
+            painter.drawRect(self._band)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
         if self._landing is not None:
             scale = self._axis.scale
             pen = QPen(QColor(theme.group_color("timeline", "drop")))
