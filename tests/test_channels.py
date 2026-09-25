@@ -116,6 +116,8 @@ def test_mute_solo_and_bypass_are_each_one_command_that_undo_follows(
     assert getattr(channel(panel, 1), field) is False
     assert not getattr(headers(panel)[1], button).isChecked()
     assert document.can_undo == before, "one click, one command"
+    document.redo()
+    assert getattr(headers(panel)[1], button).isChecked()
 
 
 def test_a_committed_gain_is_one_command() -> None:

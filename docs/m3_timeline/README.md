@@ -12,7 +12,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | Phase | Status |
 |---|---|
 | [1 — The time axis, the ruler and the grid](phase_1_time_axis_and_ruler.md) | ✅ |
-| [2 — Channels](phase_2_channels.md) | in progress |
+| [2 — Channels](phase_2_channels.md) | ✅ |
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | not started |
 | [4 — Selection](phase_4_selection.md) | not started |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | not started |
@@ -149,3 +149,14 @@ rule judged on everything drawn together, which the plan had judged series
 by series. The colours were already named: `04`'s worked example of a theme
 file had a `timeline` group, and the lanes draw from it. Twenty-six
 mutations, all killed.
+
+**Phase 2.** Channels: a header of real controls beside each lane — chip,
+name, the numeric field for gain, M, S and bypass, and the snap indicator —
+each edit one command, and a column placed against the lanes' own scroll
+so a header is always level with its lane. Adding, removing, renaming,
+recolouring and dragging to reorder, all undoable. The numeric field is
+built once here, for the pane and the playhead readout to reuse, and the
+input group with it. Headers are rebuilt only when the list of channels
+changes, and compared by identity, because a reopened file's channels are
+equal to the ones on screen and not the same. Twenty-three mutations, all
+killed.

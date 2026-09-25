@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 2 — Channels
 
-**Written:** 2026-09-25 · **Status:** in progress
+**Written:** 2026-09-25 · **Status:** ✅ complete
 
 ## Approach
 
@@ -220,4 +220,62 @@ tests/test_channels.py                      new — gui
 
 ## Outcome
 
-Filled in at the end.
+Six steps in the planned order, all ten acceptance boxes ticked.
+Twenty-three mutations were run: the fourteen named in advance and nine
+found on the way. Two survived a first run, and each was a missing test,
+now written. 1517 tests.
+
+### What the plan got right
+
+**Placing headers against one scroll value.** It never came apart: every
+test that scrolls, wheels, pans or reorders checks alignment, and none has
+failed on it.
+
+**Committing once per gesture.** The numeric field emits once and the
+header turns that into one command. The live preview a drag will need is
+the engine's command ring at phase 8, and nothing here has to change for
+it.
+
+**Updating in place.** Named as a risk, and a test for it written as the
+risk's mitigation, before the reopen showed that identity, not equality,
+is the comparison that matters.
+
+### What the plan did not see
+
+**That a name needs to give way.** Only the grab showed a long name cut
+through a letter. The first test for it measured the wrong thing, and the
+mutation survived; the test now reads what is drawn.
+
+**That menus cannot be run in the suite.** Named nowhere, found while
+writing the palette: `exec` would hang a test. Menus are built by methods
+and popped up.
+
+**That a drop depends on the scroll.** The reorder was right until
+anything had been scrolled, and only the mutation said so.
+
+**That `snap_text` would be needed twice.** It lived in the window; the
+headers need it too, and importing the window from what the window builds
+is a cycle. It lives in `grid.py` now, with the timeline's other Qt-free
+words.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| Fourteen mutations | twenty-three; two survivors, both missing tests |
+| The name a label | a label that elides, drawn by what it says it shows |
+| Menus opened | menus built by methods and popped up, never run |
+| `snap_text` in the window | in `grid.py`, beside `tempo_of` |
+| The corner a spacer | the corner is *Add channel* |
+
+### What phase 3 needs to know
+
+The scene is exactly `len(channels) * LANE_HEIGHT` tall and `axis.span()`
+wide. A lane's y is its index times `LANE_HEIGHT`, the same number the
+headers use, so a clip item at `(sample / scale, index * LANE_HEIGHT)` sits
+in its lane. Dropping on empty space below the last lane needs somewhere to
+drop onto; the scene has no space below the last lane yet, and phase 3
+decides how much. Items must read their colours when they paint, and the
+view's `retheme()` repaints the viewport. `new_channel(project, palette)`
+makes a channel for a drop that creates one, with the palette from
+`theme.active().channels`.
