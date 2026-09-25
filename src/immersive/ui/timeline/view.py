@@ -38,6 +38,9 @@ SCROLL_STEP = 60
 #: What Qt counts one wheel notch as.
 NOTCH = 120
 
+#: A lane's height, and so a header's: room for the header's two rows.
+LANE_HEIGHT = 56
+
 
 class TimelineView(QGraphicsView):
     """The timeline's lanes, drawn against the shared axis."""
@@ -65,7 +68,7 @@ class TimelineView(QGraphicsView):
 
         self.horizontalScrollBar().valueChanged.connect(self._scrolled)
         axis.observe(self._axis_changed)
-        document.observe(self.viewport().update)
+        document.observe(self._project_changed)
         self._axis_changed()
 
     @property
@@ -86,13 +89,20 @@ class TimelineView(QGraphicsView):
     def _axis_changed(self) -> None:
         self._syncing = True
         try:
-            # One pixel high until phase 2 has lanes to fill it: the grid is
-            # background, and a background is drawn across the whole view.
-            self.setSceneRect(QRectF(0, 0, self._axis.span(), 1))
+            # As tall as the lanes, so the vertical scrollbar reaches the last
+            # one. The grid is background, drawn across the whole view, so an
+            # empty project still shows it.
+            lanes = len(self._document.project.channels) * LANE_HEIGHT
+            self.setSceneRect(QRectF(0, 0, self._axis.span(), max(lanes, 1)))
             self.horizontalScrollBar().setValue(self._axis.offset)
         finally:
             self._syncing = False
         self.viewport().update()
+
+    def _project_changed(self) -> None:
+        """Channels come and go, and the tempo draws the grid: lay out and
+        repaint on every change the document reports."""
+        self._axis_changed()
 
     def _scrolled(self, value: int) -> None:
         if not self._syncing:
@@ -194,6 +204,14 @@ class TimelineView(QGraphicsView):
             x = round(line.sample / scale)
             painter.setPen(pens[line.level])
             painter.drawLine(x, top, x, bottom)
+
+        # The line under each lane, over the grid, so the lanes read as rows.
+        painter.setPen(QColor(theme.group_color("timeline", "separator")))
+        left, right = int(rect.left()) - 1, int(rect.right()) + 1
+        for lane in range(1, len(self._document.project.channels) + 1):
+            y = lane * LANE_HEIGHT - 1
+            if top <= y <= bottom:
+                painter.drawLine(left, y, right, y)
 
     def drawForeground(self, painter: QPainter, exposed: QRectF | QRect) -> None:
         """The playhead, over everything the scene holds (04, *Timeline*)."""

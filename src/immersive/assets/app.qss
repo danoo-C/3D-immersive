@@ -162,3 +162,29 @@ QLineEdit#NumericField {
     padding: 1px 4px;
 }
 QLineEdit#NumericField:focus { border-color: $input_focus_border; }
+
+/* Channel headers (M3). Every "on" carries a letter as well as a colour, and
+   a channel silenced by another's solo says so in words (04, Accessibility
+   and feel). The chip is the channel's own colour and painted, not here. */
+QFrame#ChannelHeader {
+    background-color: $channel_background;
+    border-bottom: 1px solid $channel_border;
+}
+QLabel#ChannelName, QLabel#ChannelSnap[overriding="true"] { color: $channel_name; }
+QLabel#ChannelQuiet, QLabel#ChannelSnap[overriding="false"] {
+    color: $channel_quiet;
+    font-size: 11px;
+}
+QFrame#ChannelHeader QToolButton { padding: 1px 6px; }
+QToolButton#Mute:checked {
+    background-color: $channel_mute_background;
+    color: $channel_mute_text;
+}
+QToolButton#Solo:checked {
+    background-color: $channel_solo_background;
+    color: $channel_solo_text;
+}
+QToolButton#Bypass:checked {
+    background-color: $channel_bypass_background;
+    color: $channel_bypass_text;
+}

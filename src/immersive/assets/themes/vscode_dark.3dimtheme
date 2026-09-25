@@ -22,6 +22,18 @@
       "pressed.background": "accent.pressed",
       "text": "text.primary"
     },
+    "channel": {
+      "background": "surface.raised",
+      "border": "border",
+      "bypass.background": "text.secondary",
+      "bypass.text": "surface.window",
+      "mute.background": "warn",
+      "mute.text": "surface.window",
+      "name": "text.primary",
+      "quiet": "text.disabled",
+      "solo.background": "accent.text",
+      "solo.text": "surface.window"
+    },
     "filter": {
       "background": "surface.window",
       "border": "border",
@@ -93,7 +105,8 @@
       "grid": "border",
       "grid.beat": "surface.hover",
       "grid.division": "surface.raised",
-      "playhead": "accent"
+      "playhead": "accent",
+      "separator": "border"
     },
     "toolbar": {
       "background": "surface.raised",

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from typing import Final
 
-from immersive.core.model import Project
+from immersive.core.model import Project, SnapSetting
 from immersive.core.time import (
     SAMPLE_RATE,
     TICKS_PER_BEAT,
@@ -102,6 +102,14 @@ class Tempo:
     time_signature: tuple[int, int]
     division: Division | None
     triplet: bool
+
+
+def snap_text(snap: SnapSetting) -> str:
+    """`Snap 1/16`, `Snap 1/8T` for a triplet, or `Snap off` - the toolbar's
+    words for a snap setting, and a channel header's without the `Snap`."""
+    if not snap.enabled:
+        return "Snap off"
+    return f"Snap {snap.division.value}{'T' if snap.triplet else ''}"
 
 
 def tempo_of(project: Project) -> Tempo:

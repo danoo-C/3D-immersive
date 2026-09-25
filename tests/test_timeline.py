@@ -23,9 +23,9 @@ from immersive.core.io import project_io
 from immersive.core.model import Channel, Clip, MediaFile, Project, SnapSetting
 from immersive.core.time import SAMPLE_RATE, Division
 from immersive.ui import theme, theme_io
-from immersive.ui.main_window import MainWindow, snap_text
+from immersive.ui.main_window import MainWindow
 from immersive.ui.time_axis import TimeAxis
-from immersive.ui.timeline.grid import Unit
+from immersive.ui.timeline.grid import Unit, snap_text
 from immersive.ui.timeline.panel import EXTENT_BEYOND, EXTENT_FLOOR, TimelinePanel
 from immersive.ui.timeline.view import SCROLL_STEP, ZOOM_STEP, TimelineView
 

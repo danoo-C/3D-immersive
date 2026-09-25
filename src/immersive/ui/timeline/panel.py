@@ -1,4 +1,11 @@
-"""The timeline panel: the ruler over the lanes, and where the playhead is.
+"""The timeline panel: the ruler over the lanes, the headers beside them,
+and where the playhead is.
+
+Four cells. The corner stays put; the ruler follows the lanes sideways and
+the headers follow them up and down; the lanes scroll both ways:
+
+    corner   | ruler
+    headers  | lanes
 
 It keeps the playhead until phase 9's transport does, and tells both
 widgets when it moves. It does not keep the time axis: the window does, and
@@ -8,12 +15,13 @@ neither panel may own it (D-94).
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QGridLayout, QWidget
 
 from immersive.core.document import Document
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit
+from immersive.ui.timeline.headers import HEADER_WIDTH, ChannelHeaders
 from immersive.ui.timeline.ruler import Ruler
 from immersive.ui.timeline.view import TimelineView
 from immersive.ui.widgets.placeholder import Panel
@@ -45,9 +53,22 @@ class TimelinePanel(Panel):
 
         self.ruler = Ruler(document, axis)
         self.view = TimelineView(document, axis)
-        layout = self.body()
-        layout.addWidget(self.ruler)
-        layout.addWidget(self.view, 1)
+        self.headers = ChannelHeaders(document, self.view)
+        self.corner = QWidget()
+        self.corner.setObjectName("TimelineCorner")
+        self.corner.setFixedSize(HEADER_WIDTH, self.ruler.height())
+
+        cells = QWidget()
+        grid = QGridLayout(cells)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(0)
+        grid.addWidget(self.corner, 0, 0)
+        grid.addWidget(self.ruler, 0, 1)
+        grid.addWidget(self.headers, 1, 0)
+        grid.addWidget(self.view, 1, 1)
+        grid.setRowStretch(1, 1)
+        grid.setColumnStretch(1, 1)
+        self.body().addWidget(cells, 1)
 
         self.ruler.clicked.connect(self.set_playhead)
         document.observe(self._project_changed)

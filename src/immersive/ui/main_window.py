@@ -37,7 +37,7 @@ from immersive.core.edits import AddMedia
 from immersive.core.io import project_io
 from immersive.core.io.media import Refused
 from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, find_audio
-from immersive.core.model import MediaFile, Project, SnapSetting
+from immersive.core.model import MediaFile, Project
 from immersive.core.relink import relink
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.explorer.media_pool import MediaPool
@@ -46,7 +46,7 @@ from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
 from immersive.ui.theme_menu import ThemeMenu
 from immersive.ui.time_axis import TimeAxis
-from immersive.ui.timeline.grid import Unit
+from immersive.ui.timeline.grid import Unit, snap_text
 from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.placeholder import Placeholder
@@ -1002,13 +1002,6 @@ class MainWindow(QMainWindow):
         if (latest := self._notices.latest()) is not None:
             self.statusBar().showMessage(latest.message)
         self._notice_count.refresh()
-
-
-def snap_text(snap: SnapSetting) -> str:
-    """`Snap 1/16`, `Snap 1/8T` for a triplet, or `Snap off`."""
-    if not snap.enabled:
-        return "Snap off"
-    return f"Snap {snap.division.value}{'T' if snap.triplet else ''}"
 
 
 def _reason(error: OSError) -> str:
