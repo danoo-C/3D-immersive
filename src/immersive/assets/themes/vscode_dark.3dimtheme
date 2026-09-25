@@ -37,6 +37,12 @@
       "border": "border",
       "text": "text.secondary"
     },
+    "input": {
+      "background": "surface.window",
+      "border": "border",
+      "focus.border": "accent",
+      "text": "text.primary"
+    },
     "menu": {
       "background": "surface.raised",
       "bar.background": "surface.raised",

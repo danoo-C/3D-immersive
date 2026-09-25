@@ -150,3 +150,15 @@ QLineEdit#PoolFilter {
     margin: 6px;
 }
 QLineEdit#PoolFilter:focus { border-color: $filter_focus_border; }
+
+/* Typed input (M3): the numeric field, dragged or typed, first used for a
+   channel's gain. 04 listed the input-field group under M8, for whichever
+   milestone first drew one; this is it. */
+QLineEdit#NumericField {
+    background-color: $input_background;
+    color: $input_text;
+    border: 1px solid $input_border;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+QLineEdit#NumericField:focus { border-color: $input_focus_border; }
