@@ -14,7 +14,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [1 — The time axis, the ruler and the grid](phase_1_time_axis_and_ruler.md) | ✅ |
 | [2 — Channels](phase_2_channels.md) | ✅ |
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | ✅ |
-| [4 — Selection](phase_4_selection.md) | in progress |
+| [4 — Selection](phase_4_selection.md) | ✅ |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | not started |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | not started |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | not started |
@@ -171,3 +171,13 @@ before anything was drawn. Five hundred clips were measured: scrolling is
 inside a frame, and two causes of a slow cold repaint were found and fixed,
 one of them a lookup every paint in the application was paying. Twenty-two
 mutations, all killed.
+
+**Phase 4.** Selection: clips by clicking, Shift and Ctrl, and a rubber band
+across lanes; channels by their headers; samples by their rows in the pool
+— one kind at a time, and each widget reading one selection the document
+owns and prunes after every change (D-96). `Ctrl+A` takes the focused
+channel and then everything; `Esc` clears while the transport is stopped,
+which until phase 9 it always is; `B` bypasses the selected channels as one
+edit. A selected clip wears a border and a selected header a bar, so
+neither is marked by colour alone. Twenty-seven mutations, all killed; two
+survived at first, both ranges tested in a way that could only grow.

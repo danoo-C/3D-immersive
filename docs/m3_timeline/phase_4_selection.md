@@ -1,6 +1,6 @@
 # M3 · Phase 4 — Selection
 
-**Status:** in progress · **Plan:**
+**Status:** ✅ complete · **Plan:**
 [plans/phase_4_selection.md](plans/phase_4_selection.md)
 
 ## Goal
@@ -32,22 +32,22 @@ transport runs → phase 9. Keyframe selection → M6.
 
 ## Acceptance
 
-- [ ] Clicking a clip selects it alone, and Shift+click and Ctrl+click
+- [x] Clicking a clip selects it alone, and Shift+click and Ctrl+click
       extend and toggle as `04`'s *Selection* table says.
-- [ ] A rubber band over empty lane space selects every clip it touches,
+- [x] A rubber band over empty lane space selects every clip it touches,
       across channels.
-- [ ] Selecting a channel clears any clip selection and the reverse, and
+- [x] Selecting a channel clears any clip selection and the reverse, and
       selecting a pool row clears both (D-57).
-- [ ] `Ctrl+A` selects every clip on the focused channel, and pressed again
+- [x] `Ctrl+A` selects every clip on the focused channel, and pressed again
       every clip in the project.
-- [ ] Clicking empty space, or `Esc`, clears the selection.
-- [ ] A selected clip removed by an undo leaves the selection, and nothing
+- [x] Clicking empty space, or `Esc`, clears the selection.
+- [x] A selected clip removed by an undo leaves the selection, and nothing
       else in it changes.
-- [ ] `B` toggles bypass on every selected channel as one command, and its
+- [x] `B` toggles bypass on every selected channel as one command, and its
       tooltip no longer names M3.
-- [ ] The selection is tested headless: `core/selection.py` imports no Qt,
+- [x] The selection is tested headless: `core/selection.py` imports no Qt,
       which `test_layering.py` already enforces for everything in `core/`.
-- [ ] A selected clip is marked by the `clip selected border` group, which
+- [x] A selected clip is marked by the `clip selected border` group, which
       is in `04` and the bundled theme, and by more than colour alone.
 
 ## Implements
@@ -59,3 +59,50 @@ F-51, D-57 — *Selection* and *Keyboard* in
 ## Notes
 
 Appended while building.
+
+**The selection is the document's (D-96), and the prune is the only thing
+that forgets.** After every change, before any observer is told, it drops
+whatever is no longer in the project, by identity. New and Open need no
+clear of their own: a fresh project holds none of the old things, so the
+same prune empties it. The clear the plan put there was taken out when its
+mutation turned out to be one no test could tell apart.
+
+**A press on a selected clip waits for the release.** It leaves the
+selection alone so that phase 5 can drag every selected clip from any of
+them, and a release that never moved selects that clip alone. Built now,
+so a click does not change its meaning when dragging arrives.
+
+**A range that only grows cannot tell adding from replacing.** Twice a
+mutation turning Shift's *replace* into *add* survived, once for clips and
+once for headers, because what was selected before the Shift+click lay
+inside the range, and adding the range gave the same answer as replacing
+with it. Both tests now leave something outside the range first, so the
+range has something to throw out.
+
+**The pool's tree keeps a selection of its own, because Qt insists.** It
+is kept in step both ways: a row picked becomes a media selection, and
+every change to the document's selection, and every rebuild, sets the
+tree again. A guard stops that setting from echoing back as a choice; a
+mutation that dropped the guard around a rebuild lost the selection on the
+next edit, and was killed.
+
+**A selected header wears a bar, and the bar's room is always there.**
+Every header carries a 3 px transparent left border, which selection
+colours, so the controls in it do not shift by three pixels when it is
+clicked.
+
+**`Ctrl+A` in a line edit can only be tested as a claim.** Offscreen no
+window is active, so no shortcut fires in a test at all. What is held is
+that the rename field accepts the shortcut override for `Ctrl+A`, which is
+what keeps Edit › Select All from seeing it, and selects its text.
+
+**Looked at:** clips selected on four lanes, a band dragged across three,
+two channels selected. The border reads on every lane, but on the first
+channel it is weakest: that channel's palette colour is `accent`, so its
+selected clip is purple on purple, told apart by the full frame, where an
+unselected clip shows only its right edge, and by the border being solid
+over a translucent body. `04`'s example names `accent`, so it stays; a
+theme can move it with `clip.selected.border`.
+
+The phase adds 43 tests. The suite is 1617: 14.5 s serially, 5.5 s in
+parallel, 3.2 s in the fast lane.

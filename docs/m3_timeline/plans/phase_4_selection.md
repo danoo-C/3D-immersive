@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 4 — Selection
 
-**Written:** 2026-09-26 · **Status:** in progress
+**Written:** 2026-09-26 · **Status:** ✅ complete
 
 ## Approach
 
@@ -166,4 +166,63 @@ tests/test_theme_io.py                      amended — the example
 
 ## Outcome
 
-Filled in at the end.
+Six steps in the planned order, all nine acceptance boxes ticked.
+Twenty-seven mutations: the eleven named in advance and sixteen found on
+the way, all killed. Two survived at first and were test weaknesses, not
+code faults. 1617 tests.
+
+### What the plan got right
+
+**The selection in `core`, owned by the document.** Every rule of it —
+one kind, identity, the range, the prune after an Undo — was settled by
+tests that open no window, and the widgets' tests only check that a click
+turns into the right call and that what is selected is what is drawn.
+
+**Deciding a click on a selected clip at the release.** It cost a flag and
+a test, and phase 5's group drag will not have to change what a click
+means.
+
+**Naming the two selections drifting as a risk.** The guard it called for
+was built with the sync rather than after it, and the mutation that took
+it away from a rebuild was killed.
+
+### What the plan did not see
+
+**That a clear on New was redundant.** The prune already empties a
+selection whose things are not in the new project. The mutation that
+removed the clear could not be told apart, so the clear went, and "New
+keeping the selection" is the prune's own mutation.
+
+**That a range test which only grows proves nothing about replacing.**
+Shift+click's *replace* survived its mutation twice, first for clips and
+then for headers, before the tests gave the range something to throw out.
+
+**That `Ctrl+A` in a line edit cannot be pressed in a test.** No window is
+active offscreen, so the risk's "tested with the rename field open" is a
+test of the field's claim on the key, not of the shortcut not firing.
+
+**That the first channel's colour is the accent.** A selected clip on it
+is purple on purple, marked by its frame more than by its colour.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| The document clears the selection on New and Open | the prune after the change does it; no clear |
+| Focus and Select All in `panel.py` | in the view, which owns the clicks that set the focus; `panel.py` unchanged |
+| `02` not in the file list | its layout line for `selection.py` names the owner and D-96 |
+| Eleven mutations | twenty-seven |
+
+### What phase 5 needs to know
+
+`document.selection` is the selection: `clips()`, `channels()`, `media()`,
+`kind`, and `clip in selection` by identity. It prunes itself after every
+push, so an edit that removes a clip needs do nothing about it. A press on
+a selected clip already leaves the selection alone, and a press on an
+unselected one selects it first, so a drag from any clip only has to move
+what is selected. The release selects one clip alone only if it moved less
+than `DRAG_THRESHOLD`, so a drag's release changes nothing. Today a left
+drag from a clip does nothing at all; a drag from empty lane space is the
+band.
+`view.focused()` is the channel last clicked, for anything that wants a
+default channel.
