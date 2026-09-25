@@ -374,11 +374,12 @@ who owns what. M9 is built *third*, before all of them:
 |---|---|
 | window, panel, menu, toolbar, button, **tab**, splitter, scrollbar, status bar, tooltip, **focus** | M9 — the widgets that exist when the system is built. Tab and focus were missing from this row until M9 phase 1 went looking: the tab bar exists because of D-49 and the focus ring is required by *Accessibility and feel*, and the stylesheet has styled both since M0 |
 | notice line, notice count, notice list | M9 — it builds them (D-65) |
-| tree view, header, filter field, waveform thumbnail | M2 — built as `tree`, `header`, `filter` and the painted `waveform`. The filter is styled by its object name, so the generic input field stays M8's |
-| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file* |
+| tree view, header, filter field, waveform thumbnail | M2 — built as `tree`, `header`, `filter` and the painted `waveform`. The filter is styled by its object name |
+| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file*; the channel header at phase 2 as `channel`, styled by object name, with the line between lanes as `timeline.separator` |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
-| dialog, progress bar, input field, spin box, check box, slider, combo box | M8 — the first milestone with dialogs and a preferences form |
+| input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one |
+| dialog, progress bar, spin box, check box, slider, combo box | M8 — the first milestone with dialogs and a preferences form |
 
 **Painted groups.** Some widgets draw with a painter rather than a
 stylesheet — the waveform is the first, and clips, the spatial views and the
@@ -407,6 +408,7 @@ their values:
 | `grid.beat` | `surface.hover` | beat lines |
 | `grid.division` | `surface.raised` | the snap division — the faintest, and only while snapping is on |
 | `playhead` | `accent` | the playhead, over everything, in the lanes and across the ruler |
+| `separator` | `border` | the line under each lane |
 
 | `ruler` key | Default | For |
 |---|---|---|
@@ -526,6 +528,38 @@ height indirectly. Muted channels drop to 25% opacity; soloed ones get a glow.
 Ruler across the top, switchable bars:beats ↔ min:sec, with the grid drawn from
 BPM and the current snap division. Channel headers on the left — colour chip,
 name, gain, M/S, ⊘ (HRTF bypass), snap-override indicator. Lanes to the right.
+
+```
+┌─────────────┬──────────────────────────────┐
+│ Add channel │ ruler — follows the lanes →  │
+├─────────────┼──────────────────────────────┤
+│ ■ Name  snap│                              │
+│ 0.0 dB M S ⊘│ lanes — scroll both ways     │
+├─────────────┤                              │
+│ headers     │                              │
+│ follow the  │                              │
+│ lanes ↕     │                              │
+└─────────────┴──────────────────────────────┘
+```
+
+The headers never scroll sideways and the ruler never scrolls up and down;
+each follows the lanes on the other axis, so a header is always level with
+its own lane. The corner above the headers holds *Add channel*, in reach
+however far the lanes are scrolled.
+
+- **Gain** runs from −60 dB to +12 dB, dragged or typed like every numeric
+  field. Below −60 is what mute is for, and a fader that reaches −∞ spends
+  its most-used range in its last few pixels.
+- **M, S and ⊘** are letters or a symbol as well as a colour when on. A
+  channel silenced by another's solo says *silenced* beside its name; a muted
+  one does not, because its M already says why it is quiet.
+- **The snap indicator** reads `snap` while the channel follows the project,
+  and the division — `1/8`, `1/4T`, `off` — while it overrides it.
+- **The name** is renamed by double-clicking it, and ends in an ellipsis
+  rather than running into the controls beside it.
+- **The chip** is the channel's own colour, from the project. Clicking it
+  offers the theme's channel palette. Dragging a header up or down reorders
+  the channels, and a right-click offers Rename and Remove.
 
 The grid thins as the view zooms out rather than crowding: no two lines are
 drawn closer than a few pixels, the snap division goes first, then beats, and

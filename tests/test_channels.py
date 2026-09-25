@@ -5,7 +5,9 @@ Marked gui. Built as a panel on its own, not a window.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
@@ -599,3 +601,65 @@ def test_a_header_dragged_while_scrolled_lands_under_the_pointer() -> None:
 
     assert names(panel)[7] == "Channel 6"
     assert aligned(panel)
+
+
+# --------------------------------------------------------------------------- #
+# kept
+# --------------------------------------------------------------------------- #
+
+
+def test_channels_in_every_state_survive_a_save_and_a_reopen(tmp_path: Path) -> None:
+    window = MainWindow()
+    timeline = window.timeline()
+    document = window.document()
+    for _ in range(5):
+        timeline.add_channel()
+    first, second, third, fourth, fifth = document.project.channels
+    for target, field, value in (
+        (first, "solo", True),
+        (second, "mute", True),
+        (third, "hrtf_bypass", True),
+        (fourth, "gain_db", -7.5),
+        (fifth, "snap_override", SnapSetting(division=Division.QUARTER, triplet=True)),
+        (fifth, "name", "Pads"),
+        (fifth, "color", theme.active().channels[6]),
+    ):
+        document.push(SetAttribute(target, field, value))
+    document.push(MoveChannel(document.project, fifth, 0))
+    saved = copy.deepcopy(document.project)
+    document.save_as(tmp_path / "channels.3dim")
+
+    document.new()
+    assert timeline.headers.headers() == []
+    document.open(tmp_path / "channels.3dim")
+
+    assert document.project == saved
+    shown = [
+        (h.name.text(), h.chip.colour(), h.mute.isChecked(), h.solo.isChecked(),
+         h.bypass.isChecked(), h.gain.value(), h.snap.text())
+        for h in timeline.headers.headers()
+    ]  # fmt: skip
+    assert shown == [
+        ("Pads", theme.active().channels[6], False, False, False, 0.0, "1/4T"),
+        ("Channel 1", theme.active().channels[0], False, True, False, 0.0, "snap"),
+        ("Channel 2", theme.active().channels[1], True, False, False, 0.0, "snap"),
+        ("Channel 3", theme.active().channels[2], False, False, True, 0.0, "snap"),
+        ("Channel 4", theme.active().channels[3], False, False, False, -7.5, "snap"),
+    ]
+
+
+def test_headers_of_a_reopened_project_edit_the_reopened_channels(
+    tmp_path: Path,
+) -> None:
+    """Reopening a file gives channels equal to the ones shown and not the
+    same objects; headers still holding the old ones would edit channels no
+    longer in the project, with nothing on screen to say so."""
+    window = MainWindow()
+    window.timeline().add_channel()
+    document = window.document()
+    document.save_as(tmp_path / "one.3dim")
+
+    document.open(tmp_path / "one.3dim")
+    window.timeline().headers.headers()[0].mute.click()
+
+    assert document.project.channels[0].mute is True
