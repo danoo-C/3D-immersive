@@ -12,6 +12,12 @@ does.
 what is in the exposed span and draws those, so there are never more lines
 than pixels allow and none as scene items.
 
+**A drag on clips edits nothing until the release.** While it lasts, the
+command the release would push is worked out at every movement - by
+`dragging` for where the pointer snaps and by the command for how far the
+clips may go - and the clips are drawn where it would leave them. The
+release pushes that one command (02, *Undo*); `Esc` drops it.
+
 **Colours are read when it paints**, from the `timeline` group (D-92), so
 `retheme()` only asks for a repaint. Items put in the scene later read theirs
 the same way, which is M9's warning about scene items answered: the view's
@@ -21,6 +27,7 @@ repaint reaches them because they have nothing to re-read.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
@@ -29,6 +36,7 @@ from PySide6.QtGui import (
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
+    QKeyEvent,
     QMouseEvent,
     QPainter,
     QPen,
@@ -38,12 +46,21 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QWidget
 
 from immersive.core.document import Document
+from immersive.core.edits import MoveClips, TrimClips
 from immersive.core.model import Channel, Clip
 from immersive.core.selection import Kind, between, lane_of
 from immersive.ui import theme
 from immersive.ui.explorer.media_pool import MIME
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.clips import ClipItem, Peaks
+from immersive.ui.timeline.dragging import (
+    Part,
+    lanes_moved,
+    part_at,
+    snapped_move,
+    snapped_trim,
+    targets,
+)
 from immersive.ui.timeline.grid import Level, grid_lines, tempo_of
 from immersive.ui.timeline.landing import Landing, dropped, landing
 from immersive.ui.timeline.metrics import LANE_HEIGHT
@@ -62,6 +79,21 @@ DRAG_THRESHOLD = 4
 
 #: How much of its outline's colour the rubber band is filled with.
 BAND_FILL = 0.12
+
+
+@dataclass
+class _Drag:
+    """A press on a selected clip, and what it takes: the clip, which part,
+    and the lane it was in. Once it has moved far enough it holds the
+    selection it drags, the edges it may snap to, and the edit the release
+    would push."""
+
+    grabbed: Clip
+    part: Part
+    home: int
+    clips: list[Clip] = field(default_factory=list)
+    edges: list[int] = field(default_factory=list)
+    edit: MoveClips | TrimClips | None = None
 
 
 class TimelineView(QGraphicsView):
@@ -100,6 +132,13 @@ class TimelineView(QGraphicsView):
         #: that were selected when it began if it adds to them.
         self._band: QRectF | None = None
         self._band_keeps: list[Clip] = []
+        #: A press on a selected clip, and the drag it becomes; see `_Drag`.
+        self._drag: _Drag | None = None
+        #: Where each dragged clip is drawn while the drag lasts, by the
+        #: clip's identity: its lane, start, offset and length.
+        self._preview: dict[int, tuple[int, int, int, int]] = {}
+        # The pointer says which edge a press would take before it presses.
+        self.viewport().setMouseTracking(True)
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         #: Set while the axis is being written into the scrollbar, so the
@@ -304,14 +343,17 @@ class TimelineView(QGraphicsView):
                     self.scene().addItem(item)
                     self._items[id(clip)] = item
                 sample = media.get(clip.media_id)
+                shown = self._preview.get(id(clip))
+                at = shown[0] if shown is not None else lane
                 item.present(
                     clip,
                     selected=clip in self._document.selection,
-                    colour=channel.color,
+                    colour=project.channels[at].color,
                     name=sample.name if sample is not None else clip.media_id,
                     missing=sample is None or sample.missing,
-                    lane=lane,
+                    lane=at,
                     scale=scale,
+                    placing=shown[1:] if shown is not None else None,
                 )
                 seen.add(id(clip))
         for key in [key for key in self._items if key not in seen]:
@@ -357,12 +399,102 @@ class TimelineView(QGraphicsView):
         if event.button() is Qt.MouseButton.LeftButton:
             self._press = event.position()
             self._alone_on_release = None
+            self._drag = None
             item = self._clip_at(event.position())
             if item is not None:
                 self._click(item, event.modifiers())
+                self._grab(item, event.position())
             event.accept()
             return
         self._pan_press(event)
+
+    def _grab(self, item: ClipItem, position: QPointF) -> None:
+        """Take the part of `item` under `position` - if its clip is
+        selected once the press is done, so a Ctrl+press that toggled it out
+        drags nothing."""
+        clip = item.clip
+        if clip is None or clip not in self._document.selection:
+            return
+        x = item.mapFromScene(self.mapToScene(position.toPoint())).x()
+        self._drag = _Drag(clip, part_at(x, item.boundingRect().width()), item.lane)
+
+    def dragging(self) -> bool:
+        """Whether a drag on clips is under way - past the threshold."""
+        return self._drag is not None and self._drag.edit is not None
+
+    def _dragged(self, event: QMouseEvent) -> None:
+        """Work out what releasing here would do, and draw it."""
+        drag, press = self._drag, self._press
+        assert drag is not None and press is not None
+        moved = event.position() - press
+        if drag.edit is None:
+            if abs(moved.x()) + abs(moved.y()) < DRAG_THRESHOLD:
+                return
+            drag.clips = self._document.selection.clips()
+            drag.edges = targets(self._document.project, drag.clips, drag.part.edge)
+        project = self._document.project
+        offset = round(moved.x() * self._axis.scale)
+        exact = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        edge = drag.part.edge
+        if edge is None:
+            lanes = lanes_moved(
+                self.mapToScene(press.toPoint()).y(),
+                self.mapToScene(event.position().toPoint()).y(),
+            )
+            delta = snapped_move(
+                project, drag.grabbed, drag.home, offset, lanes, drag.edges, exact=exact
+            )
+            move = MoveClips(project, drag.clips, delta, lanes)
+            drag.edit = move
+            self._preview = {
+                id(clip): (lane, start, clip.offset, clip.length)
+                for clip, lane, start in move.placed()
+            }
+        else:
+            channel = project.channels[drag.home]
+            delta = snapped_trim(
+                project, drag.grabbed, channel, edge, offset, drag.edges, exact=exact
+            )
+            trim = TrimClips(project, drag.clips, edge, delta)
+            drag.edit = trim
+            lanes_of = {id(item.clip): item.lane for item in self._items.values()}
+            self._preview = {
+                id(clip): (lanes_of[id(clip)], start, offset_, length)
+                for clip, start, offset_, length in trim.trims()
+            }
+        self._lay_out()
+
+    def _end_drag(self) -> MoveClips | TrimClips | None:
+        """Stop drawing a drag, and hand back the edit it would make."""
+        edit = self._drag.edit if self._drag is not None else None
+        self._drag = None
+        if self._preview:
+            self._preview = {}
+            self._lay_out()
+        return edit
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """`Esc` during a drag puts everything back and makes no edit."""
+        if event.key() == Qt.Key.Key_Escape and self._drag is not None:
+            self._end_drag()
+            self._press = None
+            self._alone_on_release = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _pointing(self, position: QPointF) -> None:
+        """Show, before any press, which edge a press here would take."""
+        item = self._clip_at(position)
+        part = Part.BODY
+        if item is not None:
+            x = item.mapFromScene(self.mapToScene(position.toPoint())).x()
+            part = part_at(x, item.boundingRect().width())
+        if part is Part.BODY:
+            self.viewport().unsetCursor()
+        else:
+            self.viewport().setCursor(Qt.CursorShape.SizeHorCursor)
 
     def _pan_press(self, event: QMouseEvent) -> None:
         """A middle-button drag pans both ways, the lanes following the hand.
@@ -383,6 +515,12 @@ class TimelineView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._press is not None and self._drag is not None:
+            self._dragged(event)
+            event.accept()
+            return
+        if self._press is None and self._pan is None:
+            self._pointing(event.position())
         if (
             self._press is not None
             and self._alone_on_release is None
@@ -410,7 +548,11 @@ class TimelineView(QGraphicsView):
             modifiers = event.modifiers() & (
                 Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
             )
-            if self._band is not None:
+            edit = self._end_drag()
+            if edit is not None:
+                if edit.changes:
+                    self._document.push(edit)
+            elif self._band is not None:
                 self._band = None
                 self.viewport().update()
             elif clicked and self._alone_on_release is not None:

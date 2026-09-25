@@ -75,6 +75,8 @@ class ClipItem(QGraphicsItem):
         self.clip: Clip | None = None
         self._width = 1.0
         self._look: tuple[object, ...] = ()
+        #: The part of its sample it draws: the clip's own, or a drag's.
+        self._span = (0, 0)
         #: The lane it was last shown in: its channel's index.
         self.lane = 0
         #: How many times it has painted - read by tests of the cache.
@@ -90,19 +92,27 @@ class ClipItem(QGraphicsItem):
         lane: int,
         scale: float,
         selected: bool = False,
+        placing: tuple[int, int, int] | None = None,
     ) -> None:
-        """Place and size it for `scale`, and repaint only if its look changed."""
+        """Place and size it for `scale`, and repaint only if its look changed.
+
+        `placing` - a start, an offset and a length - draws it somewhere
+        other than where the clip is: where a drag would leave it. The item
+        still holds the clip itself, so it is still found by the clip.
+        """
         self.clip = clip
-        width = max(clip.length / scale, 1.0)
+        start, offset, length = placing or (clip.start, clip.offset, clip.length)
+        width = max(length / scale, 1.0)
         if width != self._width:
             self.prepareGeometryChange()
             self._width = width
-        self.setPos(clip.start / scale, lane * LANE_HEIGHT + TOP)
+        self.setPos(start / scale, lane * LANE_HEIGHT + TOP)
         self.lane = lane
+        self._span = (offset, length)
         look = (
             clip.media_id,
-            clip.offset,
-            clip.length,
+            offset,
+            length,
             colour,
             name,
             missing,
@@ -190,8 +200,8 @@ class ClipItem(QGraphicsItem):
                 pyramid,
                 fill=QColor(theme.channel_group_color("clip", "waveform", self.colour)),
                 centre=None,
-                start=clip.offset,
-                frames=clip.length,
+                start=self._span[0],
+                frames=self._span[1],
                 columns=range(first, last),
             )
 
