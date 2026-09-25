@@ -1,6 +1,7 @@
 # M3 · Phase 3 — Clips on the lanes
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_3_clips_on_the_lanes.md](plans/phase_3_clips_on_the_lanes.md)
 
 ## Goal
 

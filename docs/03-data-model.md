@@ -196,6 +196,9 @@ another's time is a collision to resolve, not a reordering.
   order and index fields disagreed had no defined meaning.
 - Clips on one channel never overlap. Dropping onto an occupied span trims the
   existing clip (magnetic behaviour); a modifier opts out and rejects the drop.
+  A clip the drop covers entirely is removed, and one reaching past both ends
+  of the drop is split around it, both outer parts staying where they were
+  (D-95).
 - `offset + length` must not exceed `MediaFile.frames`.
 - A channel with no keyframes for an axis uses its static `position` component.
   With one keyframe, that value holds for the whole timeline.
