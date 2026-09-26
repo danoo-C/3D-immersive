@@ -1,20 +1,22 @@
 # M4 · Phase 3 — Directions
 
-**Status:** not started · **Plan:** not written yet
+**Status:** planned · **Plan:** [plans/phase_3_directions.md](plans/phase_3_directions.md)
 
 ## Goal
 
 `audio/hrtf/lookup.py` answers "which measurements, and how much of each?"
 for any direction: the triangle of the set's triangulated sphere that
-contains it, found through a KD-tree over face centroids, and barycentric
-weights over its three corners (05, *3. Spherical interpolation*). It
-answers for a whole block's sources in one call, without allocating, so
-that phase 5 can ask it on the audio thread.
+contains it, and barycentric weights over its three corners (05, *3.
+Spherical interpolation*). It answers for a whole block's sources in one
+call, without allocating, so that phase 5 can ask it on the audio thread.
+The triangle is found through a cube-map index and a walk rather than 05's
+KD-tree, which allocates on every query (D-119).
 
 ## Scope
 
 **In:** the triangulation by `scipy.spatial.ConvexHull`, built once per set;
-the centroid KD-tree; the containing-triangle test; weights for a batch of
+the cube-map index, built with a centroid KD-tree off the audio thread;
+the containing-triangle test and the walk; weights for a batch of
 directions into preallocated arrays; the degenerate cases (a direction
 exactly on an edge or a vertex, the poles); how a direction below the set's
 lowest measurement is handled.
