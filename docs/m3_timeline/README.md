@@ -17,7 +17,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [4 — Selection](phase_4_selection.md) | ✅ |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | ✅ |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | ✅ |
-| [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | in progress |
+| [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | ✅ |
 | [8 — The engine, flat](phase_8_flat_engine.md) | not started |
 | [9 — Transport](phase_9_transport.md) | not started |
 | [10 — The master meter, and the arrangement heard](phase_10_meter_and_listening.md) | not started |
@@ -206,3 +206,15 @@ Paste is disabled while a copied clip's sample is out of the pool (D-99).
 Lanes a paste needs past the last become channels in the same edit
 (D-100). A numeric field at rest no longer claims `Ctrl+C`. Forty-five
 mutations, all killed but one, which is equivalent and pinned by a test.
+
+**Phase 7.** The parameters pane follows the selection: a clip's source,
+start, length, crop offset, gain and fades; a channel's header fields, with
+position and pan drawn for M5 and M4; a sample's facts, waveform and
+Audition; and the project's tempo and signature, also in the toolbar.
+Several things show `—` where they differ and take one value in one edit,
+except a clip's start, which moves the selection (D-102). Positions read in
+the ruler's unit and durations in seconds (D-103). Fades are drawn as the
+engine will play them, and a selected clip's handles set them by dragging.
+Two fades never overlap, which a trim could already break until now
+(D-101). A hundred and five mutations: a hundred and two killed, and three
+that found code with no effect, which is gone.

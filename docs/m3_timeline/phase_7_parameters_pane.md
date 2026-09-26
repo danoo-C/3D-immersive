@@ -1,6 +1,6 @@
 # M3 · Phase 7 — The parameters pane, clip gain and fades
 
-**Status:** in progress · **Plan:**
+**Status:** ✅ complete · **Plan:**
 [plans/phase_7_parameters_pane.md](plans/phase_7_parameters_pane.md)
 
 ## Goal
@@ -36,28 +36,28 @@ the pane shows the same value.
 
 ## Acceptance
 
-- [ ] With a clip selected, the pane shows its source, start, length, crop
+- [x] With a clip selected, the pane shows its source, start, length, crop
       offset, gain and both fades; changing any of them is one undoable edit,
       and the clip in the timeline follows.
-- [ ] With several clips selected, a field whose values differ reads `—`,
+- [x] With several clips selected, a field whose values differ reads `—`,
       and setting it sets it on all of them in one edit.
-- [ ] Dragging a clip's fade handle sets that fade's length in one command
+- [x] Dragging a clip's fade handle sets that fade's length in one command
       on release; a fade never exceeds its clip, and the two fades together
       never overlap.
-- [ ] A channel's view edits its name, colour, gain, mute, solo, bypass and
+- [x] A channel's view edits its name, colour, gain, mute, solo, bypass and
       snap override; its position and pan fields are there, disabled, saying
       which milestone brings them.
-- [ ] With nothing selected, BPM and time signature are editable, each one
+- [x] With nothing selected, BPM and time signature are editable, each one
       undoable edit, and the toolbar chips show and edit the same values.
       Changing the BPM moves the grid and no clip (D-52).
-- [ ] A media file selected in the pool shows its path, source rate,
+- [x] A media file selected in the pool shows its path, source rate,
       channels, duration and full waveform, and its audition button plays
       it.
-- [ ] Typed values take units — `-6 dB`, `1.5 s`, `2.1.000` — and a value
+- [x] Typed values take units — `-6 dB`, `1.5 s`, `2.1.000` — and a value
       out of range does what the plan decides and says so.
-- [ ] The new groups are in `04`'s vocabulary table and the bundled theme,
+- [x] The new groups are in `04`'s vocabulary table and the bundled theme,
       moved out of M8's row; no widget in the pane names a hex.
-- [ ] A screenshot of each view is taken and looked at.
+- [x] A screenshot of each view is taken and looked at.
 
 ## Implements
 
@@ -69,3 +69,50 @@ F-15, F-16 (BPM and signature), D-52, D-57 — *Parameters pane*,
 ## Notes
 
 Appended while building.
+
+**Four decisions before any code.** Two fades never overlap, and a trim
+shortens the moved edge's fade first (D-101). Several clips' start is the
+selection's, and a typed one moves them all (D-102): setting one start on
+every clip would have made clips on one lane overwrite each other. A
+position reads in the ruler's unit and a duration in seconds, since a
+duration in bars.beats.ticks is ambiguous (D-103). Tempo runs 20 to 999
+BPM, and the signature is 1 to 32 beats of a 1, 2, 4, 8 or 16 note (D-104).
+
+**A trim could already make overlapping fades.** Each fade was cut to fit
+its clip on its own, so a 700-sample clip could keep a 600- and a
+300-sample fade. Nothing could see it until fades became editable. A test
+asserted that result; `validate()` now refuses it, and the trim fits both.
+
+**The source is shown, not edited.** The acceptance's "changing any of
+them" is read as the fields that can change. Nothing in the specification
+replaces a clip's sample; a sample is pointed at another file from the pool
+(D-90).
+
+**No spin box.** The style draws a spin box's arrows in a colour no sheet
+reaches, black on this panel, and the sheet's border triangles render as
+bars in Qt. The signature's beats became a numeric field like every other
+number, and the spin-box group stays with M8. **The check box paints
+itself**, from a painted `check` group: styling its indicator in the sheet
+loses the tick, and the style's own draws an unchecked box nearly invisible
+and a disabled one like an enabled one.
+
+**Fades are drawn by the function the engine will play**, `FadeShape.gain`,
+so phase 8 cannot draw one curve and play another. The equal-power curve is
+a quarter sine, and a test holds two of them crossed to constant power.
+
+**Looked at, each view, and a fade drag.** The fade lengths were squeezed
+to a sliver by the shape box, and the form was a few pixels wider than the
+250 px column. A path with no spaces ran past the pane's edge. A fade of
+1000 ms read `000 ms`, because a line edit keeps its cursor at the end. All
+four are fixed. The handle sits over the start of a clip's name, as
+Ableton's does.
+
+**What it costs.** A window takes about 27 ms longer to build, measured
+with the pane and with a placeholder in its place: 84 ms against 56. Most
+of it is the stylesheet applied to the pane's thirty widgets. In the
+application that is once, at startup. In the suite, where nearly every GUI
+test builds a window, it is most of the serial run's growth. It belongs to
+[the test-speed plan](../user-issues/tests-speeds.md), not here.
+
+The phase adds 163 tests. The suite is 1939: 27.9 s serially, 8.3 s in
+parallel, 3.7 s in the fast lane.

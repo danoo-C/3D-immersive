@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 7 — The parameters pane, clip gain and fades
 
-**Written:** 2026-09-26 · **Status:** in progress
+**Written:** 2026-09-26 · **Status:** ✅ complete
 
 ## Approach
 
@@ -241,4 +241,71 @@ tests/test_fade_handles.py                  new — gui
 
 ## Outcome
 
-Filled in at the end.
+Six steps in the planned order, and all nine acceptance boxes are ticked.
+A hundred and five mutations: nineteen of the twenty named in advance and
+eighty-six found on the way. A hundred and two are killed. Three found code
+that had no effect, which is gone. The twentieth named, "a BPM change
+moving clips", has no line to break, because nothing moves a clip when the
+tempo changes; a test holds that none does. 1939 tests.
+
+### What the plan got right
+
+**Settling the fades before the fields.** D-101 went into `validate()` in
+the first step, so no later step could make an overlap, and the random runs
+through the stack exercised it with fades set up to their room.
+
+**Formats as a Qt-free grammar.** The start's bars, the durations' seconds
+and milliseconds, and the tempo are 46 headless tests. The position format
+asks for the tempo each time, which is the plan's named risk, and a test
+changes the tempo under it.
+
+**Read back in place, rebuilt by kind.** A value being typed survives an
+edit elsewhere, tested for a number and for a name.
+
+### What the plan did not see
+
+**That a trim could already overlap two fades**, and that a test asserted
+it.
+
+**That the spin box could not be drawn.** Its arrows are black on the
+panel, and the sheet's triangles render as bars. The signature's beats
+became a numeric field.
+
+**That the check box had to paint itself**, and so became a painted group
+rather than a sheet one.
+
+**Four layout faults only the grabs showed**: squeezed fade lengths, a form
+wider than its column, a path past the pane's edge, and a narrow field
+showing the end of its value.
+
+**Where two fades meet, both handles are at one place.** The nearer wins,
+and a tie takes the fade-in. That is written in 04 and tested.
+
+**The cost to the suite.** About 27 ms more per window, from styling the
+pane's widgets.
+
+**Weak first tests**, found by their survivors:
+- the curve sampled where a rising and a falling equal-power curve cross;
+- nothing checking that a changed fade repaints;
+- a rename across a selection that grew, which would have given two
+  channels the name `—`;
+- re-choosing the current note pushing an edit that changed nothing.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| A spin box for the signature's beats | a numeric field; the spin-box group stays M8's |
+| The check box styled by the sheet | painted, from a new painted `check` group |
+| `tests/test_parameters.py`, `tests/test_fade_handles.py` | and `tests/test_check.py` for the painted check box |
+| The pane restoring its own height on opening | the splitter does it; the code went |
+| Twenty mutations | a hundred and five |
+
+### What phase 8 needs to know
+
+`FadeShape.gain(t)` is how loud a fade-in is `t` of the way through it; a
+fade-out is `gain(1 - t)`. The clip draws from it, and the engine should
+play from it. Fades never overlap (D-101), and `validate()` holds that for
+every project the engine will be given. A clip's `gain_db` is set in the
+pane from −60 to +12 dB. The implicit 32-sample edge fades (D-42) are still
+the engine's, and are not drawn.
