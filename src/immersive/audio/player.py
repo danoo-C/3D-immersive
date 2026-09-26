@@ -98,6 +98,11 @@ class Player:
         self.engine.set_loop(start, end, on)
         self._settle()
 
+    def set_repeat(self, end: int, on: bool) -> None:
+        """At `end`, the project's, go back to 0 while `on` (D-111)."""
+        self.engine.set_repeat(end, on)
+        self._settle()
+
     def audition(self, audio: npt.NDArray[np.float32]) -> bool:
         """Play `audio` from its first frame, over whatever is playing and
         in place of any other audition. False if the device would not open."""

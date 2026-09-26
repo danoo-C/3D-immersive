@@ -126,7 +126,7 @@ icon in the application without shipping a second copy of any of them.
 | Ink | `currentColor`, substituted at load |
 | Normal state | `text.primary` |
 | Disabled state | `text.disabled`, supplied explicitly |
-| Shipped today | `transport_start` `play` `pause` `stop` `loop` `undo` `redo` `arm` `app` |
+| Shipped today | `transport_start` `play` `pause` `stop` `loop` `repeat` `undo` `redo` `arm` `app` |
 
 Two of those are not toolbar glyphs. `arm` is the dot this document draws as
 `● ARM`, an icon rather than a character so that the Craft rule against ASCII
@@ -774,7 +774,7 @@ own.
 
 ## Transport and the ARM toggle
 
-The toolbar's first four buttons are the Transport menu's own actions, so a
+The toolbar's first five buttons are the Transport menu's own actions, so a
 button and its key are one thing (F-20, D-110):
 
 - **Play / Pause** (`Space`) plays from the playhead and pauses where it is.
@@ -786,8 +786,13 @@ button and its key are one thing (F-20, D-110):
   playing, 0 is then where Stop goes back to.
 - **Toggle Loop** (`L`) loops over the loop region, and is enabled only while
   there is one. A project opens with it off.
+- **Repeat Project** (`Shift+L`) goes back to 0 when playback reaches the end
+  of the last clip, and plays on (F-57, D-111). Inside the project the loop
+  region wins; a playhead already past the end plays on. It is not saved,
+  and a project opening leaves it as it was. Its icon is an arrow turning
+  back to a bar, where Loop's is a circle.
 
-Without an audio output all four are disabled and say why. The playhead
+Without an audio output all five are disabled and say why. The playhead
 readout beside them is a numeric field: it reads as the ruler counts,
 dragging it moves the playhead, and it takes a position typed in
 bars.beats.ticks, minutes:seconds, `s` or `ms`. While playing, the window
@@ -817,6 +822,7 @@ do to you.
 | `Esc` | stop, back to where playback started; stopped, clear the selection |
 | `Enter` | return playhead to 0 |
 | `L` | toggle loop |
+| `Shift+L` | toggle repeat: back to 0 at the end of the last clip |
 | `S` | split the selected clips at the playhead |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | cut / copy / paste clips — a paste at the playhead, on the focused channel |

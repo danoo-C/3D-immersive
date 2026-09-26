@@ -15,12 +15,19 @@ import pytest
 import soundfile
 from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt
 from PySide6.QtGui import QAction, QColor, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QToolBar, QWidget
 
 from immersive.app import build_application
 from immersive.audio.device import Output
 from immersive.audio.player import LOST, Player
-from immersive.core.edits import AddChannel, AddMedia, DropClips, SetAttribute
+from immersive.core.edits import (
+    AddChannel,
+    AddMedia,
+    DropClips,
+    Edge,
+    SetAttribute,
+    TrimClips,
+)
 from immersive.core.io.media import Decoded
 from immersive.core.io.peaks import build
 from immersive.core.media_store import Prepared
@@ -93,6 +100,7 @@ def action(window: MainWindow, text: str) -> QAction:
 
 
 PLAY, STOP, START, LOOP = "&Play / Pause", "&Stop", "&Return to Start", "Toggle &Loop"
+REPEAT = "Re&peat Project"
 
 
 def stream(backend: Backend) -> Stream:
@@ -116,9 +124,10 @@ def at(sample: int, count: int = BLOCK) -> Audio:
 
 def test_the_keys_are_the_keyboard_tables(window: MainWindow) -> None:
     keys = [
-        action(window, text).shortcut().toString() for text in (PLAY, STOP, START, LOOP)
+        action(window, text).shortcut().toString()
+        for text in (PLAY, STOP, START, LOOP, REPEAT)
     ]
-    assert keys == ["Space", "Esc", "Return", "L"]
+    assert keys == ["Space", "Esc", "Return", "L", "Shift+L"]
 
 
 def test_space_plays_from_the_playhead_and_pauses_where_it_is(
@@ -482,7 +491,7 @@ def test_no_tooltip_in_the_window_names_m3(window: MainWindow) -> None:
 
 def test_without_an_output_the_transport_says_why(tmp_path: Path) -> None:
     bare = MainWindow(player=None, unavailable="PortAudio is not installed")
-    for text in (PLAY, STOP, START, LOOP):
+    for text in (PLAY, STOP, START, LOOP, REPEAT):
         found = action(bare, text)
         assert not found.isEnabled()
         assert "Cannot be heard: PortAudio is not installed" in found.toolTip()
@@ -550,3 +559,53 @@ def finish(window: MainWindow, timeout: float = 20.0) -> None:
         if time.monotonic() > deadline:
             raise AssertionError("the samples did not finish loading")
     QApplication.processEvents()
+
+
+# --------------------------------------------------------------------------- #
+# repeat (F-57, D-111)
+# --------------------------------------------------------------------------- #
+
+
+def test_repeat_is_off_to_begin_with_and_on_the_toolbar(
+    window: MainWindow,
+) -> None:
+    repeat = action(window, REPEAT)
+    assert repeat.isCheckable() and not repeat.isChecked() and repeat.isEnabled()
+    [toolbar] = window.findChildren(QToolBar)
+    assert repeat in toolbar.actions()
+
+
+def test_with_repeat_on_the_end_goes_back_to_0(
+    window: MainWindow, backend: Backend
+) -> None:
+    action(window, REPEAT).trigger()
+    window.seek(FRAMES - 300)
+    action(window, PLAY).trigger()
+    got = heard(backend, 3)
+    expected = np.concatenate([at(FRAMES - 300, 300), at(0, 3 * BLOCK - 300)])
+    assert np.array_equal(got, expected)
+
+
+def test_the_end_follows_an_edit(window: MainWindow, backend: Backend) -> None:
+    document = window.document()
+    clip = document.project.channels[0].clips[0]
+    action(window, REPEAT).trigger()
+    document.push(TrimClips(document.project, [clip], Edge.END, -10_000))
+    window.seek(FRAMES - 10_000 - 100)
+    action(window, PLAY).trigger()
+    heard(backend)
+    assert window._player.engine.playhead == BLOCK - 100  # type: ignore[union-attr]
+
+
+def test_repeat_off_plays_past_the_end(window: MainWindow, backend: Backend) -> None:
+    window.seek(FRAMES - 100)
+    action(window, PLAY).trigger()
+    heard(backend)
+    assert window._player.engine.playhead == FRAMES - 100 + BLOCK  # type: ignore[union-attr]
+
+
+def test_repeat_is_kept_when_a_project_opens(window: MainWindow) -> None:
+    """Unlike looping: it is how somebody listens, not a project."""
+    action(window, REPEAT).trigger()
+    window.new_project()
+    assert action(window, REPEAT).isChecked()

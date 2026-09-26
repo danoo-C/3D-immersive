@@ -578,3 +578,76 @@ def test_a_gain_sent_before_the_stream_opens_reaches_the_snapshot_waiting() -> N
     engine.drain()
     engine.set_playing(True)
     assert not block(engine).any()
+
+
+# --------------------------------------------------------------------------- #
+# repeat (F-57, D-111)
+# --------------------------------------------------------------------------- #
+
+
+def repeating(size: int, end: int, start_at: int) -> Engine:
+    """A numbered clip that is the whole project, `end` long, repeating."""
+    project, store = numbered_arrangement()
+    project.channels[0].clips[0].length = end
+    engine = Engine(size)
+    engine.install(snapshot(project, store))
+    engine.set_repeat(end, True)
+    engine.seek(start_at)
+    engine.set_playing(True)
+    return engine
+
+
+@pytest.mark.parametrize("size", [256, 512, 2048])
+def test_at_the_projects_end_playback_goes_back_to_0(size: int) -> None:
+    """No gap and no repeated sample, where the end falls inside a block."""
+    engine = repeating(size, 10_000, 10_000 - 300)
+    heard = np.concatenate([block(engine)[:, 0] for _ in range(4)])
+    project, store = numbered_arrangement()
+    passage = numbered()[:10_000, 0].copy()
+    # The clip's cut end fades over 32 samples (D-42); its start is the file's.
+    faded = Engine(size)
+    project.channels[0].clips[0].length = 10_000
+    faded.install(snapshot(project, store))
+    faded.seek(10_000 - 300)
+    faded.set_playing(True)
+    tail = np.concatenate([block(faded)[:, 0], block(faded)[:, 0]])[:300]
+    expected = np.concatenate([tail, passage])[: heard.shape[0]]
+    assert np.array_equal(heard, expected)
+
+
+def test_the_loop_region_wins_inside_the_project() -> None:
+    """Past the region, play to the end, back to 0, and into the region,
+    which then loops."""
+    project, store = numbered_arrangement()
+    project.channels[0].clips[0].length = 4_000
+    engine = Engine(BLOCK)
+    engine.install(snapshot(project, store))
+    engine.set_repeat(4_000, True)
+    engine.set_loop(1_000, 1_500, True)
+    engine.seek(3_000)
+    engine.set_playing(True)
+    for _ in range(4):  # 1 000 to the end, back to 0, and on to 24
+        block(engine)
+    assert engine.playhead == 24
+    for _ in range(8):
+        block(engine)
+    assert 1_000 <= engine.playhead < 1_500, "looping in the region now"
+
+
+def test_a_playhead_past_the_end_plays_on() -> None:
+    engine = repeating(BLOCK, 10_000, 12_000)
+    block(engine)
+    assert engine.playhead == 12_000 + BLOCK
+
+
+def test_repeat_off_plays_past_the_end() -> None:
+    engine = repeating(BLOCK, 10_000, 9_900)
+    engine.set_repeat(10_000, False)
+    block(engine)
+    assert engine.playhead == 9_900 + BLOCK
+
+
+def test_nothing_shorter_than_a_shortest_loop_repeats() -> None:
+    engine = repeating(BLOCK, 63, 0)
+    block(engine)
+    assert engine.playhead == BLOCK

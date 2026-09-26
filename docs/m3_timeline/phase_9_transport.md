@@ -66,9 +66,18 @@ playback.
 - [x] Every transport action and the readout are live, and no tooltip in
       the window names M3 any longer.
 
+**Amended after the phase closed (2026-09-26).** *Repeat* - back to the
+start at the end of the last clip - was asked for once the transport could
+be tried, and is added here, the transport's phase, with an acceptance line
+below, rather than as a phase of its own for one switch (F-57, D-111).
+
+- [x] With Repeat on, playback that reaches the end of the last clip goes
+      back to 0 and carries on, with no gap and no repeated sample; the loop
+      region wins inside the project, and the end follows every edit.
+
 ## Implements
 
-F-19 (the readout's unit), F-20, F-52, D-63 — *Transport and the ARM
+F-19 (the readout's unit), F-20, F-52, F-57, D-63 — *Transport and the ARM
 toggle*, *Keyboard* and *Accessibility and feel* in
 [04-ui-spec.md](../04-ui-spec.md), *The output stream* in
 [05-audio-engine.md](../05-audio-engine.md).
@@ -124,3 +133,22 @@ ruler and faint behind the lanes with the playhead inside it.
 
 The phase adds 74 tests. The suite is 2094: 32.0 s serially, 9.4 s in
 parallel, 4.2 s in the fast lane.
+
+**Repeat, added after (D-111).** The engine's wrap already asked "where is
+the next end, and where does it go back to"; Repeat is a second answer to
+that question, tried after the loop region's, so one rule decides every
+wrap and the region wins inside the project. The window sends the end at
+every document change, so an edit that moves the last clip moves where
+playback turns round. That makes a command per edit before the first Play,
+with no stream to drain the ring, which is why `Player.set_repeat` settles
+like every other command (a test sends 4 097 of them and then a seek). The
+real-time test's warm-up moved into the same call as the blocks it counts:
+called apart, the first repeat wrapping mid-block kept 32 bytes, once per
+call and never again in 2 000 blocks, which is the measuring's own arrays
+and not the engine. Fifteen mutations, all caught, two only after the
+tests that should have caught them were tightened. It adds 15 tests: the
+suite is 2109.
+
+**Looked at**: the toolbar with Loop and Repeat both off and both on;
+Repeat's glyph, a bar with an arrow turning back to it, is told apart from
+Loop's circle at a glance.

@@ -63,11 +63,13 @@ RING: Final = 4096
 #: What a command is, as the ring's first number. The other three are, for
 #: a gain, its snapshot's generation, the channel and the factor; for a
 #: seek, the sample, last; for playing, 1 or 0, last; for the loop, its
-#: start, its end, and 1 or 0 for whether it is on.
+#: start, its end, and 1 or 0 for whether it is on; for repeating, the
+#: project's end, first, and 1 or 0, last.
 GAIN: Final = 0.0
 SEEK: Final = 1.0
 PLAY: Final = 2.0
 LOOP: Final = 3.0
+REPEAT: Final = 4.0
 
 #: The shortest loop the engine will wrap (D-108): so a block is at most
 #: `block // SHORTEST_LOOP + 2` pieces. The model refuses a shorter region.
@@ -103,6 +105,8 @@ class Engine:
         self._loop_start = 0
         self._loop_end = 0
         self._looping = False
+        self._repeat_end = 0
+        self._repeating = False
         #: kind, then three numbers that mean what the kind says.
         self._ring = np.zeros((RING, 4), dtype=np.float64)
         self._written = 0  # the UI thread's counter
@@ -159,6 +163,11 @@ class Engine:
         """Loop `[start, end)` while `on`. A region shorter than
         `SHORTEST_LOOP` never loops. False when the ring is full."""
         return self._send(LOOP, start, end, 1.0 if on else 0.0)
+
+    def set_repeat(self, end: int, on: bool) -> bool:
+        """At `end` - the project's - go back to 0 and play on, while `on`
+        (F-57, D-111). The loop region wins inside it. False when full."""
+        return self._send(REPEAT, end, 0, 1.0 if on else 0.0)
 
     def drain(self) -> None:
         """Apply what is in the ring now. Only for when no stream is running:
@@ -247,18 +256,17 @@ class Engine:
 
     def _plan(self) -> int:
         """Cut the block into the pieces of the timeline it plays - one, or
-        more where the loop wraps - and move the playhead past them. How
-        many pieces there are."""
+        more where the loop or the repeat wraps - and move the playhead past
+        them. How many pieces there are."""
         pieces = self._pieces
         t = self._playhead
-        end = self._loop_end
-        looping = self._looping and t < end and end - self._loop_start >= SHORTEST_LOOP
         size = self.block
         at = 0
         count = 0
         while at < size:
             length = size - at
-            if looping and t + length > end:
+            end, back = self._wrap(t)
+            if end >= 0 and t + length > end:
                 length = end - t
             pieces[count, 0] = t
             pieces[count, 1] = at
@@ -266,10 +274,25 @@ class Engine:
             count += 1
             at += length
             t += length
-            if looping and t >= end:
-                t = self._loop_start
+            if end >= 0 and t >= end:
+                t = back
         self._playhead = t
         return count
+
+    def _wrap(self, t: int) -> tuple[int, int]:
+        """Where a piece from `t` has to stop, and where the playhead goes
+        then: the loop region's end and start, while looping and before its
+        end; else the project's end and 0, while repeating and before it
+        (D-111); else nowhere, as -1. A playhead already past an end plays
+        on. Either span is at least `SHORTEST_LOOP` or never wraps, which
+        keeps a block's pieces within `block // SHORTEST_LOOP + 2`."""
+        start, end = self._loop_start, self._loop_end
+        if self._looping and t < end and end - start >= SHORTEST_LOOP:
+            return end, start
+        end = self._repeat_end
+        if self._repeating and t < end and end >= SHORTEST_LOOP:
+            return end, 0
+        return -1, 0
 
     def _mix(self, snapshot: Snapshot, pieces: int) -> None:
         """Every channel's share of the block, at its gain, into the bus."""
@@ -373,6 +396,9 @@ class Engine:
                 self._loop_start = int(command[1])
                 self._loop_end = int(command[2])
                 self._looping = bool(command[3])
+            elif kind == REPEAT:
+                self._repeat_end = int(command[1])
+                self._repeating = bool(command[3])
             self._read += 1
 
     def _peak(self, side: npt.NDArray[np.float32], which: int) -> None:

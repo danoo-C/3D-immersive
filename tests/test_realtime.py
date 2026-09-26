@@ -9,8 +9,9 @@ worth of float32 is 8 KiB at 2048 frames, and a ufunc that broadcasts makes
 2048-frame block, and the blocks run here go through every path `process()`
 has: fades implicit and explicit, clip gain, stereo and mono, a missing
 sample, gains ramping and steady, a mute, a seek and a snapshot swap, a
-loop wrapping inside blocks and one shorter than a block, an audition
-voice replaced by another, and the transport stopped and started.
+loop wrapping inside blocks and one shorter than a block, the project
+repeating from its end (D-111), an audition voice replaced by another, and
+the transport stopped and started.
 """
 
 from __future__ import annotations
@@ -135,7 +136,8 @@ def run() -> tuple[int, int]:
     voices = [Voice(store["m-00000001"].audio), Voice(store["m-00000002"].audio)]
 
     def ui(n: int) -> None:
-        """What the UI thread does meanwhile: gains, a mute, a seek, a swap."""
+        """What the UI thread does meanwhile: gains, a mute, a seek, a swap,
+        loops, auditions, a repeat."""
         generation = second.generation if engine.holds(second) else first.generation
         if n % 7 == 0:
             engine.send_gain(generation, 1, 0.25 + (n % 5) / 10)
@@ -157,21 +159,30 @@ def run() -> tuple[int, int]:
             engine.set_loop(40_000, 40_100, True)  # shorter than a block
         if n == 70:
             engine.set_loop(0, 0, False)
+        if n == 72:  # the playhead wraps back to 0 in block 80, mid-block
+            engine.set_repeat(12_345 + 20 * BLOCK + 100, True)
+        if n == 85:
+            engine.set_repeat(0, False)
         if n == 90:
             engine.set_playing(False)  # stopped, still auditioning
         if n == 95:
             engine.set_playing(True)
 
-    # A turn of the UI thread's cycle before measuring: every path taken
-    # once, and Python's freelists filled.
-    warm = np.zeros((100, 2), dtype=np.int64)
-    blocks = np.zeros((500, 2), dtype=np.int64)
-    measured(engine, warm, lambda n: ui(n % 100))
-
+    # A turn of the UI thread's cycle before what is counted: every path
+    # taken once, and the freelists filled. In the same call as the 500
+    # blocks, not one of its own: `measured` makes arrays of its own, and
+    # with a warm-up called apart the first repeat wrapping mid-block kept
+    # 32 bytes - once per call, never again in 2 000 blocks.
+    #
+    # The ring's read count passes 256, and becomes an object of its own,
+    # only in block 1 028: a run long enough to reach it keeps 32 bytes
+    # there, once, as well.
+    blocks = np.zeros((600, 2), dtype=np.int64)
     measured(engine, blocks, lambda n: ui(n % 100))
+    counted = blocks[100:]
 
     assert held and voices  # the UI thread's references, kept to the end
-    return int(blocks[:, 1].sum()), int(blocks[:, 0].max())
+    return int(counted[:, 1].sum()), int(counted[:, 0].max())
 
 
 def test_process_makes_no_array_and_keeps_nothing() -> None:

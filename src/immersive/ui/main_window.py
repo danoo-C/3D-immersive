@@ -355,6 +355,13 @@ class MainWindow(QMainWindow):
         self._loop = self._transport(transport_menu, "loop", "Toggle &Loop", "L")
         self._loop.setCheckable(True)
         self._loop.toggled.connect(self.set_looping)
+        # At the end of the last clip, back to the start (F-57, D-111). Kept
+        # across New and Open: it is how somebody is listening, not a project.
+        self._repeat = self._transport(
+            transport_menu, "repeat", "Re&peat Project", "Shift+L"
+        )
+        self._repeat.setCheckable(True)
+        self._repeat.toggled.connect(lambda _on: self._send_repeat())
         transport_menu.addSeparator()
         self._bypass = self._add(transport_menu, "Toggle HRTF &Bypass on Channel", "B")
         self._bypass.triggered.connect(self.toggle_bypass)
@@ -433,7 +440,13 @@ class MainWindow(QMainWindow):
         self.addToolBar(bar)
 
         # The Transport menu's own actions, so the button and the key are one.
-        for action in (self._to_start, self._play, self._stop, self._loop):
+        for action in (
+            self._to_start,
+            self._play,
+            self._stop,
+            self._loop,
+            self._repeat,
+        ):
             bar.addAction(action)
 
         bar.addSeparator()
@@ -1020,6 +1033,7 @@ class MainWindow(QMainWindow):
             action.setToolTip(summary if able else f"{summary}\n{nothing}")
         self._clipboard_changed()
         self._loop_changed()
+        self._send_repeat()
 
     def _loop_changed(self) -> None:
         """The loop switch after a change to the project: off for a project
@@ -1395,6 +1409,14 @@ class MainWindow(QMainWindow):
             self._player.set_loop(0, 0, False)
         else:
             self._player.set_loop(region.start, region.end, self._loop.isChecked())
+
+    def _send_repeat(self) -> None:
+        """The project's end, which every edit may move, and whether to go
+        back to 0 there."""
+        if self._player is not None:
+            self._player.set_repeat(
+                self._document.project.length, self._repeat.isChecked()
+            )
 
     def _set_playing(self, on: bool) -> None:
         self._playing = on

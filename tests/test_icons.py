@@ -25,6 +25,7 @@ EXPECTED = (
     "pause",
     "play",
     "redo",
+    "repeat",
     "stop",
     "transport_start",
     "undo",

@@ -19,6 +19,7 @@ import soundfile
 import immersive
 from immersive.app import build_application
 from immersive.audio.device import Output, load_backend
+from immersive.audio.engine import RING
 from immersive.audio.player import LOST, Player
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui.main_window import MainWindow
@@ -74,6 +75,15 @@ def test_nothing_opens_a_stream_until_something_is_to_be_heard(
     player.pause()
     assert backend.streams == [] and not player.running
     assert player.playhead == 4_000, "applied with no stream to drain them"
+
+
+def test_with_no_stream_the_ring_never_fills(backend: Backend, player: Player) -> None:
+    """The window sends the repeat's end at every edit (D-111): with no
+    stream those would fill the ring, and a seek after them would be lost."""
+    for _ in range(RING + 1):
+        player.set_repeat(96_000, True)
+    player.seek(4_000)
+    assert player.playhead == 4_000
 
 
 def test_play_and_audition_share_the_one_stream(
