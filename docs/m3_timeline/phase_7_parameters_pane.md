@@ -1,6 +1,7 @@
 # M3 · Phase 7 — The parameters pane, clip gain and fades
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_7_parameters_pane.md](plans/phase_7_parameters_pane.md)
 
 ## Goal
 

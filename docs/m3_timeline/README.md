@@ -17,7 +17,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [4 — Selection](phase_4_selection.md) | ✅ |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | ✅ |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | ✅ |
-| [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | not started |
+| [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | in progress |
 | [8 — The engine, flat](phase_8_flat_engine.md) | not started |
 | [9 — Transport](phase_9_transport.md) | not started |
 | [10 — The master meter, and the arrangement heard](phase_10_meter_and_listening.md) | not started |
