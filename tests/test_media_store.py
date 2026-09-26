@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 import soundfile
 
+from immersive.core import media_store
 from immersive.core.commands import UndoStack
 from immersive.core.edits import AddMedia
+from immersive.core.io import media
 from immersive.core.io.media import Refused
 from immersive.core.media_store import (
     MediaStore,
@@ -19,6 +22,7 @@ from immersive.core.media_store import (
     prepare,
 )
 from immersive.core.model import MediaFile, Project, validate
+from immersive.core.progress import Cancelled, Progress
 from immersive.core.time import SAMPLE_RATE
 
 
@@ -241,3 +245,105 @@ def test_an_empty_or_single_addition_undoes_cleanly(count: int) -> None:
     command.undo()
 
     assert project.media_pool == []
+
+
+# --------------------------------------------------------------------------- #
+# progress and cancel through prepare (F-59, M2 phase 8)
+# --------------------------------------------------------------------------- #
+
+
+class Watched(Progress):
+    """Records every value reached, and can cancel itself at a value."""
+
+    def __init__(self, cancel_at: float | None = None) -> None:
+        super().__init__()
+        self.seen: list[float] = []
+        self.cancel_at = cancel_at
+
+    def reach(self, fraction: float) -> None:
+        super().reach(fraction)
+        self.seen.append(self.done)
+        if self.cancel_at is not None and self.done >= self.cancel_at:
+            self.cancelled = True
+
+
+def test_prepare_moves_through_every_stage_to_1(tmp_path: Path) -> None:
+    progress = Watched()
+    result = prepare(sample(tmp_path / "a.wav"), tmp_path / "cache", progress)
+
+    assert isinstance(result, Prepared)
+    assert progress.seen == sorted(progress.seen)
+    assert media_store.DECODED in progress.seen, "decoding ends at its share"
+    assert media_store.HASHED in progress.seen, "hashing ends at its share"
+    assert progress.done == 1.0
+
+
+def test_a_refused_file_still_ends_at_1(tmp_path: Path) -> None:
+    """A batch counts it as done: its bytes are not waited for."""
+    path = tmp_path / "not.wav"
+    path.write_bytes(b"not audio")
+    progress = Progress()
+    assert isinstance(prepare(path, tmp_path / "cache", progress), Refused)
+    assert progress.done == 1.0
+
+
+def test_a_cancel_after_decoding_hashes_nothing_and_ends_at_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hashes: list[object] = []
+    real = media_store.content_hash
+
+    def counted(*args: Any, **kwargs: Any) -> Any:
+        hashes.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(media_store, "content_hash", counted)
+    path = sample(tmp_path / "a.wav")
+    progress = Watched(cancel_at=media_store.DECODED)
+
+    assert prepare(path, tmp_path / "cache", progress) == Cancelled(str(path))
+    assert len(hashes) == 1, "asked, and stopped before its first chunk"
+    assert progress.done == 1.0
+
+
+def test_a_cancel_between_hashing_and_peaks_builds_no_peaks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelled once the hash has returned, so only the check between the
+    stages can stop it."""
+    built: list[object] = []
+    monkeypatch.setattr(media_store, "peaks", lambda *args: built.append(args))
+    progress = Progress()
+    real = media_store.content_hash
+
+    def then_cancelled(*args: Any, **kwargs: Any) -> Any:
+        digest = real(*args, **kwargs)
+        progress.cancelled = True
+        return digest
+
+    monkeypatch.setattr(media_store, "content_hash", then_cancelled)
+    path = sample(tmp_path / "a.wav")
+
+    assert prepare(path, tmp_path / "cache", progress) == Cancelled(str(path))
+    assert built == []
+
+
+def test_hashing_moves_on_from_where_decoding_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its first chunk moves the file past decoding's share - not from 0,
+    where rising-only progress would hide it standing still."""
+    monkeypatch.setattr(media, "CHUNK", 256)
+    progress = Watched()
+    started: list[int] = []
+    real = media_store.content_hash
+
+    def marked(*args: Any, **kwargs: Any) -> Any:
+        started.append(len(progress.seen))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(media_store, "content_hash", marked)
+    prepare(sample(tmp_path / "a.wav"), tmp_path / "cache", progress)
+
+    first_chunk = progress.seen[started[0]]
+    assert media_store.DECODED < first_chunk < media_store.HASHED

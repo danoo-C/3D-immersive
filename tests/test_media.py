@@ -12,6 +12,7 @@ changed at all.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -28,6 +29,7 @@ from immersive.core.io.media import (
     frames_at_project_rate,
 )
 from immersive.core.model import Project
+from immersive.core.progress import Cancelled, Progress
 from immersive.core.time import SAMPLE_RATE
 
 
@@ -471,3 +473,181 @@ def test_a_project_saved_without_hashes_opens_clean_and_keeps_none(
 
     assert document.project.media_pool[0].hash == ""
     assert not document.is_dirty
+
+
+# --------------------------------------------------------------------------- #
+# a chunk at a time: progress and cancel (F-59, M2 phase 8)
+# --------------------------------------------------------------------------- #
+
+
+class Watched(Progress):
+    """Records every value it reaches, and cancels itself after `stop_after`."""
+
+    def __init__(self, stop_after: int | None = None) -> None:
+        super().__init__()
+        self.seen: list[float] = []
+        self.stop_after = stop_after
+
+    def reach(self, fraction: float) -> None:
+        super().reach(fraction)
+        self.seen.append(self.done)
+        if self.stop_after is not None and len(self.seen) >= self.stop_after:
+            self.cancelled = True
+
+
+def counting_reads(monkeypatch: pytest.MonkeyPatch, *, announce: int = 0) -> list[int]:
+    """Every `SoundFile.read` `decode` makes, by frames asked for - and a file
+    that announces `announce` frames more than it holds."""
+    reads: list[int] = []
+    real = soundfile.SoundFile
+
+    class Counted(real):  # type: ignore[misc, valid-type]
+        @property
+        def frames(self) -> int:
+            return int(super().frames) + announce
+
+        def read(self, *args: Any, **kwargs: Any) -> Any:
+            out = kwargs.get("out")
+            reads.append(len(out) if out is not None else (args[0] if args else -1))
+            return super().read(*args, **kwargs)
+
+    monkeypatch.setattr(media.soundfile, "SoundFile", Counted)
+    return reads
+
+
+@pytest.mark.parametrize(("format", "subtype", "suffix"), LOSSLESS + LOSSY)
+def test_a_chunk_at_a_time_decodes_exactly_what_one_read_gives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    format: str,
+    subtype: str,
+    suffix: str,
+) -> None:
+    path = written(
+        tmp_path / f"tone.{suffix}",
+        np.stack([tone(SAMPLE_RATE), -tone(SAMPLE_RATE, hz=440.0)], 1),
+        SAMPLE_RATE,
+        format=format,
+        subtype=subtype,
+    )
+    once, _ = soundfile.read(path, dtype="float32", always_2d=True)
+    monkeypatch.setattr(media, "FRAMES_AT_ONCE", 1_000)
+    reads = counting_reads(monkeypatch)
+
+    result = decoded(path)
+
+    if format == "MP3":
+        assert reads == [-1], "an MP3 in one read (WHOLE)"
+    else:
+        assert len(reads) > 40, "a second, a thousand frames at a time"
+    np.testing.assert_array_equal(result.audio, once)
+
+
+def test_libsndfile_still_misreads_an_mp3_read_in_pieces(tmp_path: Path) -> None:
+    """The canary for `media.WHOLE`. libsndfile 1.2.2 decodes an MP3 read in
+    pieces wrongly after each boundary. When this fails, a libsndfile without
+    the fault has arrived, and MP3s can be read a chunk at a time too."""
+    path = written(
+        tmp_path / "tone.mp3",
+        tone(SAMPLE_RATE, seconds=2.0),
+        SAMPLE_RATE,
+        format="MP3",
+        subtype="MPEG_LAYER_III",
+    )
+    once, _ = soundfile.read(path, dtype="float32", always_2d=True)
+    pieces = np.concatenate(
+        list(soundfile.blocks(path, blocksize=4_096, dtype="float32", always_2d=True))
+    )
+    assert pieces.shape == once.shape
+    assert not np.array_equal(pieces, once), "fixed: MP3 no longer needs WHOLE"
+
+
+def test_a_file_holding_fewer_frames_than_it_announces_is_trimmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sized by the announced count, the array is cut to what was read."""
+    path = written(tmp_path / "tone.wav", tone(SAMPLE_RATE), SAMPLE_RATE)
+    once, _ = soundfile.read(path, dtype="float32", always_2d=True)
+    monkeypatch.setattr(media, "FRAMES_AT_ONCE", 1_000)
+    counting_reads(monkeypatch, announce=5_000)
+    np.testing.assert_array_equal(decoded(path).audio, once)
+
+
+@pytest.mark.parametrize("rate", [SAMPLE_RATE, 44_100])
+def test_decoding_moves_its_progress_from_0_to_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rate: int
+) -> None:
+    path = written(tmp_path / "tone.wav", tone(rate), rate)
+    monkeypatch.setattr(media, "FRAMES_AT_ONCE", 4_000)
+    progress = Watched()
+
+    result = decode(path, progress.part(0.0, 1.0))
+
+    assert isinstance(result, Decoded)
+    assert progress.seen == sorted(progress.seen), "only ever rising"
+    assert any(0.0 < value < 1.0 for value in progress.seen), "within the file"
+    assert progress.done == 1.0
+    if rate != SAMPLE_RATE:
+        assert media.READING in progress.seen, "reading ends where resampling starts"
+
+
+def test_a_cancelled_decode_stops_before_the_next_chunk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = written(tmp_path / "tone.wav", tone(SAMPLE_RATE), SAMPLE_RATE)
+    monkeypatch.setattr(media, "FRAMES_AT_ONCE", 1_000)
+    reads = counting_reads(monkeypatch)
+
+    result = decode(path, Watched(stop_after=1).part(0.0, 1.0))
+
+    assert result == Cancelled(str(path))
+    assert len(reads) == 1
+
+
+def test_a_cancel_between_reading_and_resampling_resamples_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = written(tmp_path / "tone.wav", tone(44_100), 44_100)
+    resampled: list[int] = []
+    monkeypatch.setattr(
+        media.soxr, "resample", lambda *args, **kwargs: resampled.append(1)
+    )
+    progress = Watched()
+    part = progress.part(0.0, 1.0)
+
+    original = progress.reach
+
+    def cancel_once_read(fraction: float) -> None:
+        original(fraction)
+        if fraction >= media.READING:
+            progress.cancelled = True
+
+    progress.reach = cancel_once_read  # type: ignore[method-assign]
+    assert decode(path, part) == Cancelled(str(path))
+    assert resampled == []
+
+
+def test_hashing_moves_its_progress_and_stops_when_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(media, "CHUNK", 100)
+    path = tmp_path / "bytes.wav"
+    path.write_bytes(np.random.default_rng(3).bytes(1_000))
+
+    progress = Watched()
+    assert content_hash(path, progress.part(0.0, 1.0)) == hashed(path)
+    assert progress.seen == sorted(progress.seen)
+    assert any(0.0 < value < 1.0 for value in progress.seen)
+    assert progress.done == 1.0
+
+    assert content_hash(path, Watched(stop_after=2).part(0.0, 1.0)) == Cancelled(
+        str(path)
+    )
+
+
+def test_without_a_progress_nothing_is_different(tmp_path: Path) -> None:
+    path = written(tmp_path / "tone.wav", tone(44_100), 44_100)
+    plain = decoded(path)
+    with_one = decode(path, Progress().part(0.0, 1.0))
+    assert isinstance(with_one, Decoded)
+    np.testing.assert_array_equal(plain.audio, with_one.audio)

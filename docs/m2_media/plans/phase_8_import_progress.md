@@ -295,6 +295,24 @@ extended
 | A decoded-audio cache, so an open does not decode again | not planned; its own question, sized by the samples themselves |
 | Dropping files from the desktop onto the pool | not asked for; the pool is a drag source only (phase 6) |
 
+## Amended while building
+
+- **Step 1** settled the weights (0.45 reading, 0.30 resampling, 0.15
+  hashing, 0.10 peaks) and found no case for a worker cap. The numbers are
+  in the phase's Notes.
+- **Step 2: MP3 is read in one call.** libsndfile 1.2.2 misdecodes an MP3
+  read in pieces. From each boundary on, the frames are wrong: at 1 000
+  frames a read the whole file is noise, and at 2¹⁸ several thousand frames
+  after each boundary are. WAV, AIFF, FLAC and OGG read in pieces are exact.
+  So an MP3 reads whole, as before. Its reading moves the bar only when it
+  ends, and a cancel waits for that read. `media.WHOLE` says so, and a canary
+  test fails when a libsndfile without the fault arrives.
+- **Step 2: mutation 21 is dropped.** `soundfile` stops every read at the
+  frame count a file announces, its one-shot `read` included, so no file
+  can be read past it. The branch that grew the array could not be reached
+  and was removed. What remains is the trim, for a file holding fewer
+  frames than it announces, with a test of its own.
+
 ## Outcome
 
 Filled in at the end.

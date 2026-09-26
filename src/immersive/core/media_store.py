@@ -16,11 +16,19 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import Final, overload
 
 from immersive.core.io.media import Decoded, Refused, content_hash, decode
 from immersive.core.io.peaks import Pyramid, peaks
 from immersive.core.model import MEDIA_PREFIX, MediaFile, Project, all_ids, mint_id
+from immersive.core.progress import Cancelled, Progress
+
+#: Where each stage of preparing a file ends, as a fraction of it: reading and
+#: resampling 0.75, hashing 0.15, peaks 0.10 - M2 phase 8's measurement of 23
+#: real stems, where reading is most of a file from the Windows drive under
+#: WSL and resampling most of it from a local disk.
+DECODED: Final = 0.75
+HASHED: Final = 0.90
 
 #: What a folder import tries: F-5's formats by suffix, in any case (D-93).
 #: Everything else in a sample folder - readmes, cover art - is passed over
@@ -64,23 +72,47 @@ class Prepared:
         return self.decoded.media_file(media_id, self.path, self.hash)
 
 
+@overload
 def prepare(
-    path: str | os.PathLike[str], cache: Path | None = None
-) -> Prepared | Refused:
+    path: str | os.PathLike[str], cache: Path | None = None, progress: None = None
+) -> Prepared | Refused: ...
+
+
+@overload
+def prepare(
+    path: str | os.PathLike[str], cache: Path | None, progress: Progress
+) -> Prepared | Refused | Cancelled: ...
+
+
+def prepare(
+    path: str | os.PathLike[str],
+    cache: Path | None = None,
+    progress: Progress | None = None,
+) -> Prepared | Refused | Cancelled:
     """Everything the session needs from one file, or why it cannot have it.
 
     Synchronous and headless: the importer runs it on a worker. Peaks come
     through the cache (F-9), so a sample imported before is summarised once.
+
+    With a `progress`, each stage moves it through its share, and a cancel
+    stops the work at the next chunk or between stages (F-59). It ends at 1
+    whatever the outcome, so a batch counts a refused file as done. Without
+    one, nothing can cancel it.
     """
-    decoded = decode(path)
-    if isinstance(decoded, Refused):
-        return decoded
-    digest = content_hash(path)
-    if isinstance(digest, Refused):
-        return digest
-    return Prepared(
-        Path(path).absolute(), decoded, digest, peaks(digest, decoded.audio, cache)
-    )
+    moving = progress if progress is not None else Progress()
+    try:
+        decoded = decode(path, moving.part(0.0, DECODED))
+        if not isinstance(decoded, Decoded):
+            return decoded
+        digest = content_hash(path, moving.part(DECODED, HASHED))
+        if not isinstance(digest, str):
+            return digest
+        if moving.cancelled:
+            return Cancelled(str(path))
+        summary = peaks(digest, decoded.audio, cache)
+        return Prepared(Path(path).absolute(), decoded, digest, summary)
+    finally:
+        moving.reach(1.0)
 
 
 @dataclass

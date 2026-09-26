@@ -95,3 +95,57 @@ top of the media pool, for imports only. The person asked instead for a box
 that anything can use, at the top right of the transport toolbar, taking a
 label, a value and a maximum. D-116 records it, and D-113's placement is
 superseded.
+
+**Step 1 — measured, on the person's 23 stems.** Each stem is a 50 MB
+24-bit stereo WAV of 187 s at 44.1 kHz, so every one is resampled; 1.1 GB
+in all. Each file's peaks are cold.
+
+One stem, one worker:
+
+| Stage | Linux filesystem | Windows drive under WSL |
+|---|---|---|
+| read | 0.08–0.12 s | 0.85 s (67%) |
+| resample | 0.17–0.18 s (about half) | 0.16 s |
+| hash (the second read) | 0.04 s | 0.19 s |
+| peaks | 0.05–0.07 s | 0.06 s |
+| **total** | **0.34–0.41 s** | **1.25 s** |
+
+The whole import:
+
+| Workers | Linux filesystem | Windows drive |
+|---|---|---|
+| 1 | 7.9 s | 28.2 s |
+| 4 | 2.7 s | 11.5 s |
+| 8 | 2.0 s | 9.2 s |
+| 12, the machine's count | 2.0 s | 9.0 s |
+| **through the window**, offscreen | **2.4 s** | **9.4 s** |
+
+The window's own part, landing the results and painting 23 rows, took under
+0.01 s. It also measured the peak memory: 1.65 GB of samples held, and
+2.3 GB at the peak with 12 workers.
+
+What it settles:
+
+- **The wait was the Windows drive.** It reads roughly 2.3 GB over the
+  bridge, 1.15 GB twice, in 9 s: about 255 MB/s, which is the bridge's
+  limit, and no worker count beyond eight gets past it. libsndfile's own
+  reads are slow there too: 59 MB/s where the hash's 1 MiB reads reach
+  260 MB/s, because it reads in small pieces and each crosses the bridge.
+- **No worker cap.** Eight and twelve workers are equally fast on both
+  filesystems, so the pool keeps the machine's count.
+- **The stage weights.** Reading is two-thirds of a file from the Windows
+  drive, and resampling half of it from a local disk. A file's `done`
+  therefore moves 0.45 for reading, 0.30 for resampling, 0.15 for hashing
+  and 0.10 for peaks. A file already at 48 kHz skips resampling, and
+  reading takes that share.
+- **Step 5's baseline** is 9.0–9.4 s from the Windows drive and 2.0–2.4 s
+  from the Linux filesystem.
+
+**Step 2 — progress through `prepare`.** Every stage moves a file's
+progress, and a cancel stops it at the next chunk or between stages. The
+finding is libsndfile's: an MP3 read in pieces decodes wrongly after each
+boundary, so MP3s still read in one call (the plan's amendments say how,
+and a canary test watches for the fix). Fourteen mutations, all caught; two
+only after their tests were tightened. Rising-only progress hid a hash
+stage counted from 0, and a stage's own cancel check hid the one between
+stages.
