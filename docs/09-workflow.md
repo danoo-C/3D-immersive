@@ -68,7 +68,7 @@ milestone nobody has opened yet:
 | `m1_core_model/` | complete |
 | `m2_media/` | **in progress** |
 | `m3_timeline/` | **in progress** |
-| `m4_binaural_engine/` | |
+| `m4_binaural_engine/` | **in progress** |
 | `m5_spatial_workspace/` | |
 | `m6_automation/` | |
 | `m7_render/` | |

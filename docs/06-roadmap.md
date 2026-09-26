@@ -347,8 +347,12 @@ counting — *before* any HRTF complexity is layered on top.
 ---
 
 ## M4 — Binaural engine 🔴 *the risk milestone*
+
+Phases: [`docs/m4_binaural_engine/`](m4_binaural_engine/README.md)
+
 - Pick and bundle the default full-sphere SOFA dataset (listening test; see
-  QA-24 in [07-qa-archive.md](07-qa-archive.md))
+  QA-30 in [07-qa-archive.md](07-qa-archive.md) - this read QA-24, the fixed
+  listener, until M4 started)
 - SOFA loading, resampling, normalisation
 - ITD extraction + minimum-phase decomposition
 - Spherical triangulation + barycentric interpolation + KD-tree lookup
@@ -373,6 +377,10 @@ counting — *before* any HRTF complexity is layered on top.
 - The zero-allocation test on `process()`, held over the spatial path — it
   starts at M3, on the flat one
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
+- The channel's position X/Y/Z fields in the parameters pane, live. *Moved
+  here from M5 before the milestone started*: the acceptance below is
+  positions set numerically, and without the fields that means editing a
+  `.3dim` by hand
 
 **Done when:** positions set numerically in a test project are audibly, correctly
 placed — and the benchmark passes. If it does not pass here, we find out now,
@@ -388,7 +396,8 @@ with the port seam still tiny, rather than after the UI is built on top.
 - Read-only isometric 3D view via `QPainter`, in the workspace's second tab
 - Distance-as-radius, gain-as-opacity, mute/solo states
 - The bypass strip under the top view, and bypassed channels leaving the canvases
-- Position spinboxes in the parameters pane, two-way bound
+- ~~Position spinboxes in the parameters pane~~ - moved to M4, which sets
+  positions numerically; binding them two-way to a drag stays here
 
 **Done when:** you can drag a sound around the head while it plays and hear it
 move.

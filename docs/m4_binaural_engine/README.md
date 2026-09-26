@@ -1,0 +1,104 @@
+# M4 — Binaural engine
+
+Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification: *The HRTF
+pipeline*, *Per-block processing*, *HRTF bypass*, *The master bus*,
+*Parameter smoothing* and *Realtime safety checklist* in
+[05-audio-engine.md](../05-audio-engine.md); `Position`, `HrtfRef`,
+`Distance` and `Master` in [03-data-model.md](../03-data-model.md); the
+channel and project views of the *Parameters pane* in
+[04-ui-spec.md](../04-ui-spec.md); *Threading* in
+[02-architecture.md](../02-architecture.md) · Spike:
+[s0_listening_spike/](../s0_listening_spike/README.md) · Workflow:
+[09-workflow.md](../09-workflow.md)
+
+| Phase | Status |
+|---|---|
+| [1 — The HRTF set](phase_1_hrtf_set.md) | not started |
+| [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | not started |
+| [3 — Directions](phase_3_directions.md) | not started |
+| [4 — The bank, and its cache](phase_4_bank.md) | not started |
+| [5 — The engine, spatial](phase_5_spatial_engine.md) | not started |
+| [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | not started |
+| [7 — The spatial fields](phase_7_spatial_fields.md) | not started |
+| [8 — The benchmark, and the switch interval](phase_8_benchmark.md) | not started |
+| [9 — Heard](phase_9_heard.md) | not started |
+
+The order is dependency order, and it is the spike's order. The spike
+proved the pipeline by ear (S0), and this milestone rewrites it properly in
+`audio/hrtf/`. It keeps the spike's phase notes as the record of what was
+learned the hard way, and moves nothing across from `spikes/`.
+
+The first four phases are the pipeline, each headless and each tested
+against numbers the spike measured: a set loaded and normalised, then split
+into delay and spectrum, then made queryable by direction, then prepared as
+a bank. The fifth puts it on the audio thread, the sixth adds the paths that
+skip it and the bus everything lands on, and the seventh gives the pane the
+fields that make it audible. The benchmark is eighth because it measures
+the finished graph, and hearing is last because only a person can do it.
+
+## Milestone acceptance
+
+Copied verbatim from the roadmap's "Done when":
+
+> positions set numerically in a test project are audibly, correctly
+> placed — and the benchmark passes. If it does not pass here, we find out
+> now, with the port seam still tiny, rather than after the UI is built on
+> top.
+
+## Starting with M2's and M3's last boxes open
+
+M2 and M3 are built. Each waits only on a person listening on native
+Windows or Linux, and both are one sitting (M3 phase 10's Notes). Nothing
+here rests on those boxes: the flat engine this milestone extends is tested
+headless. M4's own last phase needs the same machine, and the same
+headphones.
+
+## Scope amended before the milestone started
+
+**The position fields move here from M5.** M4's acceptance is positions
+*set numerically* and heard, and without the pane's X, Y and Z fields the
+only way to set one is to edit the `.3dim` by hand. The fields exist
+already, drawn disabled and naming M5 (M3 phase 7). They go live here, one
+edit per change, and M5 keeps what is its own: the views, dragging on them,
+and the fields' two-way binding to a drag. The roadmap's M5 line is struck
+through and says where it went.
+
+**QA-24 in the roadmap's first bullet is QA-30.** QA-24 is the fixed
+listener. The default dataset is QA-30's, "pick by listening test during
+M4". Corrected in the roadmap.
+
+## Questions the plans must settle
+
+Found while writing the phase docs, and left open on purpose. Each is its
+phase's first decision.
+
+- **How does the default set ship?** The SOFA as published is 36.6 MB,
+  Apache 2.0, 8802 directions of 256 taps. The choice is between that file
+  as it is, or a derived file holding only what the pipeline reads. And
+  where it lives, since the repository does not hold it today. (Phase 1.)
+- **SOFA's axes against the project's.** SOFA's listener faces +x with +y
+  to the left. The project's faces +Y with +X to the right (03). One mapping,
+  tested at the four cardinal points and at the poles. (Phase 1.)
+- **How does a position reach the audio thread?** A position is per
+  channel and changes by edits now, and by automation at M6: in the
+  snapshot, or through the command ring as gain does (D-105). (Phase 5.)
+- **The limiter's algorithm**, inside D-54's fixed design: a ceiling of
+  −0.3 dBFS, 1.5 ms of lookahead compensated internally, 50 ms release and
+  a 2 dB knee. (Phase 6.)
+- **What "zero xruns" can mean on WSL.** N-1's benchmark is timings with a
+  margin here. The live count, with the UI repainting, is the listening
+  machine's. (Phase 8.)
+
+## What this milestone does not deliver
+
+| Not here | Where |
+|---|---|
+| Loading a SOFA of one's own (F-27's other half) | M8, with Preferences; the loader built here takes any path, and the pane shows the built-in |
+| The top and front views, dragging a source | M5 |
+| Positions that move by themselves | M6: automation. M4's sources move by edits, and in its tests and renders by a trajectory the test gives |
+| Air absorption | not in v1 (D-22) |
+| Rendering to a file | M7; M4's listening renders are written by a test helper, not by File › Render |
+
+## Notes
+
+Appended as phases complete.
