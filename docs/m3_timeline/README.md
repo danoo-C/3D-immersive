@@ -19,7 +19,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | ✅ |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | ✅ |
 | [8 — The engine, flat](phase_8_flat_engine.md) | ✅ |
-| [9 — Transport](phase_9_transport.md) | in progress |
+| [9 — Transport](phase_9_transport.md) | ✅ |
 | [10 — The master meter, and the arrangement heard](phase_10_meter_and_listening.md) | not started |
 
 The order is dependency order. Channels need a view and a time axis to be
@@ -225,3 +225,14 @@ snapshots on the UI thread. Gains ramp across one block. `process()` keeps
 nothing between blocks and makes no array in one (D-106), measured over 500
 blocks of every path. A block of 512 takes 0.06 ms. Sixty-one mutations,
 all killed.
+
+**Phase 9.** The transport: Space, Esc, Enter and L from the menu, the
+toolbar and the keys, the playhead drawn from the engine at 30 Hz with the
+page turning, a readout that takes a position in either unit, and the xrun
+count. One stream carries everything heard, audition included, over the
+arrangement (D-107). The loop region is the project's and the switch the
+transport's (D-108); the ruler drags the playhead, draws a loop, or seeks
+(D-109); Stop goes back to where playback started (D-110). A lost device
+stops the transport and says so once. Enter and Esc are kept by the fields
+and the drag that use them. Sixty-six mutations: sixty-two killed, and four
+that found code with no effect.

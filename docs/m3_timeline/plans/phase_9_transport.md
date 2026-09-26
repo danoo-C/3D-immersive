@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 9 — Transport
 
-**Written:** 2026-09-26 · **Status:** in progress
+**Written:** 2026-09-26 · **Status:** ✅ complete
 
 ## Approach
 
@@ -218,4 +218,73 @@ tests/test_theme_io.py                      amended — loop.region arrives
 
 ## Outcome
 
-Filled in at the end.
+Five steps in the planned order, and all ten acceptance boxes are ticked.
+Sixty-six mutations: sixty-two killed, and four that found code with no
+effect, which is gone. Nineteen of the twenty named in advance were run as
+named, the last of them - "the ruler snapping by a channel's setting" - with
+a test written for it at the end. "The voice under the channels' gains" was
+not, since no line has that shape; a test mutes a channel under an audition
+and hears the audition. 2094 tests.
+
+⚠️ **The step commits' mutation counts are wrong**: 18, 12, 20 and 21 where
+the lists run were 16, 11, 18 and 20. They were counted from memory rather
+than from the lists. The totals above are counted from the lists.
+
+### What the plan got right
+
+**The engine first, headless.** Looping, stopping and the voice were
+settled block by block, including a loop shorter than a block, before any
+window touched them. The window's loop test then passed first time.
+
+**The player as the only owner of the stream.** A device's loss is a flag
+on PortAudio's thread and everything else happens on the UI thread, so
+the player stayed Qt-free and the window's part is one call a tick.
+
+**Seeks through the ring, with a mark.** `sent()` and `caught_up()` let
+the tick ignore a playhead from before a seek, which the plan's risk table
+had named.
+
+### What the plan did not see
+
+**Enter and Esc.** A line edit claims the keys that type, but not those
+two, and they became the transport's the moment Stop and Return to Start
+were live. The fields that commit or cancel, and the clip drag, now claim
+them.
+
+**A phase 8 bug**: a snapshot's levels were what it was built with, not
+its targets as taken up.
+
+**A flaky test**, whose failures made three mutations look caught.
+
+**Code with no effect.** In the player, a flag cleared twice, a closing
+flag the stream check made redundant, and a stop after a refused open that
+nothing had started. In the window, a guard on the page turn that only
+decided a pause between two ticks, where following the engine is better.
+
+**A test harness that hung.** A test that runs `app.run` raised inside the
+event loop and never quit; its callback now quits in a `finally`.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| `tests/test_player.py` new | `test_audition.py` renamed to it, and the stand-in moved to `tests/standin.py` |
+| No new widget | `ui/widgets/text.py`, a line edit that keeps Enter and Esc |
+| The page turns while playing | whenever the engine moves the drawn playhead - which is while playing, and the blocks before a pause |
+| Twenty mutations | sixty-five |
+
+### What phase 10 needs to know
+
+- **Peaks:** `engine.take_peaks()` gives the bus's highest level per side
+  since the last call. The window's tick at 30 Hz is where a meter reads
+  it. Hold and decay are the meter's.
+- **Where the meter goes:** the status bar has the xrun count, the
+  notices and the version; the meter goes left of the notice count
+  (`04`).
+- **The listening test:** it can now cover the arrangement, audition over
+  it and a loop, on native Windows or Linux, in one sitting with M2's.
+- **Latency:** the drawn playhead is the engine's next block, not what is
+  heard. Listening may say whether that needs the stream's latency figure
+  as a correction.
+- **Garbage collection:** `gc.freeze()` after a project loads is still not
+  done. It belongs with the listening, where a pause would be heard.

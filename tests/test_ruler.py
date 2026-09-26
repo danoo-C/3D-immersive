@@ -247,3 +247,17 @@ def test_drawing_the_same_region_again_is_no_edit() -> None:
     count = edits(panel)
     drag(panel, 152, 398)
     assert edits(panel) == count and drawn == [1, 1], "still turns looping on"
+
+
+def test_the_ruler_snaps_by_the_project_not_by_a_channels_override() -> None:
+    """The ruler belongs to no channel (D-109)."""
+    panel, sought, _ = paneled()
+    document = panel._document
+    document.push(
+        AddChannel(
+            document.project, new_channel(document.project, theme.active().channels)
+        )
+    )
+    document.project.channels[0].snap_override = SnapSetting(division=Division.WHOLE)
+    click(panel, 162)
+    assert sought == [3 * QUARTER]
