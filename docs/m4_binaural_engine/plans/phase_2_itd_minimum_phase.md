@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 2 — ITD and minimum phase
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -123,4 +123,17 @@ quietly mirrored mix three phases on.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned: the construction, the constants and the numbers are
+S0's. What the plan got wrong was the acceptance it inherited, a tenth of
+a dB everywhere, which only held because S0 sampled twenty directions. Over
+all of them, 256 taps cannot hold the floor of an 80 dB notch, and the line
+now says where the tenth applies (the Notes have the measurement).
+
+The risk it named arrived as a test cost rather than an application one.
+The decomposition takes 5 s, and the tests paid it once per worker until
+they were folded into one.
+
+What phase 3 needs: `Decomposed.itd`, signed, to interpolate as it is;
+`minimum`, `[M, 2, 256]` float32; the `directions` from phase 1. What phase
+4 needs: `max_itd`, whose ceiling is 39 for SADIE, and a cache that holds
+the decomposition itself, since it is the slow part.

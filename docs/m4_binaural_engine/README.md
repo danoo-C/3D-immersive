@@ -14,7 +14,7 @@ channel and project views of the *Parameters pane* in
 | Phase | Status |
 |---|---|
 | [1 — The HRTF set](phase_1_hrtf_set.md) | ✅ |
-| [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | planned |
+| [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | ✅ |
 | [3 — Directions](phase_3_directions.md) | not started |
 | [4 — The bank, and its cache](phase_4_bank.md) | not started |
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | not started |
@@ -109,3 +109,10 @@ normalised to S0's 0.25 per ear; the file's own licence. SADIE II D1 is
 fetched at install and checked by SHA-256, following 02 and 08's *fetched,
 not committed* over a 14 MB derived file that was measured and rejected.
 Twenty-eight mutations, all caught.
+
+**Phase 2.** Each measurement split into a signed ITD and a minimum-phase
+response, S0's construction ported with S0's numbers: 99.99% far-ear
+agreement, the largest ITD 38.3 samples on the interaural axis. Checking
+every response rather than S0's twenty found that the magnitude holds to
+0.019 dB within 30 dB of each peak, but not at the floors of notches 80 dB
+down, which 256 taps cannot carry. The acceptance was amended to say so.
