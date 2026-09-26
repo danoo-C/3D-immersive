@@ -426,6 +426,13 @@ window closes, so the command ring is drained while the transport is stopped.
 Before it has ever opened there is no audio thread, and the player applies
 the ring's commands itself. `audio/player.py` owns it.
 
+An audition plays from its first frame to its last unless it is stopped -
+by Stop, which silences it along with the transport - or replaced by
+another. Either way a voice still sounding plays one block more, multiplied
+by a ramp falling to 0, so it ends without a click (D-115). The engine holds
+that voice until the falling block is played, as it holds a snapshot, so
+the UI thread never frees an array the audio thread is reading.
+
 The stream is always opened at **48 kHz** (D-11, D-63). There is no output
 resampler: putting a second rate converter inside the callback to paper over a
 device mismatch costs latency and quality to hide something that is better

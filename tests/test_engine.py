@@ -15,7 +15,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
-from immersive.audio.dsp import db_to_gain
+from immersive.audio.dsp import db_to_gain, ramp_steps
 from immersive.audio.engine import RING, Engine, Voice
 from immersive.audio.scheduler import Snapshot, build
 from immersive.core.io.media import Decoded
@@ -506,14 +506,75 @@ def test_a_stereo_voice_keeps_its_sides() -> None:
     assert np.array_equal(out, sample[:BLOCK])
 
 
-def test_the_next_voice_replaces_the_first_from_its_first_frame() -> None:
+def fall() -> Audio:
+    """One block falling from just under 1 to 0, as a stopped voice does."""
+    return np.float32(1.0) - ramp_steps(BLOCK)
+
+
+def test_the_next_voice_starts_from_its_first_frame_over_the_first_falling() -> None:
+    """Replaced, the first does not stop dead, which clicks (D-115)."""
     engine = Engine(BLOCK)
     engine.audition(Voice(level(0.25)))
     block(engine)
     second = Voice(numbered())
     engine.audition(second)
     assert engine.holds_voice(second)
-    assert np.array_equal(block(engine)[:, 0], numbered()[:BLOCK, 0])
+    expected = numbered()[:BLOCK, 0] + np.float32(0.25) * fall()
+    np.testing.assert_allclose(block(engine)[:, 0], expected, rtol=1e-6)
+    assert np.array_equal(block(engine)[:, 0], numbered()[BLOCK : 2 * BLOCK, 0])
+
+
+def sounding(engine: Engine) -> bool:
+    """`auditioning`, read afresh: mypy would keep an assert's narrowing."""
+    return engine.auditioning
+
+
+def test_a_voice_stopped_falls_to_silence_across_one_block() -> None:
+    engine = Engine(BLOCK)
+    sample = level(0.5)
+    engine.audition(Voice(sample))
+    block(engine)
+    assert sounding(engine)
+
+    engine.audition(None)
+
+    assert not sounding(engine), "at once, for the window's Esc"
+    out = block(engine)
+    np.testing.assert_allclose(out[:, 0], np.float32(0.5) * fall(), rtol=1e-6)
+    assert np.array_equal(out[:, 0], out[:, 1])
+    assert out[0, 0] > 0.49 and out[-1, 0] == 0.0
+    assert not block(engine).any()
+
+
+def test_a_voice_that_has_finished_is_not_played_again_to_fall() -> None:
+    engine = Engine(BLOCK)
+    engine.audition(Voice(level(0.5, BLOCK)))
+    block(engine)
+    assert not engine.auditioning, "played to its end"
+    engine.audition(None)
+    assert not block(engine).any()
+
+
+def test_a_falling_voice_is_held_until_its_block_is_played() -> None:
+    """The UI thread frees what the engine no longer holds, so a voice that
+    has stopped being the voice but still has a block to fall through must
+    count as held while that block is played."""
+    first = Voice(level(0.25))
+    held_while_falling: list[bool] = []
+
+    class Watched(Engine):
+        def _audition(self) -> None:
+            held_while_falling.append(self.holds_voice(first))
+            super()._audition()
+
+    engine = Watched(BLOCK)
+    engine.audition(first)
+    block(engine)
+    engine.audition(None)
+    block(engine)
+
+    assert held_while_falling == [True, True]
+    assert not engine.holds_voice(first), "and let go of after it"
 
 
 def test_a_voice_is_heard_over_the_arrangement_and_under_no_channels_gain() -> None:

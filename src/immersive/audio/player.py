@@ -75,6 +75,11 @@ class Player:
     def playhead(self) -> int:
         return self.engine.playhead
 
+    @property
+    def auditioning(self) -> bool:
+        """Whether a sample is being auditioned."""
+        return self.engine.auditioning
+
     # ---------------------------------------------------------- transport
 
     def play(self) -> bool:
@@ -111,6 +116,12 @@ class Player:
         self.engine.audition(voice)
         self.release()
         return self._open()
+
+    def stop_audition(self) -> None:
+        """Silence the audition from the next block, falling rather than cut
+        (D-115). The voice is let go of once the engine has."""
+        self.engine.audition(None)
+        self.release()
 
     # ------------------------------------------------------------ keeping
 

@@ -786,8 +786,9 @@ button and its key are one thing (F-20, D-110):
 - **Play / Pause** (`Space`) plays from the playhead and pauses where it is.
   Its icon is the other one while playing.
 - **Stop** (`Esc`) stops and puts the playhead back where playback last
-  started, so play, listen and stop can be repeated over one passage. With
-  the transport already stopped it clears the selection instead.
+  started, so play, listen and stop can be repeated over one passage. It
+  also silences a sample being auditioned, fading it over one block
+  (D-115). With nothing sounding it clears the selection instead.
 - **Return to Start** (`Enter`) puts the playhead at 0, playing or not;
   playing, 0 is then where Stop goes back to.
 - **Toggle Loop** (`L`) loops over the loop region, and is enabled only while
@@ -825,7 +826,7 @@ do to you.
 | Key | Action |
 |---|---|
 | `Space` | play / pause |
-| `Esc` | stop, back to where playback started; stopped, clear the selection |
+| `Esc` | stop, back to where playback started, and silence an audition; with nothing sounding, clear the selection |
 | `Enter` | return playhead to 0 |
 | `L` | toggle loop |
 | `Shift+L` | toggle repeat: back to 0 at the end of the last clip |

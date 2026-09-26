@@ -1371,10 +1371,15 @@ class MainWindow(QMainWindow):
             self._set_playing(True)
 
     def stop(self) -> None:
-        """Esc: stop, and put the playhead back where playback last started.
-        With the transport already stopped, clear the selection (D-110)."""
+        """Esc: silence. An audition stops, and the transport stops with the
+        playhead back where playback last started. With nothing sounding,
+        clear the selection (D-110, D-115)."""
+        auditioning = self._player is not None and self._player.auditioning
+        if self._player is not None and auditioning:
+            self._player.stop_audition()
         if self._player is None or not self._playing:
-            self._document.selection.clear()
+            if not auditioning:
+                self._document.selection.clear()
             return
         self._player.pause()
         self._set_playing(False)

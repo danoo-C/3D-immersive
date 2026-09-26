@@ -75,9 +75,17 @@ below, rather than as a phase of its own for one switch (F-57, D-111).
       back to 0 and carries on, with no gap and no repeated sample; the loop
       region wins inside the project, and the end follows every edit.
 
+**Amended again (2026-09-26).** Once audition could be heard, a sample
+double-clicked could not be stopped. Stop now silences it (D-115).
+
+- [x] `Esc` and Stop silence an audition, falling across one block rather
+      than cut, while playing or stopped; with nothing sounding, `Esc`
+      still clears the selection. A sample replaced by another falls the
+      same way.
+
 ## Implements
 
-F-19 (the readout's unit), F-20, F-52, F-57, D-63 — *Transport and the ARM
+F-19 (the readout's unit), F-20, F-52, F-57, D-63, D-115 — *Transport and the ARM
 toggle*, *Keyboard* and *Accessibility and feel* in
 [04-ui-spec.md](../04-ui-spec.md), *The output stream* in
 [05-audio-engine.md](../05-audio-engine.md).

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QToolBar, QWidget
 
 from immersive.app import build_application
 from immersive.audio.device import Output
+from immersive.audio.dsp import ramp_steps
 from immersive.audio.player import LOST, Player
 from immersive.core.edits import (
     AddChannel,
@@ -609,3 +610,53 @@ def test_repeat_is_kept_when_a_project_opens(window: MainWindow) -> None:
     action(window, REPEAT).trigger()
     window.new_project()
     assert action(window, REPEAT).isChecked()
+
+
+# --------------------------------------------------------------------------- #
+# stopping an audition (D-115)
+# --------------------------------------------------------------------------- #
+
+
+def falling(audio: Audio) -> Audio:
+    """`audio` falling to silence across one block, as a stopped voice does."""
+    return audio * (np.float32(1.0) - ramp_steps(BLOCK))
+
+
+def test_esc_stops_an_audition_and_leaves_the_selection(
+    window: MainWindow, backend: Backend
+) -> None:
+    document = window.document()
+    document.selection.select(Kind.CLIPS, document.project.channels[0].clips)
+    assert window.audition_media("m-00000001")
+    assert np.array_equal(heard(backend), at(0))
+
+    action(window, STOP).trigger()
+
+    np.testing.assert_allclose(heard(backend), falling(at(BLOCK)), rtol=1e-6)
+    assert not heard(backend).any()
+    assert document.selection.kind is Kind.CLIPS, "Esc silenced; that was all"
+    action(window, STOP).trigger()
+    assert document.selection.kind is None, "and with nothing sounding, clears"
+
+
+def test_stop_during_playback_silences_the_audition_too(
+    window: MainWindow, backend: Backend
+) -> None:
+    window.seek(10_000)
+    action(window, PLAY).trigger()
+    heard(backend)
+    window.audition_media("m-00000001")
+    heard(backend)
+
+    action(window, STOP).trigger()
+
+    np.testing.assert_allclose(heard(backend), falling(at(BLOCK)), rtol=1e-6)
+    assert not heard(backend).any()
+    assert not window.playing() and window.timeline().playhead() == 10_000
+
+
+def test_the_pool_leaves_esc_to_stop(window: MainWindow) -> None:
+    """Where the double-click was, so where the focus is."""
+    pool = window.pool()
+    assert not claims(pool.tree, Qt.Key.Key_Escape)
+    assert not claims(pool.filter, Qt.Key.Key_Escape)

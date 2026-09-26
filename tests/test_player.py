@@ -13,12 +13,14 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 import soundfile
 
 import immersive
 from immersive.app import build_application
 from immersive.audio.device import Output, load_backend
+from immersive.audio.dsp import ramp_steps
 from immersive.audio.engine import RING
 from immersive.audio.player import LOST, Player
 from immersive.core.time import SAMPLE_RATE
@@ -151,7 +153,36 @@ def test_a_second_sample_replaces_the_first_from_its_first_frame(
     player.audition(second)
     out = stream(backend).block()
 
-    np.testing.assert_array_equal(out, second[:BLOCK])
+    first_falling = ramp(BLOCK * 10)[2 * BLOCK : 3 * BLOCK] * fall()[:, None]
+    np.testing.assert_allclose(out, second[:BLOCK] + first_falling, rtol=1e-6)
+    np.testing.assert_array_equal(stream(backend).block(), second[BLOCK:])
+
+
+def sounding(player: Player) -> bool:
+    """`auditioning`, read afresh: mypy would keep an assert's narrowing."""
+    return player.auditioning
+
+
+def fall() -> npt.NDArray[np.float32]:
+    return np.float32(1.0) - ramp_steps(BLOCK)
+
+
+def test_stopping_an_audition_falls_to_silence_and_lets_the_voice_go(
+    backend: Backend, player: Player
+) -> None:
+    player.audition(ramp(BLOCK * 10))
+    stream(backend).block()
+    assert sounding(player)
+
+    player.stop_audition()
+
+    assert not sounding(player)
+    out = stream(backend).block()
+    expected = ramp(BLOCK * 10)[BLOCK : 2 * BLOCK] * fall()[:, None]
+    np.testing.assert_allclose(out, np.repeat(expected, 2, axis=1), rtol=1e-6)
+    assert not stream(backend).block().any()
+    player.release()
+    assert player._voices == []
 
 
 def test_a_voice_is_held_until_the_engine_lets_it_go(

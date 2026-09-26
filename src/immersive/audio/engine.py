@@ -36,7 +36,9 @@ past the loop's end plays on.
 after the channels - so no channel's gain, mute or solo reaches it - from
 its first frame to its last. It is handed over as a snapshot is, and taken
 up at the top of a block, so the engine never holds the only reference to
-one, and never frees its array.
+one, and never frees its array. A voice stopped or replaced while it still
+sounds plays one block more, falling to silence, so it does not click
+(D-115).
 
 **Nothing on the audio thread allocates an array** (D-106). The bus and a
 channel's rows are made once, one contiguous row per ear, and every
@@ -100,6 +102,8 @@ class Engine:
         self._next = self._current
         self._voice: Voice | None = None
         self._next_voice: Voice | None = None
+        #: A voice stopped or replaced mid-sample, for its one falling block.
+        self._fading: Voice | None = None
         self._playhead = 0
         self._playing = False
         self._loop_start = 0
@@ -116,6 +120,8 @@ class Engine:
         self._lane = np.zeros((2, block), dtype=np.float32)
         self._lane_l, self._lane_r = self._lane[0], self._lane[1]
         self._steps = ramp_steps(block)
+        #: A block's fall to silence: its last sample is at 0.
+        self._fall = np.subtract(np.float32(1.0), self._steps)
         self._ramp = np.zeros(block, dtype=np.float32)
         self._scratch = np.zeros(block, dtype=np.float32)
         #: Where a block's pieces start on the timeline, where in the block,
@@ -144,7 +150,15 @@ class Engine:
         self._next_voice = voice
 
     def holds_voice(self, voice: Voice) -> bool:
-        return voice is self._voice or voice is self._next_voice
+        return (
+            voice is self._voice or voice is self._next_voice or voice is self._fading
+        )
+
+    @property
+    def auditioning(self) -> bool:
+        """Whether a voice is sounding, or about to: the UI thread's view."""
+        voice = self._next_voice
+        return voice is not None and not voice.finished
 
     def send_gain(self, generation: int, channel: int, gain: float) -> bool:
         """Ramp channel `channel` of snapshot `generation` to `gain`, a
@@ -235,6 +249,10 @@ class Engine:
         if snapshot is not self._current:
             self._take_up(snapshot)
         if self._next_voice is not self._voice:
+            # Held as fading before it stops being the voice, so the UI
+            # thread never sees it held by neither. One that has finished
+            # falls through nothing: `_sound` has no frames left to play.
+            self._fading = self._voice
             self._voice = self._next_voice
         self._drain(snapshot)
 
@@ -341,17 +359,36 @@ class Engine:
         return wrote
 
     def _audition(self) -> None:
-        """The voice's next block, summed into the bus over the channels."""
+        """The voice's next block, summed into the bus over the channels -
+        and a voice just stopped or replaced, falling to silence."""
+        fading = self._fading
+        if fading is not None:
+            self._sound(fading, falling=True)
+            self._fading = None
         voice = self._voice
-        if voice is None or voice.position >= voice.frames:
-            return
+        if voice is not None:
+            self._sound(voice, falling=False)
+
+    def _sound(self, voice: Voice, *, falling: bool) -> None:
         read = voice.position
+        if read >= voice.frames:
+            return
         count = min(self.block, voice.frames - read)
         sample = voice.audio
         into_l = self._bus_l[:count]
         into_r = self._bus_r[:count]
-        np.add(into_l, sample[read : read + count, 0], out=into_l)
-        np.add(into_r, sample[read : read + count, voice.last], out=into_r)
+        left = sample[read : read + count, 0]
+        right = sample[read : read + count, voice.last]
+        if falling:
+            fall = self._fall[:count]
+            scratch = self._scratch[:count]
+            np.multiply(left, fall, out=scratch)
+            np.add(into_l, scratch, out=into_l)
+            np.multiply(right, fall, out=scratch)
+            np.add(into_r, scratch, out=into_r)
+        else:
+            np.add(into_l, left, out=into_l)
+            np.add(into_r, right, out=into_r)
         voice.position = read + count
 
     def _take_up(self, snapshot: Snapshot) -> None:

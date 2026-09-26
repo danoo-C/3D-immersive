@@ -10,8 +10,9 @@ worth of float32 is 8 KiB at 2048 frames, and a ufunc that broadcasts makes
 has: fades implicit and explicit, clip gain, stereo and mono, a missing
 sample, gains ramping and steady, a mute, a seek and a snapshot swap, a
 loop wrapping inside blocks and one shorter than a block, the project
-repeating from its end (D-111), an audition voice replaced by another, and
-the transport stopped and started.
+repeating from its end (D-111), an audition voice replaced by another and
+then stopped, each falling to silence (D-115), and the transport stopped and
+started.
 """
 
 from __future__ import annotations
@@ -154,7 +155,9 @@ def run() -> tuple[int, int]:
         if n == 30:
             engine.audition(voices[0])
         if n == 35:
-            engine.audition(voices[1])  # and one replacing it
+            engine.audition(voices[1])  # and one replacing it, the first falling
+        if n == 38:
+            engine.audition(None)  # stopped: falling to silence (D-115)
         if n == 50:
             engine.set_loop(40_000, 40_100, True)  # shorter than a block
         if n == 70:
