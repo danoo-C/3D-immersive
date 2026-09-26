@@ -16,7 +16,7 @@ channel and project views of the *Parameters pane* in
 | [1 — The HRTF set](phase_1_hrtf_set.md) | ✅ |
 | [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | ✅ |
 | [3 — Directions](phase_3_directions.md) | ✅ |
-| [4 — The bank, and its cache](phase_4_bank.md) | not started |
+| [4 — The bank, and its cache](phase_4_bank.md) | planned |
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | not started |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | not started |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | not started |
