@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 1 — The HRTF set
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -133,4 +133,13 @@ stdlib only
 
 ## Outcome
 
-Filled in at the end.
+Built as planned. The plan's approach held, and none of its risks
+arrived: `sofar` wrote every synthetic set the tests needed, delays
+included, and `Data_Delay` broadcast from one row or from one per
+measurement. What it got wrong was one test missing, a download killed
+part-way, and one test too trusting of its own constant (the 0.25).
+
+What phase 2 needs: `HrirSet.responses`, `[M, 2, N]` float32 at 48 kHz,
+normalised; `directions` in the project's axes, never to be converted
+again; `delays`, zero for SADIE II D1 but read for the next set; and
+`hash` for phase 4's cache key.

@@ -13,7 +13,7 @@ channel and project views of the *Parameters pane* in
 
 | Phase | Status |
 |---|---|
-| [1 — The HRTF set](phase_1_hrtf_set.md) | planned |
+| [1 — The HRTF set](phase_1_hrtf_set.md) | ✅ |
 | [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | not started |
 | [3 — Directions](phase_3_directions.md) | not started |
 | [4 — The bank, and its cache](phase_4_bank.md) | not started |
@@ -102,3 +102,10 @@ phase's first decision.
 ## Notes
 
 Appended as phases complete.
+
+**Phase 1.** A SOFA set loads into an `HrirSet`: directions in the
+project's axes, converted here and nowhere else; responses at 48 kHz,
+normalised to S0's 0.25 per ear; the file's own licence. SADIE II D1 is
+fetched at install and checked by SHA-256, following 02 and 08's *fetched,
+not committed* over a 14 MB derived file that was measured and rejected.
+Twenty-eight mutations, all caught.

@@ -51,6 +51,16 @@ raises. The application still starts without it — audio output is simply
 unavailable, and the window says so and names this package (M2 phase 7) —
 but nothing can be heard. WSL counts as Linux here.
 
+**The HRTF set is fetched, not committed** (02, QA-30). `--install` downloads
+SADIE II D1, 36.6 MB, from sofacoustics.org, checks it against the SHA-256
+recorded in `src/immersive/assets/hrtf/__init__.py`, and keeps it beside
+that file, gitignored. It is written beside its final name and moved there
+only once its digest matches, so nothing ever finds half a file. A failed
+download says so, and leaves the rest of the install in place; running
+`--install` again retries it. `--check` reports whether it is there.
+Offline, a copy of the same file placed in that folder is accepted if its
+digest matches.
+
 **No output device found - on WSL, route ALSA to WSLg's sound server.**
 PortAudio reaches the sound server through ALSA. A desktop distribution
 routes ALSA's default there already (through `pipewire-alsa` or the
