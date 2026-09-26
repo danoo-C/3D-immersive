@@ -19,11 +19,13 @@ See docs/08-environment.md.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent
@@ -220,6 +222,14 @@ def report(verbose: bool = True) -> int:
         else:
             print(f"  app package      '{PACKAGE}' ok")
 
+    sets = hrtf_sets()
+    for entry in sets.SETS.values():
+        if sets.verified(entry):
+            print(f"  hrtf set         {entry.id} ok")
+        else:
+            print(f"  hrtf set         {entry.id} MISSING - --install fetches it")
+            ok = False
+
     print("  " + "-" * 44)
     print("  READY" if ok else "  NOT READY — see docs/08-environment.md")
     print()
@@ -303,6 +313,43 @@ def create_venv() -> None:
         )
 
 
+def hrtf_sets() -> ModuleType:
+    """The built-in HRTF sets' registry and fetch, loaded by path.
+
+    Stdlib only, and loaded without importing the package, which may not be
+    installed yet - so the registry has one home, inside the package, and
+    this launcher cannot drift from it.
+    """
+    path = SRC / PACKAGE / "assets" / "hrtf" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("_immersive_hrtf_sets", path)
+    if spec is None or spec.loader is None:
+        die(f"cannot read the HRTF registry at {path}")
+    module = importlib.util.module_from_spec(spec)
+    # A dataclass looks its module up here while it is being built.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def fetch_hrtf() -> bool:
+    """Fetch every built-in HRTF set not already here (QA-30). Whether all
+    are now in place."""
+    sets = hrtf_sets()
+    ok = True
+    for entry in sets.SETS.values():
+        if sets.verified(entry):
+            print(f"\n  == {entry.title}: already here")
+            continue
+        print(f"\n  == fetching {entry.title} ({entry.size / 1e6:.1f} MB)")
+        print(f"     {entry.url}")
+        try:
+            sets.fetch(entry)
+        except sets.FetchError as failed:
+            print(f"  ! {failed}")
+            ok = False
+    return ok
+
+
 def do_install(dev: bool) -> int:
     """Create the venv and install dependencies. Returns a process exit code."""
     print()
@@ -330,10 +377,23 @@ def do_install(dev: bool) -> int:
         if dev:
             run([vpy, "-m", "pip", "install", *DEV_REQUIRED], "installing dev tooling")
 
+    # The HRTF set last: the environment stands without it, and a failed
+    # download says what to do rather than undoing everything before it.
+    fetched = fetch_hrtf()
+
     # Shown for information. Every pip step above already died on failure, so
     # a remaining gap here (typically: the app package is not scaffolded yet)
     # must not be treated as an install failure.
     report()
+    if not fetched:
+        print("  The HRTF set is missing: the application starts, but cannot")
+        print("  place sounds around the listener until it is fetched. Run")
+        print()
+        print("      python3 launch.py --install")
+        print()
+        print("  again to retry; what was installed is kept.")
+        print()
+        return 1
     return 0
 
 
