@@ -296,9 +296,11 @@ Phases: [`docs/m2_media/`](m2_media/README.md)
   (F-55, D-63). *Moved here from M3 before the milestone started*: D-63 and
   [05](05-audio-engine.md) already said "from M2", because audition is the
   first sound
-- Import and load progress, and cancelling an import (F-59). *Added after
-  the milestone's phases were built*, once a real project's 22 stems had
-  imported with nothing on screen until the end
+- Import and load progress, and cancelling an import (F-59), in an info
+  box at the right of the transport toolbar that any later work - render,
+  the HRTF cache - uses too (D-116). *Added after the milestone's phases
+  were built*, once a real project's 22 stems had imported with nothing on
+  screen until the end
 
 **Done when:** you can import a folder, see waveforms, and double-click to hear
 a sample.
