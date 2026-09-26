@@ -1,7 +1,7 @@
 # Plan — M2 · Phase 8 — Import progress, in the info box
 
 **Written:** 2026-09-26 · **Reworked:** 2026-09-26, before building - the
-pool strip became the toolbar's info box (D-116) · **Status:** planned
+pool strip became the toolbar's info box (D-116) · **Status:** ✅ complete
 
 ## Approach
 
@@ -313,6 +313,38 @@ extended
   and was removed. What remains is the trim, for a file holding fewer
   frames than it announces, with a test of its own.
 
+- **Step 3: the box gives way.** At the window's narrowest, 1024 px, a
+  fixed 260 px box was folded into the toolbar's overflow menu, the risk
+  named above. It shrinks to 150 px instead. The ✕ was trimmed to 20 px to
+  keep the box no taller than the buttons, and was unpadded so its icon
+  shows.
+- **Step 4 added closing.** Closing the window cancels running work: the
+  importer's pool is its own now, and a pool being destroyed waits for its
+  threads.
+- **Step 5 was reverted, by its criterion.** Reading once was exact and
+  half again *slower*: 13 s against 2 s locally and 9 s from the Windows
+  drive, because libsndfile's 6 000 small reads a stem become Python calls
+  holding the GIL, and the workers queue behind each other.
+
 ## Outcome
 
-Filled in at the end.
+Built as planned in five of six steps. The sixth, reading each file once,
+was measured and reverted, which is what its criterion was for. The plan
+got three things wrong:
+
+- **It assumed reading in pieces was safe for every format.** It is not
+  for MP3 under libsndfile 1.2.2, so MP3 still reads in one call, with a
+  canary test watching for a fix.
+- **It gave the box a fixed width.** The window's narrowest would have
+  hidden it in the overflow menu.
+- **It expected one read to help.** It hurt, for a reason the risks named
+  and only a measurement could size.
+
+What the next user of the box needs: `window.activities().begin(label,
+maximum, cancel=...)`, `update()` from the UI thread, and `finish()` when
+the work has stopped. Work on a worker reports through a `Progress` that
+the UI thread reads, as the importer does. Render (M7, F-37) is the next
+user, and should read the importer's `progressed` timer as its pattern.
+
+For the person on WSL: samples on the Linux filesystem import in 2 s
+instead of 9, and the bar now says which is happening.

@@ -90,7 +90,10 @@ src/immersive/
     time_axis.py         scroll and zoom, shared by the timeline and the curve
                          editor, owned by neither - no Qt (D-94, M3)
     notices.py           the notice model - no Qt, so theme_io may use it (D-81)
-    importer.py          preparing samples on workers (N-3, M2)
+    importer.py          preparing samples on workers, how far, and cancel
+                         (N-3, F-59, M2)
+    activity.py          anything slow, begun, updated, finished - no Qt,
+                         the info box's model (D-116, M2)
     explorer/            media pool tree (top)
     parameters/          the params pane (bottom): a view per kind of
                          selection, and the project's with none (M3)
@@ -98,6 +101,7 @@ src/immersive/
     spatial/             ortho_view.py (top & front), view3d.py (read-only)
     keyframes/           curve editor panel
     widgets/             shared small widgets
+      info_box.py        the toolbar's info box: what is under way (D-116, M2)
       notices.py         the status-bar line, count and list (F-56, M9)
       numeric.py         a number dragged or typed, in any unit (M3)
       check.py           the painted check box (M3)
@@ -296,6 +300,15 @@ setuptools would also work; there is no reason to prefer it here. → D-31
 | **UI** (Qt main) | All widgets, the `Project` model, the undo stack | Block for more than a frame |
 | **Audio** (PortAudio callback) | Engine state, preallocated buffers | Allocate, lock, log, or touch the model |
 | **Workers** (`QThreadPool`) | Decode, resample, peak generation, offline render | Touch widgets directly |
+
+A worker says how far it has got through a `core.progress.Progress`: a
+fraction it writes and a cancel flag it reads between chunks, each one
+attribute assigned whole, which the GIL makes safe to share without a
+lock. The UI thread reads the fractions when it chooses - the importer
+fifteen times a second - and turns them into an *activity* for the info
+box (D-116). An activity is begun, updated and finished on the UI thread
+only, like everything else a widget shows. The importer has a pool of its
+own, so cancelling it clears only its own queue.
 
 ### Crossing from UI to audio
 

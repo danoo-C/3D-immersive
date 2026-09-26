@@ -1,6 +1,6 @@
 # M2 · Phase 8 — Import progress, in the info box
 
-**Status:** planned · **Plan:**
+**Status:** ✅ complete · **Plan:**
 [plans/phase_8_import_progress.md](plans/phase_8_import_progress.md)
 
 ## Goal
@@ -45,39 +45,40 @@ rather than twice.
 
 ## Acceptance
 
-- [ ] An activity begun with a label and a maximum, and updated, shows that
+- [x] An activity begun with a label and a maximum, and updated, shows that
       label and that value of that maximum in the info box. A maximum of 0
       shows busy, with no measure. Finishing it empties the box.
-- [ ] Nothing shows for an activity finished within 0.25 s; one still
+- [x] Nothing shows for an activity finished within 0.25 s; one still
       running at 0.25 s shows then.
-- [ ] With two activities running, the box shows the one begun first and
+- [x] With two activities running, the box shows the one begun first and
       *+1 more*, and its tooltip names both. A ✕ shows only for an activity
       begun with a cancel, and clicking it calls that cancel.
-- [ ] The box sits at the right end of the transport toolbar, and showing
+- [x] The box sits at the right end of the transport toolbar, and showing
       or hiding it moves nothing else in the toolbar.
-- [ ] An import that runs longer than 0.25 s shows *Importing n of N files*
+- [x] An import that runs longer than 0.25 s shows *Importing n of N files*
       and a ✕ in the box, until it has landed.
-- [ ] The bar moves within a file: one large file's import reports progress
+- [x] The bar moves within a file: one large file's import reports progress
       strictly between 0 and 1 before it finishes.
-- [ ] The bar counts bytes. When a small and a large file are imported and
+- [x] The bar counts bytes. When a small and a large file are imported and
       only the small one is done, the bar stands at the small file's share
       of the bytes.
-- [ ] The ✕ cancels the import: nothing is added, no notice is posted, and
+- [x] The ✕ cancels the import: nothing is added, no notice is posted, and
       the undo stack is unchanged. Files not yet started never run, and a
       file being prepared stops at its next chunk.
-- [ ] While an import runs, *Import Audio…* and *Import Folder…* are
+- [x] While an import runs, *Import Audio…* and *Import Folder…* are
       disabled, and their tooltips say an import is running.
-- [ ] Opening a project shows *Loading n of N samples* with no ✕. Opening
+- [x] Opening a project shows *Loading n of N samples* with no ✕. Opening
       another project while that load runs stops it, and the second
       project's samples load.
-- [ ] Reading in chunks decodes to exactly the samples a single read gives,
-      for every format F-5 names.
-- [ ] `info` is in `04` and the bundled theme, and the box names no hex.
-- [ ] A 22-stem import is timed stage by stage, on the Linux filesystem and
+- [x] Reading in chunks decodes to exactly the samples a single read gives,
+      for every format F-5 names. *MP3 is read in one call: libsndfile
+      misdecodes one read in pieces (step 2's Notes).*
+- [x] `info` is in `04` and the bundled theme, and the box names no hex.
+- [x] A 22-stem import is timed stage by stage, on the Linux filesystem and
       on the Windows drive under WSL. The numbers are recorded in the Notes,
       along with whether reading once was kept, judged by the plan's
       criterion.
-- [ ] A screenshot of the box part-way through a real import is taken and
+- [x] A screenshot of the box part-way through a real import is taken and
       looked at.
 
 ## Implements
@@ -184,3 +185,40 @@ One addition the plan did not name: **closing the window asks running
 work to stop**. The importer's pool is its own now, and a pool being
 destroyed waits for its threads, so a close would otherwise have waited
 for a folder to finish decoding. Fourteen mutations, all caught.
+
+**Step 5 — reading once: measured, and reverted by the plan's criterion.**
+The wrapper was exact. For WAV, AIFF, FLAC, OGG and MP3 it hashed every
+byte in order as libsndfile read it, with nothing to read again, and the
+digest was `content_hash`'s. But over the 23 stems at twelve workers:
+
+| | Read twice (as built) | Read once |
+|---|---|---|
+| Linux filesystem | 1.8–2.5 s | 12.9–13.2 s |
+| Windows drive | 8.7–8.9 s | 13.1 s |
+
+With one worker the two were level (8.1 s and 8.4 s), so no single call is
+expensive. libsndfile makes about 6 000 small reads of a stem, and through
+a file object each is a Python call holding the GIL. Twelve workers then
+queue behind one another: the parallelism the workers exist for, lost. The
+criterion asked for a quarter faster from the Windows drive and no more
+than a tenth slower locally; it was half again slower on both. Reverted. A
+one-read that kept libsndfile's reads in C would take a memory file
+(`memfd`) on Linux and something else on Windows, for a saving that
+matters only on WSL's bridge. Not pursued. **On WSL, keeping samples on
+the Linux filesystem is the fix: 2 s instead of 9 for the same stems.**
+
+**Step 6 — looked at, and closed.** The person's 23 stems, imported through
+the window from the Linux filesystem, landed in 2.65 s. The box read
+*Importing 0 of 23 files* at a quarter second with its bar at 19%, and the
+bar kept moving: 67% at 1.7 s, 99% at 2.6 s. Its one pause, about half a
+second at 23%, was twelve workers resampling at once, the one stage with no
+progress inside it, as the plan accepted. The file count jumped from 0 to 12
+in one step, which is exactly why the bar counts bytes. The grab shows the
+box at the top right with a third of its bar and a ✕, over a pool still
+empty.
+
+The phase adds 50 tests. The suite is 2192: 12.3 s in parallel and 7.0 s
+in the fast lane. The fast lane was 4.2 s at M3 phase 9; this phase's
+chunked-read tests account for some of that, but the machine has been
+slower all session (both states measured 23–27 s once, see M3), so the
+figure is not a comparison.

@@ -809,6 +809,19 @@ playhead that leaves the view turns the page, bringing it a tenth of the way
 in (D-110). A seek is drawn at once, and the engine's playhead is not read
 again until the engine has taken the seek.
 
+**The info box** is at the right end of the toolbar, past the free space,
+and shows anything slow while it runs (D-116): a label, a thin bar, and a
+✕ when the work can be stopped. An import reads *Importing 7 of 22 files*,
+its bar counting the files' bytes (D-113), and its ✕ drops the whole
+import quietly (D-114). A project's samples loading on open read *Loading
+7 of 22 samples*, with no ✕. With more than one running, the first begun
+is shown, *+1 more* beside it, and the tooltip names them all. It appears
+once the work has run for a quarter of a second, is hidden when nothing
+runs, and moves nothing when it comes and goes. At the window's narrowest
+it gives way to 150 px and elides its label, rather than fold into the
+toolbar's overflow menu. While an import runs, *Import Audio…* and *Import
+Folder…* are disabled, and say so.
+
 **A field that commits on `Enter` or cancels on `Esc`** - a channel's name
 being typed, a numeric field being typed into - keeps both keys while it
 has the keyboard, and a clip drag keeps `Esc` to cancel itself. Otherwise

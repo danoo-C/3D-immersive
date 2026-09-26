@@ -15,7 +15,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [5 — The waveform widget](phase_5_waveform_widget.md) | ✅ |
 | [6 — The media pool](phase_6_media_pool.md) | ✅ |
 | [7 — Audition](phase_7_audition.md) | built — **waiting to be heard** |
-| [8 — Import progress, in the info box](phase_8_import_progress.md) | planned |
+| [8 — Import progress, in the info box](phase_8_import_progress.md) | ✅ |
 
 The order is dependency order. Everything after phase 1 edits a project the
 window has to be holding; peaks need decoded audio and a hash to be keyed by;
@@ -155,3 +155,13 @@ honoured becomes a notice and a default; a machine with no PortAudio starts
 and says what to install. Six of seven boxes are ticked by tests. The seventh
 is a person listening on native Windows or Linux, and **M2 is not complete
 until one has** — the phase's Notes say exactly what to do.
+
+**Phase 8 — added after, and built.** Anything slow now shows in an info
+box at the right of the transport toolbar (D-116). Importing and loading
+are its first users: a label, a bar counting bytes, and for an import a ✕
+that drops it (D-113, D-114). Measuring the person's 23 stems found that
+the wait was the Windows drive under WSL, 9 s against 2 s from the Linux
+filesystem. It also found that libsndfile misreads an MP3 read in pieces,
+and that reading each file once, planned to help, made imports half again
+slower, so it was reverted by the criterion set for it. The sweep caught
+all its mutations, several only after their tests were tightened.
