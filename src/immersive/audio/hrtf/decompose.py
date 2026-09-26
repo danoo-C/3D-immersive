@@ -21,7 +21,7 @@ below are its measured choices, with their measurements.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -29,6 +29,7 @@ from scipy import signal
 
 from immersive.audio.hrtf.sofa import HrirSet
 from immersive.core.io.media import Refused
+from immersive.core.progress import Cancelled, Part
 from immersive.core.time import SAMPLE_RATE
 
 #: The ITD is a low-frequency cue. Above about 1.5 kHz head-shadow ripple
@@ -102,9 +103,25 @@ class Decomposed:
         return self.source.directions
 
 
-def decompose(hrirs: HrirSet) -> Decomposed | Refused:
+#: How much of decomposing is the delays; the rest is the minimum phase.
+DELAYS: Final = 0.1
+
+
+@overload
+def decompose(hrirs: HrirSet, progress: None = None) -> Decomposed | Refused: ...
+
+
+@overload
+def decompose(hrirs: HrirSet, progress: Part) -> Decomposed | Refused | Cancelled: ...
+
+
+def decompose(
+    hrirs: HrirSet, progress: Part | None = None
+) -> Decomposed | Refused | Cancelled:
     """Split `hrirs`, or refuse it if its two delay estimates disagree about
-    which ear is far - the sign of a mirrored or malformed set."""
+    which ear is far - the sign of a mirrored or malformed set. With a
+    `progress`, it moves a chunk at a time and stops between chunks when
+    cancelled: 5 s for SADIE II D1 is too long to hold a window's close."""
     correlated = itd(hrirs.responses)
     onset = onset_itd(hrirs.responses)
     stored = hrirs.delays[:, 0] - hrirs.delays[:, 1]
@@ -122,10 +139,17 @@ def decompose(hrirs: HrirSet) -> Decomposed | Refused:
         )
     difference = correlated - onset
     total = correlated + stored
+    if progress is not None:
+        progress.at(DELAYS)
+    minimum = minimum_phase(
+        hrirs.responses, progress=progress.part(DELAYS, 1.0) if progress else None
+    )
+    if minimum is None:
+        return Cancelled(hrirs.title)
     return Decomposed(
         source=hrirs,
         itd=total,
-        minimum=minimum_phase(hrirs.responses),
+        minimum=minimum,
         max_itd=float(np.abs(total).max()),
         agreement=agree,
         median_difference=float(np.median(difference)),
@@ -191,19 +215,44 @@ def onset_itd(responses: npt.NDArray[np.float32]) -> npt.NDArray[np.float64]:
     return position[:, 0] - position[:, 1]
 
 
+@overload
 def minimum_phase(
-    responses: npt.NDArray[np.float32], nfft: int = MINIMUM_PHASE_NFFT
-) -> npt.NDArray[np.float32]:
+    responses: npt.NDArray[np.float32],
+    nfft: int = MINIMUM_PHASE_NFFT,
+    progress: None = None,
+) -> npt.NDArray[np.float32]: ...
+
+
+@overload
+def minimum_phase(
+    responses: npt.NDArray[np.float32],
+    nfft: int = MINIMUM_PHASE_NFFT,
+    *,
+    progress: Part,
+) -> npt.NDArray[np.float32] | None: ...
+
+
+def minimum_phase(
+    responses: npt.NDArray[np.float32],
+    nfft: int = MINIMUM_PHASE_NFFT,
+    progress: Part | None = None,
+) -> npt.NDArray[np.float32] | None:
     """The minimum-phase part of each response, by the real cepstrum.
 
     Not "the response with the ITD taken out": the construction discards
     every scrap of excess phase, the delay and any all-pass together. The
     ITD is measured from the original pair, never subtracted first.
+    `None` if `progress` is cancelled, which it is asked between chunks.
     """
     taps = responses.shape[-1]
     half = nfft // 2
+    count = responses.shape[0]
     out = np.empty(responses.shape, dtype=np.float32)
-    for start in range(0, responses.shape[0], CHUNK):
+    for start in range(0, count, CHUNK):
+        if progress is not None:
+            if progress.cancelled:
+                return None
+            progress.at(start / count)
         chunk = responses[start : start + CHUNK].astype(np.float64)
         magnitude = np.abs(np.fft.rfft(chunk, n=nfft, axis=-1))
         floor = magnitude.max(axis=-1, keepdims=True) * 10 ** (FLOOR_DB / 20)

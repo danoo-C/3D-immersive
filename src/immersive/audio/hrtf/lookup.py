@@ -24,11 +24,13 @@ next to a pole.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, overload
 
 import numpy as np
 import numpy.typing as npt
 from scipy.spatial import ConvexHull, cKDTree
+
+from immersive.core.progress import Part
 
 #: Cells along each edge of each of the cube map's six faces.
 CELLS: Final = 64
@@ -55,17 +57,36 @@ class Lookup:
     inverses: npt.NDArray[np.float64]
     #: `[F, 3]` the face across the edge opposite each vertex.
     neighbours: npt.NDArray[np.int64]
-    #: The same three, as tuples, for the query's plain arithmetic.
+    #: Every cube-map cell's candidate faces, one after another, and where
+    #: each cell's start: cell `i` is `cells[offsets[i]:offsets[i + 1]]`.
+    cells: npt.NDArray[np.int64]
+    offsets: npt.NDArray[np.int64]
+    #: The same, as tuples, for the query's plain arithmetic.
     _faces: tuple[tuple[int, int, int], ...]
     _inverses: tuple[tuple[float, ...], ...]
     _neighbours: tuple[tuple[int, int, int], ...]
-    #: Each cube-map cell's candidate faces.
     _cells: tuple[tuple[int, ...], ...]
 
+    @overload
     @classmethod
-    def build(cls, directions: npt.NDArray[np.float64]) -> Lookup:
+    def build(
+        cls, directions: npt.NDArray[np.float64], progress: None = None
+    ) -> Lookup: ...
+
+    @overload
+    @classmethod
+    def build(
+        cls, directions: npt.NDArray[np.float64], progress: Part
+    ) -> Lookup | None: ...
+
+    @classmethod
+    def build(
+        cls, directions: npt.NDArray[np.float64], progress: Part | None = None
+    ) -> Lookup | None:
         """Triangulate `directions`, unit vectors, and index the result.
-        Allocates freely: a worker's job, once per set."""
+        Allocates freely: a worker's job, once per set. With a `progress`,
+        it moves a cube face at a time, and gives up - `None` - when
+        cancelled between them."""
         faces = np.ascontiguousarray(ConvexHull(directions).simplices, dtype=np.int64)
         vertices = directions[faces]  # [F, 3 vertices, 3 components]
         inverses = np.linalg.inv(np.transpose(vertices, (0, 2, 1)))
@@ -73,20 +94,45 @@ class Lookup:
         centroids = vertices.sum(axis=1)
         centroids /= np.linalg.norm(centroids, axis=1, keepdims=True)
         tree = cKDTree(centroids)
-        cells = tuple(
-            tuple(int(face) for face in np.unique(row))
-            for row in _located(_samples(), inverses, tree)
+        per_cell: list[npt.NDArray[np.int64]] = []
+        for side, samples in enumerate(_sides()):
+            if progress is not None:
+                if progress.cancelled:
+                    return None
+                progress.at(side / 6)
+            per_cell.extend(np.unique(row) for row in _located(samples, inverses, tree))
+        sizes = np.fromiter((len(cell) for cell in per_cell), dtype=np.int64)
+        offsets = np.concatenate([[0], np.cumsum(sizes)]).astype(np.int64)
+        return cls.assemble(
+            faces, inverses, neighbours, np.concatenate(per_cell), offsets
         )
+
+    @classmethod
+    def assemble(
+        cls,
+        faces: npt.NDArray[np.int64],
+        inverses: npt.NDArray[np.float64],
+        neighbours: npt.NDArray[np.int64],
+        cells: npt.NDArray[np.int64],
+        offsets: npt.NDArray[np.int64],
+    ) -> Lookup:
+        """A lookup from its arrays - freshly built, or read from a cache."""
+        flat = cells.tolist()
+        bounds = offsets.tolist()
         return cls(
             faces=faces,
             inverses=inverses,
             neighbours=neighbours,
+            cells=cells,
+            offsets=offsets,
             _faces=tuple((int(a), int(b), int(c)) for a, b, c in faces.tolist()),
             _inverses=tuple(tuple(row) for row in inverses.reshape(-1, 9).tolist()),
             _neighbours=tuple(
                 (int(a), int(b), int(c)) for a, b, c in neighbours.tolist()
             ),
-            _cells=cells,
+            _cells=tuple(
+                tuple(flat[bounds[i] : bounds[i + 1]]) for i in range(len(bounds) - 1)
+            ),
         )
 
     def weigh(
@@ -188,9 +234,9 @@ def _cell(x: float, y: float, z: float) -> int:
     return (side * CELLS + i) * CELLS + j
 
 
-def _samples() -> npt.NDArray[np.float64]:
-    """`[6 * CELLS * CELLS, SAMPLES * SAMPLES, 3]`: the points sampled in
-    each cell, in `_cell`'s order."""
+def _sides() -> list[npt.NDArray[np.float64]]:
+    """The points sampled in each cell, one cube face at a time, in
+    `_cell`'s order: six arrays of `[CELLS * CELLS, SAMPLES * SAMPLES, 3]`."""
     grid = (np.arange(CELLS * SAMPLES) + 0.5) / (CELLS * SAMPLES) * 2.0 - 1.0
     u, v = np.meshgrid(grid, grid, indexing="ij")
     sides = []
@@ -205,7 +251,7 @@ def _samples() -> npt.NDArray[np.float64]:
             sides.append(
                 per_cell.transpose(0, 2, 1, 3, 4).reshape(CELLS * CELLS, SAMPLES**2, 3)
             )
-    return np.concatenate(sides)
+    return sides
 
 
 def _located(
