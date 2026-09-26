@@ -13,7 +13,7 @@ channel and project views of the *Parameters pane* in
 
 | Phase | Status |
 |---|---|
-| [1 — The HRTF set](phase_1_hrtf_set.md) | not started |
+| [1 — The HRTF set](phase_1_hrtf_set.md) | planned |
 | [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | not started |
 | [3 — Directions](phase_3_directions.md) | not started |
 | [4 — The bank, and its cache](phase_4_bank.md) | not started |
