@@ -28,6 +28,8 @@ import numpy as np
 import numpy.typing as npt
 
 from immersive.audio.dsp import IMPLICIT_FADE, Samples, db_to_gain, fade_in, fade_out
+from immersive.audio.hrtf.bank import Bank
+from immersive.audio.spatial import Space
 from immersive.core.io.media import Decoded
 from immersive.core.model import Clip, Fade, FadeShape, Project, audible
 
@@ -74,6 +76,14 @@ class Snapshot:
     #: them, `(channels, 2)`: what it adds to the bus, for its meter (D-117).
     #: Raised by the engine, read and zeroed by `Engine.take_channel_peaks`.
     peaks: npt.NDArray[np.float64] = field(repr=False)
+    #: `(channels, 3)` each channel's position, metres; written by the
+    #: engine from `POSITION` commands after handover (D-121).
+    positions: npt.NDArray[np.float64] = field(repr=False)
+    #: Each channel's row in `space`, or -1 for a channel played flat.
+    slots: tuple[int, ...] = ()
+    #: The spatial channels' buffers and the bank, or None: no bank yet,
+    #: or every channel bypassed.
+    space: Space | None = field(default=None, repr=False)
     #: For each channel, its index in the snapshot before, or -1.
     carry: tuple[int, ...] = ()
     #: The generation `carry` counts in: the snapshot this was built from.
@@ -119,9 +129,11 @@ def build(
     project: Project,
     audio: Callable[[str], Decoded | None],
     previous: Snapshot | None = None,
+    bank: Bank | None = None,
 ) -> Snapshot:
     """The snapshot of `project` as it stands, reading samples through
-    `audio`. On the UI thread only: it allocates freely."""
+    `audio`. With a `bank`, every channel not bypassed is spatial. On the UI
+    thread only: it allocates freely."""
     frames = {media.id: media.frames for media in project.media_pool}
     lanes = []
     for channel in project.channels:
@@ -149,12 +161,29 @@ def build(
         else {}
     )
     targets = np.array(gains(project), dtype=np.float64)
+    positions = np.array(
+        [(c.position.x, c.position.y, c.position.z) for c in project.channels],
+        dtype=np.float64,
+    ).reshape(len(lanes), 3)
+    spatial = tuple(
+        index
+        for index, channel in enumerate(project.channels)
+        if bank is not None and not channel.hrtf_bypass
+    )
+    slot_of = {index: slot for slot, index in enumerate(spatial)}
     return Snapshot(
         generation=previous.generation + 1 if previous is not None else 1,
         lanes=tuple(lanes),
         targets=targets,
         levels=targets.copy(),
         peaks=np.zeros((len(lanes), 2), dtype=np.float64),
+        positions=positions,
+        slots=tuple(slot_of.get(index, -1) for index in range(len(lanes))),
+        space=(
+            Space.build(bank, spatial, positions, project.distance)
+            if bank is not None and spatial
+            else None
+        ),
         carry=tuple(before.get(channel.id, -1) for channel in project.channels),
         based_on=previous.generation if previous is not None else 0,
     )
@@ -169,6 +198,7 @@ def empty() -> Snapshot:
         targets=none,
         levels=none.copy(),
         peaks=np.zeros((0, 2), dtype=np.float64),
+        positions=np.zeros((0, 3), dtype=np.float64),
     )
 
 

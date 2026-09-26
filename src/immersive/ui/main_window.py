@@ -1617,6 +1617,8 @@ class MainWindow(QMainWindow):
     def _hrtf_prepared(self, bank: Bank) -> None:
         self._bank = bank
         self._end_hrtf_activity()
+        if self._feed is not None:
+            self._feed.set_bank(bank)  # heard where each channel is, from now
 
     def _hrtf_refused(self, refused: Refused) -> None:
         self._end_hrtf_activity()

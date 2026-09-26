@@ -61,6 +61,9 @@ class Lookup:
     #: each cell's start: cell `i` is `cells[offsets[i]:offsets[i + 1]]`.
     cells: npt.NDArray[np.int64]
     offsets: npt.NDArray[np.int64]
+    #: Cells along each edge of each cube face: the index's own, carried
+    #: with it, since a query into a table of another size reads past it.
+    resolution: int
     #: The same, as tuples, for the query's plain arithmetic.
     _faces: tuple[tuple[int, int, int], ...]
     _inverses: tuple[tuple[float, ...], ...]
@@ -94,8 +97,9 @@ class Lookup:
         centroids = vertices.sum(axis=1)
         centroids /= np.linalg.norm(centroids, axis=1, keepdims=True)
         tree = cKDTree(centroids)
+        resolution = CELLS
         per_cell: list[npt.NDArray[np.int64]] = []
-        for side, samples in enumerate(_sides()):
+        for side, samples in enumerate(_sides(resolution, SAMPLES)):
             if progress is not None:
                 if progress.cancelled:
                     return None
@@ -104,7 +108,7 @@ class Lookup:
         sizes = np.fromiter((len(cell) for cell in per_cell), dtype=np.int64)
         offsets = np.concatenate([[0], np.cumsum(sizes)]).astype(np.int64)
         return cls.assemble(
-            faces, inverses, neighbours, np.concatenate(per_cell), offsets
+            faces, inverses, neighbours, np.concatenate(per_cell), offsets, resolution
         )
 
     @classmethod
@@ -115,8 +119,11 @@ class Lookup:
         neighbours: npt.NDArray[np.int64],
         cells: npt.NDArray[np.int64],
         offsets: npt.NDArray[np.int64],
+        resolution: int,
     ) -> Lookup:
         """A lookup from its arrays - freshly built, or read from a cache."""
+        if len(offsets) != 6 * resolution * resolution + 1:
+            raise ValueError("the cells do not fill a cube map of that resolution")
         flat = cells.tolist()
         bounds = offsets.tolist()
         return cls(
@@ -125,6 +132,7 @@ class Lookup:
             neighbours=neighbours,
             cells=cells,
             offsets=offsets,
+            resolution=resolution,
             _faces=tuple((int(a), int(b), int(c)) for a, b, c in faces.tolist()),
             _inverses=tuple(tuple(row) for row in inverses.reshape(-1, 9).tolist()),
             _neighbours=tuple(
@@ -162,7 +170,8 @@ class Lookup:
 
     def candidates(self, direction: npt.NDArray[np.float64]) -> tuple[int, ...]:
         """The faces the index offers for `direction`, before any walk."""
-        return self._cells[_cell(*(float(x) for x in direction))]
+        x, y, z = (float(value) for value in direction)
+        return self._cells[_cell(x, y, z, self.resolution)]
 
     @staticmethod
     def blend(
@@ -187,7 +196,7 @@ class Lookup:
         """The face containing `(x, y, z)` and its barycentric coordinates."""
         best = -1
         best_low = -2.0
-        for face in self._cells[_cell(x, y, z)]:
+        for face in self._cells[_cell(x, y, z, self.resolution)]:
             a, b, c = self._coordinates(face, x, y, z)
             low = min(a, b, c)
             if low >= INSIDE:
@@ -217,7 +226,7 @@ class Lookup:
         )
 
 
-def _cell(x: float, y: float, z: float) -> int:
+def _cell(x: float, y: float, z: float, cells: int) -> int:
     """The cube-map cell `(x, y, z)` falls in: its largest component picks
     the cube face and its sign, and the other two, divided by it, the cell."""
     ax, ay, az = abs(x), abs(y), abs(z)
@@ -229,15 +238,15 @@ def _cell(x: float, y: float, z: float) -> int:
         axis, major, u, v = 2, z, x, y
     side = 2 * axis + (0 if major > 0 else 1)
     scale = abs(major)
-    i = min(int((u / scale + 1.0) * 0.5 * CELLS), CELLS - 1)
-    j = min(int((v / scale + 1.0) * 0.5 * CELLS), CELLS - 1)
-    return (side * CELLS + i) * CELLS + j
+    i = min(int((u / scale + 1.0) * 0.5 * cells), cells - 1)
+    j = min(int((v / scale + 1.0) * 0.5 * cells), cells - 1)
+    return (side * cells + i) * cells + j
 
 
-def _sides() -> list[npt.NDArray[np.float64]]:
+def _sides(cells: int, samples: int) -> list[npt.NDArray[np.float64]]:
     """The points sampled in each cell, one cube face at a time, in
-    `_cell`'s order: six arrays of `[CELLS * CELLS, SAMPLES * SAMPLES, 3]`."""
-    grid = (np.arange(CELLS * SAMPLES) + 0.5) / (CELLS * SAMPLES) * 2.0 - 1.0
+    `_cell`'s order: six arrays of `[cells * cells, samples * samples, 3]`."""
+    grid = (np.arange(cells * samples) + 0.5) / (cells * samples) * 2.0 - 1.0
     u, v = np.meshgrid(grid, grid, indexing="ij")
     sides = []
     for axis in range(3):
@@ -247,9 +256,9 @@ def _sides() -> list[npt.NDArray[np.float64]]:
             points[..., (axis + 1) % 3] = u
             points[..., (axis + 2) % 3] = v
             points /= np.linalg.norm(points, axis=-1, keepdims=True)
-            per_cell = points.reshape(CELLS, SAMPLES, CELLS, SAMPLES, 3)
+            per_cell = points.reshape(cells, samples, cells, samples, 3)
             sides.append(
-                per_cell.transpose(0, 2, 1, 3, 4).reshape(CELLS * CELLS, SAMPLES**2, 3)
+                per_cell.transpose(0, 2, 1, 3, 4).reshape(cells * cells, samples**2, 3)
             )
     return sides
 

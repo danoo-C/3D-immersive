@@ -37,7 +37,8 @@ from immersive.core.io.peaks import cache_directory
 from immersive.core.progress import Cancelled, Part, Progress
 
 #: The cache entry's layout. A different number is a miss, never a misread.
-FORMAT: Final = 1
+#: 2: the direction index's resolution is stored with it.
+FORMAT: Final = 2
 
 #: How much of preparing is decomposing, and how much indexing directions.
 DECOMPOSED: Final = 0.8
@@ -150,6 +151,7 @@ def _read(entry: Path, hrirs: HrirSet) -> _Stored | None:
                 np.asarray(stored["neighbours"], dtype=np.int64),
                 np.asarray(stored["cells"], dtype=np.int64),
                 np.asarray(stored["offsets"], dtype=np.int64),
+                int(stored["resolution"]),
             )
             max_itd = float(stored["max_itd"])
     except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
@@ -183,6 +185,7 @@ def _write(
         "neighbours": lookup.neighbours,
         "cells": lookup.cells,
         "offsets": lookup.offsets,
+        "resolution": np.asarray(lookup.resolution, dtype=np.int64),
     }
     temporary: str | None = None
     try:

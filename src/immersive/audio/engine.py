@@ -62,16 +62,21 @@ from immersive.core.model import MIN_LOOP_LENGTH
 #: gesture, so this many only pile up before the stream has first opened.
 RING: Final = 4096
 
-#: What a command is, as the ring's first number. The other three are, for
+#: What a command is, as the ring's first number. The other five are, for
 #: a gain, its snapshot's generation, the channel and the factor; for a
-#: seek, the sample, last; for playing, 1 or 0, last; for the loop, its
+#: seek, the sample, third; for playing, 1 or 0, third; for the loop, its
 #: start, its end, and 1 or 0 for whether it is on; for repeating, the
-#: project's end, first, and 1 or 0, last.
+#: project's end, first, and 1 or 0, third; for a position, its snapshot's
+#: generation, the channel, and x, y and z (D-121).
 GAIN: Final = 0.0
 SEEK: Final = 1.0
 PLAY: Final = 2.0
 LOOP: Final = 3.0
 REPEAT: Final = 4.0
+POSITION: Final = 5.0
+
+#: Numbers a command carries, its kind first. Six since M4, for a position.
+WIDTH: Final = 6
 
 #: The shortest loop the engine will wrap (D-108): so a block is at most
 #: `block // SHORTEST_LOOP + 2` pieces. The model refuses a shorter region.
@@ -112,7 +117,7 @@ class Engine:
         self._repeat_end = 0
         self._repeating = False
         #: kind, then three numbers that mean what the kind says.
-        self._ring = np.zeros((RING, 4), dtype=np.float64)
+        self._ring = np.zeros((RING, WIDTH), dtype=np.float64)
         self._written = 0  # the UI thread's counter
         self._read = 0  # the audio thread's counter
         self._bus = np.zeros((2, block), dtype=np.float32)
@@ -164,6 +169,13 @@ class Engine:
         """Ramp channel `channel` of snapshot `generation` to `gain`, a
         factor. False when the ring is full."""
         return self._send(GAIN, generation, channel, gain)
+
+    def send_position(
+        self, generation: int, channel: int, x: float, y: float, z: float
+    ) -> bool:
+        """Place channel `channel` of snapshot `generation` at `(x, y, z)`,
+        metres, from the next block (D-121). False when the ring is full."""
+        return self._send(POSITION, generation, channel, x, y, z)
 
     def seek(self, sample: int) -> bool:
         """Play the next block from `sample`. False when the ring is full."""
@@ -233,11 +245,13 @@ class Engine:
             for lane, (left, right) in zip(snapshot.lanes, read, strict=True)
         ]
 
-    def _send(self, kind: float, a: float, b: float, c: float) -> bool:
+    def _send(
+        self, kind: float, a: float, b: float, c: float, d: float = 0.0, e: float = 0.0
+    ) -> bool:
         if self._written - self._read >= RING:
             return False
         slot = self._ring[self._written % RING]
-        slot[0], slot[1], slot[2], slot[3] = kind, a, b, c
+        slot[0], slot[1], slot[2], slot[3], slot[4], slot[5] = kind, a, b, c, d, e
         # Published last: the audio thread reads nothing past this count.
         self._written += 1
         return True
@@ -272,12 +286,18 @@ class Engine:
         bus_l, bus_r = self._bus_l, self._bus_r
         bus_l.fill(0)
         bus_r.fill(0)
+        space = snapshot.space
         if self._playing:
             self._mix(snapshot, self._plan())
+            if space is not None:
+                space.render(snapshot.positions, snapshot.peaks, bus_l, bus_r)
         else:
             # Stopped: nothing ramps, so a gain changed meanwhile is in place
-            # when playing starts.
+            # when playing starts. The spatial tail still drains, so a pause
+            # decays rather than cuts and a resume does not replay it.
             np.copyto(snapshot.levels, snapshot.targets)
+            if space is not None:
+                space.drain(bus_l, bus_r)
         self._audition()
 
         self._peak(bus_l, 0)
@@ -331,6 +351,10 @@ class Engine:
         lane_l, lane_r = self._lane_l, self._lane_r
         targets, levels, peaks = snapshot.targets, snapshot.levels, snapshot.peaks
         lanes = snapshot.lanes
+        slots = snapshot.slots
+        space = snapshot.space
+        if space is not None:
+            space.src.fill(0.0)  # a silent spatial channel still has a block
         start = int(self._pieces[0, 0])
         for index in range(len(lanes)):
             target = float(targets[index])
@@ -354,6 +378,14 @@ class Engine:
             elif target != 1.0:
                 np.multiply(lane_l, target, out=lane_l)
                 np.multiply(lane_r, target, out=lane_r)
+            slot = slots[index]
+            if space is not None and slot >= 0:
+                # A mono point (D-16): the space places it, meters it after
+                # its distance, and sums it into the bus after the HRTF.
+                row = space.src[slot]
+                np.add(lane_l, lane_r, out=row)
+                np.multiply(row, 0.5, out=row)
+                continue
             # What this channel adds to the bus, for its meter (D-117).
             self._raise(peaks, index, 0, lane_l)
             self._raise(peaks, index, 1, lane_r)
@@ -418,6 +450,13 @@ class Engine:
         The one before is not freed here: whoever installed it still holds
         it."""
         np.copyto(snapshot.levels, snapshot.targets)
+        # The tail is sound already begun: it carries into the new snapshot
+        # when the two are shaped alike. The filters do not (05): its first
+        # block starts fresh, with no crossfade from a stale one.
+        old, new = self._current.space, snapshot.space
+        if old is not None and new is not None and old.tail.shape == new.tail.shape:
+            np.copyto(new.tail, old.tail)
+        del old, new
         if self._current.generation == snapshot.based_on:
             before = self._current.levels
             levels = snapshot.levels
@@ -443,6 +482,17 @@ class Engine:
                     targets[int(command[2])] = command[3]
             elif kind == SEEK:
                 self._playhead = int(command[3])
+                if snapshot.space is not None:
+                    snapshot.space.fresh = True  # no crossfade from before it
+            elif kind == POSITION:
+                positions = snapshot.positions
+                if command[1] == snapshot.generation and 0 <= command[2] < len(
+                    positions
+                ):
+                    row = int(command[2])
+                    positions[row, 0] = command[3]
+                    positions[row, 1] = command[4]
+                    positions[row, 2] = command[5]
             elif kind == PLAY:
                 self._playing = bool(command[3])
             elif kind == LOOP:

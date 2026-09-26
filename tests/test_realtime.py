@@ -18,6 +18,7 @@ started.
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import tracemalloc
@@ -190,6 +191,67 @@ def run() -> tuple[int, int]:
     return int(counted[:, 1].sum()), int(counted[:, 0].max())
 
 
+def run_spatial() -> tuple[int, int]:
+    """The spatial path (M4): 32 channels, every one moving by a `POSITION`
+    every block - N-1's load - through a synthetic head's bank, with one
+    bypassed channel beside them. The same measure as `run`."""
+    import tempfile
+
+    from immersive.audio.hrtf import lookup
+    from immersive.audio.hrtf.bank import Bank, prepare
+    from immersive.core.model import Position
+    from test_spatial import head
+
+    # The index at test size: `setattr`, since they are `Final` constants.
+    setattr(lookup, "CELLS", 16)  # noqa: B010
+    setattr(lookup, "SAMPLES", 2)  # noqa: B010
+    with tempfile.TemporaryDirectory() as cache:
+        bank = prepare(head(), BLOCK, Path(cache))
+    assert isinstance(bank, Bank)
+
+    source = MediaFile("m-00000001", "/m.wav", "m.wav", 48_000, 2, FRAMES)
+    store = {source.id: sample(2, 3)}
+    channels = [
+        Channel(
+            f"c-{n:08x}",
+            f"S{n}",
+            "#A855F7",
+            hrtf_bypass=n == 32,
+            gain_db=-12.0,
+            position=Position(1.0, 1.0, 0.0),
+            clips=[Clip(f"k-{n:08x}", source.id, n * 100, 0, FRAMES - n * 100)],
+        )
+        for n in range(33)
+    ]
+    project = Project(media_pool=[source], channels=channels)
+    snapshot = build(project, store.get, None, bank)
+    engine = Engine(BLOCK)
+    engine.install(snapshot)
+    engine.set_playing(True)
+    generation = snapshot.generation
+    turns = np.linspace(0.0, 2.0 * np.pi, 33)
+
+    def ui(n: int) -> None:
+        """Every source a little further round, and now and then a seek."""
+        engine.take_peaks()
+        engine.take_channel_peaks()
+        for channel in range(32):
+            angle = float(turns[channel]) + n * 0.07
+            engine.send_position(
+                generation, channel, math.sin(angle), math.cos(angle), 0.3
+            )
+        if n == 50:
+            engine.seek(24_000)
+
+    # Two turns of the cycle before counting, not one: CPython's float
+    # freelist grows to its high-water mark in block 132 - 32 bytes, once
+    # in 800 blocks, never again - and a leak would repeat every turn.
+    blocks = np.zeros((400, 2), dtype=np.int64)
+    measured(engine, blocks, lambda n: ui(n % 100))
+    counted = blocks[200:]
+    return int(counted[:, 1].sum()), int(counted[:, 0].max())
+
+
 def test_process_makes_no_array_and_keeps_nothing() -> None:
     """Measured in an interpreter of its own. `tracemalloc` counts every
     thread's allocations, and a pytest-xdist worker has a thread of its own
@@ -209,5 +271,21 @@ def test_process_makes_no_array_and_keeps_nothing() -> None:
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent))
+    spatial = sys.argv[1:] == ["spatial"]
     tracemalloc.start()
-    print(json.dumps(run()))
+    print(json.dumps(run_spatial() if spatial else run()))
+
+
+def test_the_spatial_path_makes_no_array_and_keeps_nothing() -> None:
+    """32 moving sources through the HRTF, measured as the flat path is."""
+    done = subprocess.run(
+        [sys.executable, str(Path(__file__)), "spatial"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
+    )
+    kept, worst = json.loads(done.stdout)
+    assert kept <= 0, f"200 blocks left {kept} bytes allocated"
+    assert worst < LINE, f"a block raised the peak by {worst} bytes"

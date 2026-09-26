@@ -241,3 +241,55 @@ def test_a_full_ring_sends_the_gains_as_a_snapshot_instead() -> None:
 
     assert len(engine.installed) == installed + 1
     assert engine.installed[-1].targets.tolist() == [0.0]
+
+
+# --------------------------------------------------------------------------- #
+# positions, bypass and the bank (D-121)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def bank() -> object:
+    import tempfile
+    from pathlib import Path
+
+    from immersive.audio.hrtf import lookup
+    from immersive.audio.hrtf.bank import prepare
+    from test_spatial import head
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(lookup, "CELLS", 16)
+    patch.setattr(lookup, "SAMPLES", 2)
+    with tempfile.TemporaryDirectory() as cache:
+        made = prepare(head(), BLOCK, Path(cache))
+    patch.undo()
+    return made
+
+
+def test_a_position_edit_sends_a_command_and_no_snapshot(bank: object) -> None:
+    from immersive.core.model import Position
+
+    document, engine, feed, _ = fed(0.5)
+    feed.set_bank(bank)  # type: ignore[arg-type]
+    installed, sent = len(engine.installed), engine.sent()
+
+    document.push(
+        SetAttribute(document.project.channels[0], "position", Position(2.0, 0.0, 0.0))
+    )
+
+    assert len(engine.installed) == installed and engine.sent() == sent + 1
+    block(engine)
+    np.testing.assert_array_equal(engine.installed[-1].positions[0], [2.0, 0.0, 0.0])
+
+
+def test_the_bank_and_bypass_rebuild_the_snapshot(bank: object) -> None:
+    document, engine, feed, _ = fed(0.5, 0.25)
+    installed = len(engine.installed)
+
+    feed.set_bank(bank)  # type: ignore[arg-type]
+    assert len(engine.installed) == installed + 1
+    assert engine.installed[-1].slots == (0, 1), "both channels heard in space"
+
+    document.push(SetAttribute(document.project.channels[1], "hrtf_bypass", True))
+    assert len(engine.installed) == installed + 2
+    assert engine.installed[-1].slots == (0, -1), "the bypassed one flat"

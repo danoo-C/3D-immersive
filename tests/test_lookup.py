@@ -256,3 +256,32 @@ def test_sadie_ii_d1_located_and_its_itd_continuous() -> None:
         blended = np.zeros(len(path))
         Lookup.blend(field, vertices, weights, blended)
         assert np.abs(np.diff(blended)).max() < 1.0
+
+
+def test_an_index_keeps_its_own_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Built at one size and queried after the constant changed - as a
+    cached index read by a later version would be. It used to read the
+    constant at query time and run past its own table."""
+    from immersive.audio.hrtf import lookup as module
+
+    directions = fibonacci(300)
+    monkeypatch.setattr(module, "CELLS", 16)
+    small = Lookup.build(directions)
+    monkeypatch.undo()
+    assert small.resolution == 16 and module.CELLS == 64
+    assert_contained(directions, small, random_directions(2000))
+
+
+def test_cells_that_do_not_fit_their_resolution_are_refused(
+    sphere: tuple[Directions, Lookup],
+) -> None:
+    _, lookup = sphere
+    with pytest.raises(ValueError, match="resolution"):
+        Lookup.assemble(
+            lookup.faces,
+            lookup.inverses,
+            lookup.neighbours,
+            lookup.cells,
+            lookup.offsets,
+            lookup.resolution + 1,
+        )
