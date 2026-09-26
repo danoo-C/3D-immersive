@@ -355,7 +355,8 @@ def trimmed(project: Project, clip: Clip, edge: Edge, delta: int) -> _Placing:
     `MIN_CLIP_LENGTH` - or than it already is, if a file made it shorter.
 
     Moving the start moves the offset with it, so what is left plays the
-    samples it played. A fade stays with its edge, cut to fit.
+    samples it played. A fade stays with its edge, cut to fit - the moved
+    edge's first (D-101).
     """
     channel = _home(project, clip)
     index = _index_of(channel.clips, clip)
@@ -371,24 +372,36 @@ def trimmed(project: Project, clip: Clip, edge: Edge, delta: int) -> _Placing:
         if limit is not None:
             longest = min(longest, limit - clip.start)
         length = min(max(clip.length + delta, shortest), longest)
-        return _piece_to(clip, clip.start, length)
+        return _piece_to(clip, clip.start, length, Edge.END)
     floor = max(-clip.offset, -clip.start)
     if index > 0:
         floor = max(floor, channel.clips[index - 1].end - clip.start)
     delta = min(max(delta, floor), clip.length - shortest)
-    return _piece_to(clip, clip.start + delta, clip.length - delta)
+    return _piece_to(clip, clip.start + delta, clip.length - delta, Edge.START)
 
 
-def _piece_to(of: Clip, start: int, length: int) -> _Placing:
+def _piece_to(of: Clip, start: int, length: int, moved: Edge) -> _Placing:
     """`of` running from `start` for `length`, its offset following its start
-    and its fades kept on their edges, cut to fit."""
-    return (
-        start,
-        of.offset + (start - of.start),
-        length,
-        replace(of.fade_in, length=min(of.fade_in.length, length)),
-        replace(of.fade_out, length=min(of.fade_out.length, length)),
-    )
+    and its fades kept on their edges, cut to fit together (D-101): the fade
+    on the edge that did not move keeps what it can, and the moved edge's
+    has what is left."""
+    fade_in, fade_out = of.fade_in, of.fade_out
+    if moved is Edge.END:
+        fade_in = replace(fade_in, length=min(fade_in.length, length))
+        fade_out = replace(
+            fade_out, length=min(fade_out.length, length - fade_in.length)
+        )
+    else:
+        fade_out = replace(fade_out, length=min(fade_out.length, length))
+        fade_in = replace(fade_in, length=min(fade_in.length, length - fade_out.length))
+    return (start, of.offset + (start - of.start), length, fade_in, fade_out)
+
+
+def fade_room(clip: Clip, edge: Edge) -> int:
+    """How long the fade on `clip`'s `edge` may be: as long as the clip,
+    less the other fade (D-101)."""
+    other = clip.fade_out if edge is Edge.START else clip.fade_in
+    return max(clip.length - other.length, 0)
 
 
 class TrimClips(_Rearrangement):
@@ -407,6 +420,33 @@ class TrimClips(_Rearrangement):
         return [
             (clip, after[0], after[1], after[2]) for clip, _, after in self._placings
         ]
+
+
+class SetLengths(_Rearrangement):
+    """Every one of `clips` made `length` long by moving its end, each as
+    far as it can (D-98, D-102): no further than its sample or its
+    neighbour, and no shorter than `MIN_CLIP_LENGTH`. One edit."""
+
+    def __init__(self, project: Project, clips: Sequence[Clip], length: int) -> None:
+        super().__init__()
+        for clip in clips:
+            self._placing(clip, trimmed(project, clip, Edge.END, length - clip.length))
+
+
+class SlipClips(_Rearrangement):
+    """Every one of `clips` playing its sample from `offset`, each as near
+    as its sample allows (D-102): the clip stays where it is and as long as
+    it is, and plays other samples. Its fades stay as they are. One edit."""
+
+    def __init__(self, project: Project, clips: Sequence[Clip], offset: int) -> None:
+        super().__init__()
+        frames = {media.id: media.frames for media in project.media_pool}
+        for clip in clips:
+            latest = frames.get(clip.media_id, clip.offset + clip.length) - clip.length
+            slipped = min(max(offset, 0), max(latest, 0))
+            self._placing(
+                clip, (clip.start, slipped, clip.length, clip.fade_in, clip.fade_out)
+            )
 
 
 class SplitClips(_Rearrangement):

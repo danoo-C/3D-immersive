@@ -420,6 +420,19 @@ def validate(project: Project) -> list[Problem]:
                 found.append(Problem(clip_where, f"length is {clip.length}"))
             if clip.start < 0:
                 found.append(Problem(clip_where, f"start is {clip.start}"))
+            # D-101: a gain curve rising and falling over the same samples
+            # has no one meaning, so the two fades may meet but not cross.
+            fades = (clip.fade_in.length, clip.fade_out.length)
+            if min(fades) < 0:
+                found.append(Problem(clip_where, f"fade lengths are {fades}"))
+            elif sum(fades) > clip.length:
+                found.append(
+                    Problem(
+                        clip_where,
+                        f"fades of {fades[0]} and {fades[1]} overlap in a clip "
+                        f"{clip.length} long",
+                    )
+                )
 
             if previous_end is not None and clip.start < previous_end:
                 found.append(

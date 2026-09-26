@@ -304,6 +304,30 @@ def test_an_unknown_automation_key_is_reported() -> None:
     assert "unknown automation key" in _first_problem(project)
 
 
+def test_fades_that_overlap_are_reported() -> None:
+    """D-101: they may meet, and may not cross."""
+    project = _project()
+    clip = project.channels[0].clips[0]
+    clip.fade_in, clip.fade_out = Fade(60), Fade(40)
+    assert validate(project) == []
+
+    clip.fade_out = Fade(41)
+    message = _first_problem(project)
+    assert "clips[0]" in message and "overlap" in message
+
+
+def test_a_fade_longer_than_its_clip_is_reported() -> None:
+    project = _project()
+    project.channels[0].clips[0].fade_in = Fade(101)
+    assert "overlap" in _first_problem(project)
+
+
+def test_a_negative_fade_is_reported() -> None:
+    project = _project()
+    project.channels[0].clips[0].fade_out = Fade(-1)
+    assert "fade lengths" in _first_problem(project)
+
+
 def test_pan_outside_its_range_is_reported() -> None:
     project = _project()
     project.channels[0].pan = 1.5

@@ -29,8 +29,11 @@ from immersive.core.edits import (
     RemoveClip,
     RemoveClips,
     SetAttribute,
+    SetLengths,
+    SlipClips,
     SplitClips,
     TrimClips,
+    fade_room,
 )
 from immersive.core.model import (
     MIN_CLIP_LENGTH,
@@ -132,6 +135,8 @@ EDITS: dict[str, Build] = {
     "split a clip": lambda p: SplitClips(p, [p.channels[0].clips[0]], 12_000),
     "duplicate clips": lambda p: DuplicateClips(p, p.channels[0].clips),
     "remove clips": lambda p: RemoveClips(p, p.channels[0].clips),
+    "set clips' length": lambda p: SetLengths(p, p.channels[0].clips, 30_000),
+    "slip clips": lambda p: SlipClips(p, p.channels[0].clips, 5_000),
     "paste clips onto an empty lane": lambda p: pasting(
         p, p.channels[0].clips, 1, 10_000
     ),
@@ -714,12 +719,136 @@ def test_several_clips_trim_each_as_far_as_it_can() -> None:
 
 
 def test_a_trim_cuts_a_fade_to_fit_and_keeps_it_on_its_edge() -> None:
-    clip = Clip(
-        "k-00000001", LONG, 0, 0, 10_000, fade_in=Fade(4_000), fade_out=Fade(6_000)
-    )
+    clip = Clip("k-00000001", LONG, 0, 0, 10_000, fade_out=Fade(6_000))
     project = lanes([clip])
     TrimClips(project, [clip], Edge.END, -7_000).do()
-    assert (clip.fade_in.length, clip.fade_out.length) == (3_000, 3_000)
+    assert (clip.fade_in.length, clip.fade_out.length) == (0, 3_000)
+
+
+# --------------------------------------------------------------------------- #
+# fades that fit (D-101)
+# --------------------------------------------------------------------------- #
+
+
+def faded(fade_in: int, fade_out: int, length: int = 10_000) -> Clip:
+    return Clip(
+        "k-00000001",
+        LONG,
+        100_000,
+        50_000,
+        length,
+        fade_in=Fade(fade_in, FadeShape.EQUAL_POWER),
+        fade_out=Fade(fade_out),
+    )
+
+
+def fades(clip: Clip) -> tuple[int, int]:
+    return clip.fade_in.length, clip.fade_out.length
+
+
+@pytest.mark.parametrize(
+    ("edge", "delta", "expected"),
+    [
+        (Edge.END, -3_000, (4_000, 3_000)),  # the moved edge's gives way
+        (Edge.END, -5_000, (4_000, 1_000)),
+        (Edge.END, -7_000, (3_000, 0)),  # and the other only when it must
+        (Edge.START, 3_000, (1_000, 6_000)),
+        (Edge.START, 5_000, (0, 5_000)),
+        (Edge.END, -1_000, (4_000, 5_000)),  # meeting is allowed
+        (Edge.END, 5_000, (4_000, 6_000)),  # growing changes neither
+    ],
+)
+def test_a_trim_fits_both_fades_the_moved_edges_giving_way_first(
+    edge: Edge, delta: int, expected: tuple[int, int]
+) -> None:
+    clip = faded(4_000, 6_000)
+    project = lanes([clip])
+
+    command = TrimClips(project, [clip], edge, delta)
+    command.do()
+
+    assert fades(clip) == expected
+    assert clip.fade_in.shape is FadeShape.EQUAL_POWER, "the shape stays"
+    assert validate(project) == []
+    command.undo()
+    assert fades(clip) == (4_000, 6_000)
+
+
+def test_a_split_and_a_drop_leave_fades_that_fit() -> None:
+    clip = faded(4_000, 5_000)
+    project = lanes([clip])
+    SplitClips(project, [clip], 102_000).do()
+    DropClips(project, project.channels[0], [at(107_000, 500, "k-000000d1")]).do()
+    assert validate(project) == []
+    assert [fades(c) for c in project.channels[0].clips] == [
+        (2_000, 0),
+        (0, 0),
+        (0, 0),
+        (0, 2_500),
+    ]
+
+
+@pytest.mark.parametrize(("edge", "room"), [(Edge.START, 7_000), (Edge.END, 6_000)])
+def test_a_fade_has_the_room_the_other_leaves(edge: Edge, room: int) -> None:
+    assert fade_room(faded(4_000, 3_000), edge) == room
+
+
+# --------------------------------------------------------------------------- #
+# lengths and slips (D-102)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_length_is_set_on_each_clip_as_far_as_it_can_go() -> None:
+    short = MediaFile("m-00000003", "s.wav", "s.wav", SAMPLE_RATE, 1, 30_000)
+    free = at(0, 10_000, "k-00000001")
+    blocked = at(0, 10_000, "k-00000002")
+    neighbour = at(15_000, 5_000, "k-00000003")
+    sampled = Clip("k-00000004", short.id, 0, 25_000, 2_000)
+    project = lanes([free], [blocked, neighbour], [sampled])
+    project.media_pool.append(short)
+    before = copy.deepcopy(project)
+
+    command = SetLengths(project, [free, blocked, sampled], 20_000)
+    command.do()
+
+    assert [c.length for c in (free, blocked, sampled)] == [20_000, 15_000, 5_000]
+    assert (free.start, free.offset) == (0, 0), "the end moves, not the start"
+    assert validate(project) == []
+    command.undo()
+    assert project == before
+
+
+def test_a_length_stops_at_the_shortest_a_clip_may_be() -> None:
+    clip = at(0, 10_000, "k-00000001")
+    project = lanes([clip])
+    SetLengths(project, [clip], 3).do()
+    assert clip.length == MIN_CLIP_LENGTH
+
+
+def test_a_slip_plays_other_samples_in_the_same_place() -> None:
+    short = MediaFile("m-00000003", "s.wav", "s.wav", SAMPLE_RATE, 1, 30_000)
+    a = Clip("k-00000001", short.id, 5_000, 1_000, 10_000, fade_in=Fade(300))
+    b = Clip("k-00000002", short.id, 5_000, 0, 25_000)
+    project = lanes([a], [b])
+    project.media_pool.append(short)
+    before = copy.deepcopy(project)
+
+    command = SlipClips(project, [a, b], 12_000)
+    command.do()
+
+    assert (a.start, a.offset, a.length) == (5_000, 12_000, 10_000)
+    assert (b.start, b.offset, b.length) == (5_000, 5_000, 25_000), "its sample's end"
+    assert a.fade_in == Fade(300)
+    assert validate(project) == []
+    command.undo()
+    assert project == before
+
+
+def test_a_slip_stops_at_the_sample_start() -> None:
+    clip = at(5_000, 10_000, "k-00000001", offset=4_000)
+    project = lanes([clip])
+    SlipClips(project, [clip], -3_000).do()
+    assert (clip.start, clip.offset) == (5_000, 0)
 
 
 # --------------------------------------------------------------------------- #
@@ -848,7 +977,19 @@ def test_any_run_of_edits_stays_valid_and_undoes_to_where_it_began(seed: int) ->
         if not clips:
             break
         chosen = rng.sample(clips, rng.randint(1, min(3, len(clips))))
-        verb = rng.choice(["move", "trim", "split", "duplicate", "paste", "remove"])
+        verb = rng.choice(
+            [
+                "move",
+                "trim",
+                "split",
+                "duplicate",
+                "paste",
+                "length",
+                "slip",
+                "fade",
+                "remove",
+            ]
+        )
         if verb == "move":
             command: Command = MoveClips(
                 project, chosen, rng.randint(-60_000, 60_000), rng.randint(-2, 2)
@@ -861,6 +1002,21 @@ def test_any_run_of_edits_stays_valid_and_undoes_to_where_it_began(seed: int) ->
             command = SplitClips(project, chosen, rng.randint(0, 400_000))
         elif verb == "duplicate":
             command = DuplicateClips(project, chosen)
+        elif verb == "length":
+            command = SetLengths(project, chosen, rng.randint(0, 60_000))
+        elif verb == "slip":
+            command = SlipClips(project, chosen, rng.randint(-1_000, 40_000))
+        elif verb == "fade":
+            edge = rng.choice(list(Edge))
+            name = "fade_in" if edge is Edge.START else "fade_out"
+            command = Compound(
+                [
+                    SetAttribute(
+                        clip, name, Fade(rng.randint(0, fade_room(clip, edge)))
+                    )
+                    for clip in chosen
+                ]
+            )
         elif verb == "paste":
             if len(project.channels) > 5:
                 continue

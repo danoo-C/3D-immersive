@@ -217,6 +217,13 @@ another's time is a collision to resolve, not a reordering.
   made in the same edit.
 - A fade stays on its edge through a trim or a split, cut to fit what is
   left, and an edge a split or a drop made has none of its own.
+- **Two fades never overlap** (D-101): a clip's fade-in and fade-out
+  together are no longer than the clip, and may meet. A trim that leaves
+  too little room shortens the fade on the edge it moves first, and the
+  other only if that is not enough.
+- **A slip** changes which samples a clip plays and nothing else: its
+  offset moves within its sample and stops at the sample's ends, while its
+  start, length and fades stay (D-102).
 - `offset + length` must not exceed `MediaFile.frames`.
 - A channel with no keyframes for an axis uses its static `position` component.
   With one keyframe, that value holds for the whole timeline.
