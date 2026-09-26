@@ -46,6 +46,10 @@ CLIP_PREFIX = "k"
 #: 32-sample fades end to end, so the two never overlap (D-98).
 MIN_CLIP_LENGTH = 64
 
+#: The shortest loop region (D-108): the engine wraps a block at most
+#: `block // MIN_LOOP_LENGTH + 1` times, and needs that bounded.
+MIN_LOOP_LENGTH = 64
+
 _ID_PATTERN = re.compile(r"^[mck]-[0-9a-f]{8}$")
 _HEX_COLOUR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _DEFAULT_RNG = random.Random()
@@ -123,6 +127,19 @@ class Distance:
     rolloff: float = 1.0
     min_distance: float = 0.2
     ref_distance: float = 1.0
+
+
+@dataclass
+class LoopRegion:
+    """The stretch of the timeline the transport loops over while looping
+    is on (D-108): from `start`, up to but not including `end`."""
+
+    start: int
+    end: int
+
+    @property
+    def length(self) -> int:
+        return self.end - self.start
 
 
 @dataclass
@@ -213,6 +230,9 @@ class Project:
     hrtf: HrtfRef = field(default_factory=HrtfRef)
     distance: Distance = field(default_factory=Distance)
     master: Master = field(default_factory=Master)
+    #: Where the transport loops, or nowhere. Saved with the project; whether
+    #: it is looping is the transport's, and off when a project opens (D-108).
+    loop: LoopRegion | None = None
     media_pool: list[MediaFile] = field(default_factory=list)
     channels: list[Channel] = field(default_factory=list)
 
@@ -371,6 +391,15 @@ def validate(project: Project) -> list[Problem]:
         found.append(Problem("project", f"bpm is {project.bpm}"))
     if any(part <= 0 for part in project.time_signature):
         found.append(Problem("project", f"time_signature is {project.time_signature}"))
+    loop = project.loop
+    if loop is not None and (loop.start < 0 or loop.length < MIN_LOOP_LENGTH):
+        found.append(
+            Problem(
+                "project.loop",
+                f"runs from {loop.start} to {loop.end}; a loop starts at 0 or "
+                f"later and is at least {MIN_LOOP_LENGTH} samples long",
+            )
+        )
 
     seen: dict[str, str] = {}
 

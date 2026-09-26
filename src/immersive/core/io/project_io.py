@@ -44,6 +44,7 @@ from immersive.core.model import (
     Fade,
     FadeShape,
     HrtfRef,
+    LoopRegion,
     Master,
     MediaFile,
     Position,
@@ -125,6 +126,10 @@ def _snap(snap: SnapSetting) -> dict[str, Any]:
         "division": snap.division.value,
         "triplet": snap.triplet,
     }
+
+
+def _loop(loop: LoopRegion) -> dict[str, Any]:
+    return {"start": loop.start, "end": loop.end}
 
 
 def _hrtf(hrtf: HrtfRef) -> dict[str, Any]:
@@ -248,6 +253,7 @@ def _document(project: Project, project_directory: Path) -> dict[str, Any]:
         "hrtf": _hrtf(project.hrtf),
         "distance": _distance(project.distance),
         "master": _master(project.master),
+        "loop": None if project.loop is None else _loop(project.loop),
         "media_pool": [
             _media(media, project_directory) for media in project.media_pool
         ],
@@ -635,6 +641,18 @@ def _read_distance(reading: _Reading, node: dict[str, Any], where: str) -> Dista
     )
 
 
+def _read_loop(reading: _Reading, document: dict[str, Any]) -> LoopRegion | None:
+    """The loop region, or none: null and absent both mean there is none,
+    and a file from before loop regions existed has neither (D-108)."""
+    if document.get("loop") is None:
+        return None
+    node = reading.mapping(document, "loop", "project")
+    return LoopRegion(
+        start=reading.integer(node, "start", "project.loop", 0, required=True),
+        end=reading.integer(node, "end", "project.loop", 0, required=True),
+    )
+
+
 def _read_master(reading: _Reading, node: dict[str, Any], where: str) -> Master:
     return Master(
         gain_db=reading.number(node, "gain_db", where, 0.0),
@@ -836,6 +854,7 @@ def _read_project(
         master=_read_master(
             reading, reading.mapping(document, "master", "project"), "project.master"
         ),
+        loop=_read_loop(reading, document),
         media_pool=[
             _read_media(reading, media, at, project_directory)
             for media, at in reading.objects(document, "media_pool", "")

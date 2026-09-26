@@ -7,20 +7,25 @@ the headers follow them up and down; the lanes scroll both ways:
     corner   | ruler
     headers  | lanes
 
-It keeps the playhead until phase 9's transport does, and tells both
-widgets when it moves. It does not keep the time axis: the window does, and
-hands it in, because the curve editor at M6 observes the same one and
-neither panel may own it (D-94).
+It shows the playhead and tells both widgets when it moves; while playing,
+the window moves it from the engine at every tick. What a person does to it
+in the ruler - a click or a drag - it passes on as `sought`, for the window
+to seek the engine there. A loop region drawn in the ruler is one edit to
+the project here, and `loop_drawn` says so, for the transport to start
+looping (D-108). It does not keep the time axis: the window does, and hands
+it in, because the curve editor at M6 observes the same one and neither
+panel may own it (D-94).
 """
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
 from immersive.core.document import Document
-from immersive.core.edits import AddChannel
+from immersive.core.edits import AddChannel, SetAttribute
 from immersive.core.media_store import MediaStore
-from immersive.core.model import new_channel
+from immersive.core.model import LoopRegion, new_channel
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
 from immersive.ui.time_axis import TimeAxis
@@ -45,7 +50,13 @@ def extent_for(length: int) -> int:
 
 
 class TimelinePanel(Panel):
-    """Channels, clips, ruler and playhead - the ruler and the grid so far."""
+    """Channels, clips, ruler and playhead."""
+
+    #: The playhead put somewhere by a person, clicking or dragging in the
+    #: ruler: a sample, as `object` for the 32-bit reason the ruler gives.
+    sought = Signal(object)
+    #: A loop region was drawn, and is now the project's.
+    loop_drawn = Signal()
 
     def __init__(
         self,
@@ -85,7 +96,9 @@ class TimelinePanel(Panel):
         grid.setColumnStretch(1, 1)
         self.body().addWidget(cells, 1)
 
-        self.ruler.clicked.connect(self.set_playhead)
+        self.ruler.clicked.connect(self._sought)
+        self.ruler.dragged.connect(self._sought)
+        self.ruler.looped.connect(self._draw_loop)
         document.observe(self._project_changed)
         self._project_changed()
         self.retheme()
@@ -98,9 +111,26 @@ class TimelinePanel(Panel):
         return self._playhead
 
     def set_playhead(self, sample: int) -> None:
+        """Show the playhead at `sample`. Seeks nothing."""
         self._playhead = max(sample, 0)
         self.ruler.set_playhead(self._playhead)
         self.view.set_playhead(self._playhead)
+
+    def set_looping(self, on: bool) -> None:
+        """Whether the loop region is drawn as looping."""
+        self.ruler.set_looping(on)
+        self.view.set_looping(on)
+
+    def _sought(self, sample: int) -> None:
+        self.set_playhead(sample)
+        self.sought.emit(self._playhead)
+
+    def _draw_loop(self, start: int, end: int) -> None:
+        project = self._document.project
+        region = LoopRegion(start, end)
+        if region != project.loop:
+            self._document.push(SetAttribute(project, "loop", region))
+        self.loop_drawn.emit()
 
     def _project_changed(self) -> None:
         """The view and the ruler read the tempo when they paint, and repaint

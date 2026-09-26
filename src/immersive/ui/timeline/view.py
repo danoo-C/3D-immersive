@@ -81,6 +81,10 @@ DRAG_THRESHOLD = 4
 #: How much of its outline's colour the rubber band is filled with.
 BAND_FILL = 0.12
 
+#: How much of `loop.region` a looping region is laid behind the lanes in:
+#: enough to see where the loop is, not enough to compete with the clips.
+LOOP_FILL = 0.08
+
 
 @dataclass
 class _Drag:
@@ -146,6 +150,7 @@ class TimelineView(QGraphicsView):
         #: scrollbar's own signal does not write it back.
         self._syncing = False
         self._playhead = 0
+        self._looping = False
         #: Where a middle-button pan began, and the axis offset and vertical
         #: scroll it began from; `None` when no pan is under way.
         self._pan: tuple[QPointF, int, int] | None = None
@@ -170,6 +175,11 @@ class TimelineView(QGraphicsView):
     def set_playhead(self, sample: int) -> None:
         """Where to draw the playhead. The panel decides where it is."""
         self._playhead = sample
+        self.viewport().update()
+
+    def set_looping(self, on: bool) -> None:
+        """Whether the loop region is laid behind the lanes."""
+        self._looping = on
         self.viewport().update()
 
     def retheme(self) -> None:
@@ -699,6 +709,15 @@ class TimelineView(QGraphicsView):
             x = round(line.sample / scale)
             painter.setPen(pens[line.level])
             painter.drawLine(x, top, x, bottom)
+
+        # The loop region, faintly, while looping: where playback will go round.
+        loop = self._document.project.loop
+        if self._looping and loop is not None:
+            band = QColor(theme.group_color("timeline", "loop.region"))
+            band.setAlphaF(LOOP_FILL)
+            painter.fillRect(
+                QRectF(loop.start / scale, top, loop.length / scale, bottom - top), band
+            )
 
         # The line under each lane, over the grid, so the lanes read as rows.
         painter.setPen(QColor(theme.group_color("timeline", "separator")))

@@ -97,6 +97,7 @@ Project
 ├── hrtf             HrtfRef
 ├── distance         { rolloff, min_distance, ref_distance }
 ├── master           { gain_db, limiter_on }
+├── loop             { start, end } or null  where the transport loops (D-108)
 ├── media_pool       [MediaFile]
 └── channels         [Channel]              ordered, top to bottom
 
@@ -311,6 +312,7 @@ git-friendliness D-13 was for. The filesystem already knows.
   "hrtf": { "kind": "builtin", "id": "sadie-d1" },
   "distance": { "rolloff": 1.0, "min_distance": 0.2, "ref_distance": 1.0 },
   "master": { "gain_db": 0.0, "limiter_on": true },
+  "loop": { "start": 0, "end": 384000 },
   "media_pool": [
     {
       "id": "m-3f2a91c7", "path": "samples/kick.wav", "name": "kick.wav",

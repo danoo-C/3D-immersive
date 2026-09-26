@@ -187,3 +187,22 @@ def _nearest(edges: Sequence[int], sample: int) -> int | None:
     if not around:
         return None
     return min(around, key=lambda edge: (abs(edge - sample), -edge))
+
+
+def snapped_point(
+    project: Project, sample: int, edges: Sequence[int], *, exact: bool = False
+) -> int:
+    """Where a press in the ruler lands (D-109): on the grid or a clip's
+    edge, nearest wins, by the project's own setting - the ruler belongs to
+    no channel - or exactly under the pointer with `Alt`."""
+    setting = project.snap
+    if exact or not setting.enabled:
+        return sample
+    return snap(
+        sample,
+        bpm=project.bpm,
+        time_signature=project.time_signature,
+        division=setting.division,
+        triplet=setting.triplet,
+        edges=edges,
+    )

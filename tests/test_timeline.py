@@ -247,16 +247,22 @@ def paneled(scale: float = SCALE) -> TimelinePanel:
 
 
 def click(panel: TimelinePanel, x: float) -> None:
+    """A press and a release in the same place: a seek (D-109). A press
+    that moved would draw a loop region instead."""
     point = QPointF(x, 5)
-    event = QMouseEvent(
-        QMouseEvent.Type.MouseButtonPress,
-        point,
-        panel.ruler.mapToGlobal(point),
-        Qt.MouseButton.LeftButton,
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    QApplication.sendEvent(panel.ruler, event)
+    for kind, held in (
+        (QMouseEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+        (QMouseEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        event = QMouseEvent(
+            kind,
+            point,
+            panel.ruler.mapToGlobal(point),
+            Qt.MouseButton.LeftButton,
+            held,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(panel.ruler, event)
 
 
 def column(image: QImage, x: int) -> set[str]:

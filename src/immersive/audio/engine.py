@@ -54,6 +54,7 @@ import numpy.typing as npt
 from immersive.audio.device import DEFAULT_BLOCK
 from immersive.audio.dsp import ramp_steps
 from immersive.audio.scheduler import Lane, Snapshot, empty, fill
+from immersive.core.model import MIN_LOOP_LENGTH
 
 #: How many commands can wait between two blocks. A gain is sent once per
 #: gesture, so this many only pile up before the stream has first opened.
@@ -69,8 +70,8 @@ PLAY: Final = 2.0
 LOOP: Final = 3.0
 
 #: The shortest loop the engine will wrap (D-108): so a block is at most
-#: `block // SHORTEST_LOOP + 2` pieces.
-SHORTEST_LOOP: Final = 64
+#: `block // SHORTEST_LOOP + 2` pieces. The model refuses a shorter region.
+SHORTEST_LOOP: Final = MIN_LOOP_LENGTH
 
 
 class Voice:
