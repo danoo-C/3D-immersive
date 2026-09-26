@@ -12,8 +12,8 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from immersive import __version__
-from immersive.audio.audition import Audition
 from immersive.audio.device import load_backend, settle
+from immersive.audio.player import Player
 from immersive.ui import theme, theme_menu
 from immersive.ui.main_window import MainWindow
 from immersive.ui.notices import Severity
@@ -51,7 +51,7 @@ def run(
     # The audio stack is looked at on a real launch too, and only here: a
     # window built by a test must not go looking for a sound card.
     backend = load_backend()
-    audition: Audition | None = None
+    player: Player | None = None
     if isinstance(backend, str):
         unavailable, problems = backend, [backend]
     else:
@@ -59,9 +59,9 @@ def run(
         problems = settled.problems
         unavailable = "" if settled.usable else problems[-1]
         if settled.usable:
-            audition = Audition(backend, settled.output)
+            player = Player(backend, settled.output)
 
-    window = MainWindow(audition=audition, unavailable=unavailable)
+    window = MainWindow(player=player, unavailable=unavailable)
     for problem in problems:
         window.notices().add(Severity.WARN, problem)
     window.show()

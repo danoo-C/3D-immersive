@@ -159,13 +159,19 @@ def launched(
     seen: dict[str, Any] = {}
 
     def look() -> None:
-        for widget in QApplication.topLevelWidgets():
-            if isinstance(widget, MainWindow):
-                seen["notices"] = [n.message for n in widget.notices().newest_first()]
-                seen["audition"] = widget._audition
-        instance = QApplication.instance()
-        assert instance is not None
-        instance.quit()
+        # Quits whatever happens: an exception here, inside the event loop,
+        # would otherwise leave `run` waiting for ever.
+        try:
+            for widget in QApplication.topLevelWidgets():
+                if isinstance(widget, MainWindow):
+                    seen["notices"] = [
+                        n.message for n in widget.notices().newest_first()
+                    ]
+                    seen["player"] = widget._player
+        finally:
+            instance = QApplication.instance()
+            assert instance is not None
+            instance.quit()
 
     real_build = app.build_application
 
@@ -187,7 +193,7 @@ def test_a_launch_reports_every_flag_it_could_not_honour(
     seen = launched(monkeypatch, Backend(), device="Nowhere", block="64")
 
     assert seen["exit"] == 0
-    assert seen["audition"] is not None, "and can still be heard, on the default"
+    assert seen["player"] is not None, "and can still be heard, on the default"
     assert sorted(seen["notices"]) == sorted(
         [
             "--block 64 is outside 256-2048; using 512",
@@ -206,5 +212,5 @@ def test_a_launch_with_no_audio_stack_starts_and_says_what_to_install(
     seen = launched(monkeypatch, reason)
 
     assert seen["exit"] == 0
-    assert seen["audition"] is None
+    assert seen["player"] is None
     assert seen["notices"] == [reason]

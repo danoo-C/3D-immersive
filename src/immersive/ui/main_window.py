@@ -12,7 +12,7 @@ from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from immersive import __version__
-from immersive.audio.audition import Audition
+from immersive.audio.player import Player
 from immersive.core.commands import Compound
 from immersive.core.document import Document
 from immersive.core.edits import (
@@ -73,6 +73,10 @@ from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.placeholder import Placeholder
 
 WINDOW_TITLE = "3d immersive"
+
+#: How often the window looks at the audio thread: fast enough for a
+#: moving playhead to look smooth, slow enough to cost nothing.
+TICK_HZ = 30
 
 #: What the signature chip offers. Anything else is typed in the pane.
 COMMON_SIGNATURES = ((2, 4), (3, 4), (4, 4), (5, 4), (6, 8), (7, 8), (12, 8))
@@ -162,23 +166,21 @@ def _menu_is_open(bar: QMenuBar) -> bool:
 
 
 class MainWindow(QMainWindow):
-    #: A problem reported from PortAudio's thread, posted on the UI thread.
-    #: Emitting a signal is the one thing that thread may do here.
-    _audio_problem = Signal(str)
-
-    def __init__(self, audition: Audition | None = None, unavailable: str = "") -> None:
+    def __init__(self, player: Player | None = None, unavailable: str = "") -> None:
         super().__init__()
-        #: How samples are heard (F-8), or `None` with the reason in
-        #: `unavailable`. A window built by a test has neither, and hears
-        #: nothing: only a real launch goes looking for a sound card.
-        self._audition = audition
+        #: The one output stream and the engine behind it (D-107), or `None`
+        #: with the reason in `unavailable`. A window built by a test has
+        #: neither, and hears nothing: only a real launch goes looking for a
+        #: sound card.
+        self._player = player
         self._unavailable = unavailable
         #: Everything this session has reported (F-56, D-65). Built before
         #: the status bar, which draws it.
         self._notices = NoticeLog()
-        self._audio_problem.connect(self._report_audio_problem)
-        if audition is not None:
-            audition.report = self._audio_problem.emit
+        if player is not None:
+            # The player reports on this thread only: a device lost on
+            # PortAudio's is found by `poll`, from the tick below.
+            player.report = self._report_audio_problem
         #: The project that is open (D-85). Every edit goes through it, and
         #: the window reads its state back after each one rather than keeping
         #: a second copy that could disagree.
@@ -219,6 +221,13 @@ class MainWindow(QMainWindow):
         self._document.selection.observe(self._selection_changed)
         self._document_changed()
         self._selection_changed()
+        #: The window's look at the audio thread, TICK_HZ times a second:
+        #: where the playhead is, and whether the device is still there.
+        self._ticker = QTimer(self)
+        self._ticker.setInterval(1000 // TICK_HZ)
+        self._ticker.timeout.connect(self.tick)
+        if player is not None:
+            self._ticker.start()
         # Last, because it may report - and the notice centre it reports to
         # is built by _build_statusbar.
         self.restore_theme()
@@ -518,7 +527,7 @@ class MainWindow(QMainWindow):
         self._pool = MediaPool(self._document, self._store, self.audition_media)
         self._pool.set_hearing(
             "Double-click to hear it"
-            if self._audition is not None
+            if self._player is not None
             else f"Cannot be heard: {self._unavailable or 'no audio output'}"
         )
         left.addWidget(self._pool)
@@ -526,7 +535,7 @@ class MainWindow(QMainWindow):
             self._document,
             unit=lambda: self._timeline.unit(),
             peaks=self._store.peaks,
-            audition=self.audition_media if self._audition is not None else None,
+            audition=self.audition_media if self._player is not None else None,
             unavailable=self._unavailable,
         )
         left.addWidget(self._parameters)
@@ -679,10 +688,15 @@ class MainWindow(QMainWindow):
     def audition_media(self, media_id: str) -> bool:
         """Play a sample straight to the output, replacing any other (F-8)."""
         audio = self._store.audio(media_id)
-        if self._audition is None or audio is None:
+        if self._player is None or audio is None:
             return False
-        self._audition.play(audio.audio)
-        return True
+        return self._player.audition(audio.audio)
+
+    def tick(self) -> None:
+        """What the timer does: the player's device looked at from this
+        thread. A test calls it directly rather than waiting for the timer."""
+        if self._player is not None:
+            self._player.poll()
 
     def _report_audio_problem(self, message: str) -> None:
         self._notices.add(Severity.WARN, message)
@@ -830,8 +844,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         """Quit asks, like New and Open, and Cancel keeps the window."""
         if self._may_discard():
-            if self._audition is not None:
-                self._audition.close()
+            if self._player is not None:
+                self._player.close()
             event.accept()
         else:
             event.ignore()
