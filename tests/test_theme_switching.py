@@ -566,3 +566,21 @@ def test_the_info_box_cancel_is_rendered_again_on_a_switch(
     before = cancel.icon().cacheKey()
     window.apply_theme(loud())
     assert cancel.icon().cacheKey() != before
+
+
+def test_the_meters_paint_in_the_new_theme(window: MainWindow) -> None:
+    """A painted group: read when it paints, so the walk's repaint is enough."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor
+
+    meter = window.meter()
+    window.apply_theme(loud())
+    image = meter.grab().toImage()
+    bars = meter.bars()
+    corner = QPoint(int(bars.left()) + 1, int(bars.top()))
+    assert QColor(image.pixelColor(corner)).name() == (
+        QColor(theme.group_color("meter", "background")).name()
+    )
+    assert theme.group_color("meter", "background").upper() != (
+        theme_io.builtin().tokens["surface.hover"].upper()
+    ), "the loud theme's, not the built-in's"

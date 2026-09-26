@@ -62,6 +62,7 @@ from immersive.ui.timeline.grid import snap_text
 from immersive.ui.timeline.metrics import LANE_HEIGHT
 from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.timeline.view import TimelineView
+from immersive.ui.widgets.meter import Meter
 from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.text import TextField
 
@@ -262,11 +263,20 @@ class ChannelHeader(QFrame):
         bottom.addStretch(1)
         for button in (self.mute, self.solo, self.bypass):
             bottom.addWidget(button)
-        rows = QVBoxLayout(self)
-        rows.setContentsMargins(8, 6, 6, 6)
+        rows = QVBoxLayout()
+        rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(4)
         rows.addLayout(top)
         rows.addLayout(bottom)
+        # What this channel adds to the bus, at the header's right edge
+        # (F-60, D-117). No clip light: the master's is the only one.
+        self.meter = Meter(Qt.Orientation.Vertical)
+        self.meter.setToolTip("What this channel adds to the mix, left and right")
+        columns = QHBoxLayout(self)
+        columns.setContentsMargins(8, 6, 6, 6)
+        columns.setSpacing(6)
+        columns.addLayout(rows, 1)
+        columns.addWidget(self.meter)
 
     def _toggle(self, text: str, name: str, tip: str) -> QToolButton:
         button = QToolButton()

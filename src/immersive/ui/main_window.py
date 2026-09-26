@@ -72,6 +72,7 @@ from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.units import Plain, Position
 from immersive.ui.widgets.info_box import InfoBox
+from immersive.ui.widgets.meter import Meter
 from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.placeholder import Placeholder
@@ -667,7 +668,9 @@ class MainWindow(QMainWindow):
         bar.addPermanentWidget(self._xruns)
 
         # 04-ui-spec.md, *Accessibility and feel*: left to right, the master
-        # meter (phase 10), the notice count, the version.
+        # meter, the notice count, the version (F-54, D-118).
+        self._meter = Meter(Qt.Orientation.Horizontal, clip_light=True)
+        bar.addPermanentWidget(self._meter)
         self._notice_count = NoticeCount(self._notices)
         bar.addPermanentWidget(self._notice_count)
         self._notices.observe(self._notices_changed)
@@ -777,6 +780,8 @@ class MainWindow(QMainWindow):
         if self._playing and not player.running:
             self._set_playing(False)  # the device went: stopped, where it was
         engine = player.engine
+        self._meter.feed(*engine.take_peaks())
+        self._feed_channel_meters(engine.take_channel_peaks())
         if self._seek_mark is not None:
             if not engine.caught_up(self._seek_mark):
                 return  # the engine's playhead is from before the seek
@@ -790,6 +795,18 @@ class MainWindow(QMainWindow):
             self._position.set_value(position)
             self._turn_page(position)
         self._show_xruns()
+
+    def _feed_channel_meters(self, peaks: list[tuple[str, float, float]]) -> None:
+        """Each header's meter its channel's peaks, by id (D-117). A header
+        the playing snapshot does not hold yet - a channel just added - is
+        fed silence, so every meter falls when nothing plays."""
+        levels = {channel: (left, right) for channel, left, right in peaks}
+        for header in self._timeline.headers.headers():
+            header.meter.feed(*levels.get(header.channel.id, (0.0, 0.0)))
+
+    def meter(self) -> Meter:
+        """The master meter, in the status bar."""
+        return self._meter
 
     def _report_audio_problem(self, message: str) -> None:
         self._notices.add(Severity.WARN, message)
