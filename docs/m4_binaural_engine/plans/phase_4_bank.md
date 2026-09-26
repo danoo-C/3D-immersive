@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 4 — The bank, and its cache
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -118,4 +118,14 @@ progress
 
 ## Outcome
 
-Filled in at the end.
+Built as planned. D-120, settled while planning, held: the bank is made in
+0.11 s from a 21 MB entry that serves every block size. Mutation 6, written
+straight to its name, is equivalent. A half-written `.npz` has no zip
+directory and reads as a miss, so the temporary file only spares a failed
+read; it is kept, as the peaks do, for the reason its docstring gives.
+
+What phase 5 needs: `window.bank()`, a `Bank` with `filters` `[M, 2,
+nfft/2 + 1]`, `itd` signed, `lookup` to weigh and blend, and `nfft` for
+its buffers. It is `None` until prepared, and stays `None` without an
+output or a fetched set. The engine has to play without it, flat, as it
+does today.

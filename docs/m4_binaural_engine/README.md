@@ -16,7 +16,7 @@ channel and project views of the *Parameters pane* in
 | [1 — The HRTF set](phase_1_hrtf_set.md) | ✅ |
 | [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | ✅ |
 | [3 — Directions](phase_3_directions.md) | ✅ |
-| [4 — The bank, and its cache](phase_4_bank.md) | planned |
+| [4 — The bank, and its cache](phase_4_bank.md) | ✅ |
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | not started |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | not started |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | not started |
@@ -121,3 +121,10 @@ down, which 256 taps cannot carry. The acceptance was amended to say so.
 (D-119): a cube map of sampled cells and a walk across shared edges, in
 place of S0's KD-tree, which returns new arrays on every query. 3.5 µs a
 direction, 215 µs for 32 sources, and the ITD continuous as S0 measured.
+
+**Phase 4.** The bank, and a cache of what is slow to make rather than of
+the bank itself (D-120). SADIE II D1: 6.4 s cold, 0.23 s warm, from one
+21 MB entry for every block size. The application prepares it on a worker
+with an activity. Only a real launch or an open asks for it, so no test
+that builds a window pays for it. The pipeline is complete and headless;
+phase 5 puts it on the audio thread.

@@ -77,10 +77,12 @@ src/immersive/
     dsp.py               gain, fades, resampling, limiter
     render.py            offline render (reuses engine.process)
     hrtf/
-      sofa.py            load SOFA → HRIR set, resample, normalise
-      prepare.py         ITD extraction + minimum-phase decomposition
-      interp.py          spherical triangulation + barycentric lookup
-      bank.py            the ready-to-use frequency-domain HRTF bank
+      sofa.py            load SOFA → HRIR set, resample, normalise (M4)
+      decompose.py       ITD extraction + minimum-phase decomposition (M4)
+      lookup.py          triangulation, and locating a direction without
+                         allocating (D-119, M4)
+      bank.py            the frequency-domain bank, and the cache of what is
+                         slow to make (D-120, M4)
 
   ui/
     main_window.py       menus, toolbar, splitter layout
@@ -90,6 +92,7 @@ src/immersive/
     time_axis.py         scroll and zoom, shared by the timeline and the curve
                          editor, owned by neither - no Qt (D-94, M3)
     notices.py           the notice model - no Qt, so theme_io may use it (D-81)
+    hrtf.py              preparing the HRTF set's bank on a worker (D-120, M4)
     importer.py          preparing samples on workers, how far, and cancel
                          (N-3, F-59, M2)
     activity.py          anything slow, begun, updated, finished - no Qt,

@@ -61,9 +61,16 @@ direction.
 ### 4. Prepare the bank
 
 Each minimum-phase HRIR is zero-padded to `nfft` and forward-transformed once.
-The whole bank lives in memory as `[M, 2, nfft//2 + 1]` complex64, and is
-cached to disk keyed by SOFA hash and block size, so project load does not pay
-for it twice.
+The whole bank lives in memory as `[M, 2, nfft//2 + 1]` complex64: 72 MB for
+SADIE II D1 at 512 frames, and 289 MB at 2048.
+
+What is cached is what is slow to make (D-120): the decomposition and the
+direction index, keyed by the set's content hash alone. They take 6.5 s for
+SADIE II D1 and are the same at every block size; the entry is 21 MB. The
+bank is transformed from them on every load, 0.11 s at 512 frames. A
+project therefore opens in 0.23 s once the set has been prepared once.
+Preparing runs on a worker, shown in the info box, and a closed window
+stops it at its next chunk (`ui/hrtf.py`).
 
 #### Buffer length must account for the ITD
 

@@ -1,6 +1,6 @@
 # M4 · Phase 4 — The bank, and its cache
 
-**Status:** planned · **Plan:** [plans/phase_4_bank.md](plans/phase_4_bank.md)
+**Status:** ✅ complete · **Plan:** [plans/phase_4_bank.md](plans/phase_4_bank.md)
 
 ## Goal
 
@@ -26,17 +26,17 @@ stopping when the window closes.
 
 ## Acceptance
 
-- [ ] For SADIE II D1 at a 512-frame block, `nfft` is 1024, as the spike
+- [x] For SADIE II D1 at a 512-frame block, `nfft` is 1024, as the spike
       found, and at 2048 frames it is the next power of two the formula
       gives.
-- [ ] Each bank entry, transformed back, is its minimum-phase response,
+- [x] Each bank entry, transformed back, is its minimum-phase response,
       zero-padded.
-- [ ] A second preparation of the same set is read from the cache without
+- [x] A second preparation of the same set is read from the cache without
       decomposing, and a different block size is served by the same entry,
       transformed anew (D-120).
-- [ ] A cache entry that is truncated or from another format version is
+- [x] A cache entry that is truncated or from another format version is
       prepared again, never used, and nothing raises.
-- [ ] Preparing the bank on opening a project runs on a worker and shows
+- [x] Preparing the bank on opening a project runs on a worker and shows
       in the info box; the time it takes cold and warm is recorded.
 
 ## Implements
@@ -54,3 +54,33 @@ hash and block size. Measured while planning, the bank is the cheap part:
 block would store 72 MB to 289 MB per block size to save that fraction of
 a second. The Goal, Scope and one acceptance line were corrected to D-120
 before any code.
+
+**Built (2026-09-27).** SADIE II D1 through `prepare()`:
+
+| | |
+|---|---|
+| cold: decompose, index, write, transform | 6.44 s |
+| warm, 512 frames | 0.23 s |
+| warm, 2048 frames, the same entry | 0.76 s |
+| the entry | 21 MB, one per set |
+| the bank in memory | 72 MB at 512 frames, 289 MB at 2048 |
+
+In the application the set is prepared on a worker with an activity. It
+starts once `app.run` has the window up, and again when an open names
+another set. A window built any other way asks for nothing, which is what
+keeps dozens of window tests from starting SADIE's decomposition; a
+mutation that prepared on construction was caught by five tests at once. A
+close stops it at its next chunk.
+
+Found by the sweep: a replaced request whose result no cancel can stop - a
+refusal - could arrive after its replacement had landed. The request number
+was there, and the first tests never exercised it, because a cancelled
+decomposition returns `Cancelled`, which is ignored anyway. A test replaces
+a held request and releases it late. And a constant `nfft` of 39 passed at
+512 frames, where this set's ITD of 10 rounds to the same power of two; at
+880 frames it does not, and the test is there.
+
+The index tests run it coarse, 16 cells a face, because they test the cache
+and not the index's quality. At full size it cost a second per preparation.
+Twenty mutations over the phase, all caught, three after a test was added
+or tightened. The phase adds 25 tests; the suite is 2326.
