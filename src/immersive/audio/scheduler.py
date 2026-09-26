@@ -72,6 +72,8 @@ class Snapshot:
     levels: npt.NDArray[np.float64] = field(repr=False)
     #: For each channel, its index in the snapshot before, or -1.
     carry: tuple[int, ...] = ()
+    #: The generation `carry` counts in: the snapshot this was built from.
+    based_on: int = 0
 
 
 def gains(project: Project) -> list[float]:
@@ -149,6 +151,7 @@ def build(
         targets=targets,
         levels=targets.copy(),
         carry=tuple(before.get(channel.id, -1) for channel in project.channels),
+        based_on=previous.generation if previous is not None else 0,
     )
 
 
@@ -199,9 +202,7 @@ def fill(lane: Lane, t: int, left: Samples, right: Samples) -> bool:
             _envelope(into_l, into_r, clip.head, first - clip.start, count)
         if clip.tail is not None:
             length = clip.tail.shape[0]
-            _envelope(
-                into_l, into_r, clip.tail, first - (clip.end - length), count
-            )
+            _envelope(into_l, into_r, clip.tail, first - (clip.end - length), count)
     return wrote
 
 
