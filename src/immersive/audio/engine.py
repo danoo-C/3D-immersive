@@ -170,6 +170,16 @@ class Engine:
         """Where the next block starts."""
         return self._playhead
 
+    def sent(self) -> int:
+        """How many commands have been sent: a mark `caught_up` can be
+        asked about."""
+        return self._written
+
+    def caught_up(self, sent: int) -> bool:
+        """Whether the first `sent` commands have all been applied - so the
+        playhead read now is after a seek, not before it."""
+        return self._read >= sent
+
     @property
     def playing(self) -> bool:
         return self._playing

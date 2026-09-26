@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -522,6 +522,18 @@ class TimelineView(QGraphicsView):
             self._preview = {}
             self._lay_out()
         return edit
+
+    def event(self, event: QEvent) -> bool:
+        """During a drag, `Esc` is the drag's to cancel, not Stop's."""
+        if (
+            self._drag is not None
+            and event.type() == QEvent.Type.ShortcutOverride
+            and isinstance(event, QKeyEvent)
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            event.accept()
+            return True
+        return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """`Esc` during a drag puts everything back and makes no edit."""

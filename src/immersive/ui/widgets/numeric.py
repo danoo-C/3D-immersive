@@ -33,6 +33,7 @@ from PySide6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QLineEdit, QWidget
 
 from immersive.ui.units import Format, Plain
+from immersive.ui.widgets.text import claims
 
 #: How far a press has to move before it is a drag rather than a click.
 THRESHOLD = 3
@@ -180,6 +181,10 @@ class NumericField(QLineEdit):
         if event.type() == QEvent.Type.ShortcutOverride and self.isReadOnly():
             event.ignore()
             return False
+        if claims(event):
+            # Typing: Enter commits and Esc puts back, not the transport's.
+            event.accept()
+            return True
         return super().event(event)
 
     # ------------------------------------------------------------ internal

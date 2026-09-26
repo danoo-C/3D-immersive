@@ -15,12 +15,15 @@ voice replaced by another, and the transport stopped and started.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import tracemalloc
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
-import pytest
 
 from immersive.audio.engine import Engine, Voice
 from immersive.audio.scheduler import Snapshot, build
@@ -93,15 +96,6 @@ def arrangement() -> tuple[Project, dict[str, Decoded]]:
     return project, store
 
 
-@pytest.fixture
-def traced() -> Iterator[None]:
-    tracemalloc.start()
-    try:
-        yield
-    finally:
-        tracemalloc.stop()
-
-
 def measured(
     engine: Engine, blocks: npt.NDArray[np.int64], between: Callable[[int], None]
 ) -> None:
@@ -127,7 +121,9 @@ def measured(
         blocks[n, 1] = after[0] - before[0]
 
 
-def test_process_makes_no_array_and_keeps_nothing(traced: None) -> None:
+def run() -> tuple[int, int]:
+    """Every path through `process()` for 500 blocks: what they left
+    allocated between them, and the most any one raised the peak by."""
     project, store = arrangement()
     engine = Engine(BLOCK)
     first = build(project, store.get)
@@ -174,8 +170,28 @@ def test_process_makes_no_array_and_keeps_nothing(traced: None) -> None:
 
     measured(engine, blocks, lambda n: ui(n % 100))
 
-    kept = int(blocks[:, 1].sum())
-    assert kept <= 0, f"500 blocks left {kept} bytes allocated"
-    worst = int(blocks[:, 0].max())
-    assert worst < LINE, f"a block raised the peak by {worst} bytes"
     assert held and voices  # the UI thread's references, kept to the end
+    return int(blocks[:, 1].sum()), int(blocks[:, 0].max())
+
+
+def test_process_makes_no_array_and_keeps_nothing() -> None:
+    """Measured in an interpreter of its own. `tracemalloc` counts every
+    thread's allocations, and a pytest-xdist worker has a thread of its own
+    passing messages: one run in six, it allocated during a block and the
+    test blamed `process()` for 1 698 bytes. Nothing else runs in a fresh
+    interpreter, so what is measured there is the engine's."""
+    done = subprocess.run(
+        [sys.executable, str(Path(__file__))],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
+    )
+    kept, worst = json.loads(done.stdout)
+    assert kept <= 0, f"500 blocks left {kept} bytes allocated"
+    assert worst < LINE, f"a block raised the peak by {worst} bytes"
+
+
+if __name__ == "__main__":
+    tracemalloc.start()
+    print(json.dumps(run()))

@@ -46,7 +46,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMenu,
     QSizePolicy,
     QToolButton,
@@ -64,6 +63,7 @@ from immersive.ui.timeline.metrics import LANE_HEIGHT
 from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.timeline.view import TimelineView
 from immersive.ui.widgets.numeric import NumericField
+from immersive.ui.widgets.text import TextField
 
 #: The headers column's width, and so the corner's above it.
 HEADER_WIDTH = 220
@@ -165,7 +165,7 @@ class Name(QLabel):
             painter.end()
 
 
-class RenameField(QLineEdit):
+class RenameField(TextField):
     """The name, open for typing in place. Enter or leaving it keeps what
     was typed; Esc keeps nothing. Either way it says so once."""
 

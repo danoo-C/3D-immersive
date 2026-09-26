@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMenu,
     QSizePolicy,
     QToolButton,
@@ -71,6 +70,7 @@ from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.units import Duration, Plain, Position, clock
 from immersive.ui.widgets.check import CheckBox
 from immersive.ui.widgets.numeric import MIXED, NumericField
+from immersive.ui.widgets.text import TextField
 from immersive.ui.widgets.waveform import Waveform
 
 #: Why a field is drawn but dead, by the milestone that brings it.
@@ -504,7 +504,7 @@ class ChannelView(View):
 
     def __init__(self, document: Document) -> None:
         super().__init__(document, "Channel")
-        self.name = QLineEdit()
+        self.name = TextField()
         self.name.setObjectName("PaneText")
         self.name.setToolTip("The channel's name — type, then Enter")
         self.name.editingFinished.connect(self._rename)

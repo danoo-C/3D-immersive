@@ -47,9 +47,6 @@ class Counting(Engine):
         self.installed.append(snapshot)
         super().install(snapshot)
 
-    def sent(self) -> int:
-        return self._written
-
 
 def level(value: float) -> Decoded:
     audio = np.full((FRAMES, 1), value, dtype=np.float32)

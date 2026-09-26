@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from immersive import __version__
+from immersive.audio.feed import Feed
 from immersive.audio.player import Player
 from immersive.core.commands import Compound
 from immersive.core.document import Document
@@ -61,13 +62,13 @@ from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
 from immersive.ui.parameters.pane import ParametersPane
-from immersive.ui.parameters.views import TEMPO_CEILING, TEMPO_FLOOR
+from immersive.ui.parameters.views import LONGEST, TEMPO_CEILING, TEMPO_FLOOR, TIME_STEP
 from immersive.ui.theme_menu import ThemeMenu
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit, snap_text
 from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.timeline.snap_menu import fill_snap_menu
-from immersive.ui.units import Plain
+from immersive.ui.units import Plain, Position
 from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.placeholder import Placeholder
@@ -111,7 +112,6 @@ _PARAMS_H = 220
 # milestone rather than a dozen scattered strings - and so that a grep for
 # "M3" finds everything the timeline milestone switches on. The milestones
 # themselves are defined in docs/06-roadmap.md.
-_M3 = "the timeline and transport arrive at M3"
 _M5 = "the spatial views arrive at M5"
 _M6 = "automation arrives at M6"
 _M7 = "rendering arrives at M7"
@@ -208,6 +208,20 @@ class MainWindow(QMainWindow):
         #: Kept so a theme change can ask for the colour again (D-82).
         self._chips: list[tuple[QLabel, str]] = []
         self._icon_actions: list[tuple[QAction, str]] = []
+        #: The transport as the window asked for it (D-110): whether it is
+        #: playing, where playback last started - where Stop goes back to -
+        #: and the engine's command count after the last seek, until the
+        #: engine has caught up with it.
+        self._playing = False
+        self._started_at = 0
+        self._seek_mark: int | None = None
+        #: The project the loop switch was last set for: another one means
+        #: New or Open, and a project opens with looping off (D-108).
+        self._looping_for: Project | None = None
+        #: What the engine plays, kept in step with the project (D-105).
+        self._feed = (
+            Feed(player.engine, self._store.audio) if player is not None else None
+        )
         self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(icons.app_icon())
         self.resize(1500, 950)
@@ -217,6 +231,9 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self.setCentralWidget(self._build_layout())
         self._build_statusbar()
+        self._timeline.sought.connect(self.seek)
+        self._timeline.loop_drawn.connect(lambda: self._loop.setChecked(True))
+        self._document.observe(self._feed_update)
         self._document.observe(self._document_changed)
         self._document.selection.observe(self._selection_changed)
         self._document_changed()
@@ -325,10 +342,19 @@ class MainWindow(QMainWindow):
         view_menu.addMenu(self._theme_menu)
 
         transport_menu = self._menu(bar, "&Transport")
-        self._add(transport_menu, "&Play / Pause", "Space", arrives=_M3)
-        self._add(transport_menu, "&Stop", "Esc", arrives=_M3)
-        self._add(transport_menu, "&Return to Start", "Return", arrives=_M3)
-        self._add(transport_menu, "Toggle &Loop", "L", arrives=_M3)
+        # One action each, in the menu and on the toolbar: two with one
+        # shortcut would be ambiguous, and Qt would fire neither.
+        self._play = self._transport(transport_menu, "play", "&Play / Pause", "Space")
+        self._play.triggered.connect(self.play_pause)
+        self._stop = self._transport(transport_menu, "stop", "&Stop", "Esc")
+        self._stop.triggered.connect(self.stop)
+        self._to_start = self._transport(
+            transport_menu, "transport_start", "&Return to Start", "Return"
+        )
+        self._to_start.triggered.connect(self.return_to_start)
+        self._loop = self._transport(transport_menu, "loop", "Toggle &Loop", "L")
+        self._loop.setCheckable(True)
+        self._loop.toggled.connect(self.set_looping)
         transport_menu.addSeparator()
         self._bypass = self._add(transport_menu, "Toggle HRTF &Bypass on Channel", "B")
         self._bypass.triggered.connect(self.toggle_bypass)
@@ -406,26 +432,30 @@ class MainWindow(QMainWindow):
         bar.setIconSize(QSize(16, 16))
         self.addToolBar(bar)
 
-        # Tooltips carry the shortcut and say why the button is dead - a dead
-        # button with no explanation is the whole reason M0 looked unfinished.
-        transport = (
-            ("transport_start", "Return to Start", "Return", _M3),
-            ("play", "Play / Pause", "Space", _M3),
-            ("stop", "Stop", "Esc", _M3),
-            ("loop", "Toggle Loop", "L", _M3),
-        )
-        for name, text, shortcut, arrives in transport:
-            bar.addAction(self._tool_action(name, text, shortcut, arrives))
+        # The Transport menu's own actions, so the button and the key are one.
+        for action in (self._to_start, self._play, self._stop, self._loop):
+            bar.addAction(action)
 
         bar.addSeparator()
-        # The playhead readout. Every comparable tool has one, and the ruler
-        # alone cannot give you a value you can read off or type back in.
-        self._position = self._chip("1.1.000", primary=True)
-        self._position.setToolTip(
-            "Playhead position, bars.beats.ticks\n"
-            "Click the ruler label to switch to minutes:seconds.\n"
-            f"Not live yet — {_M3}."
+        # The playhead readout (F-52). Every comparable tool has one, and the
+        # ruler alone cannot give you a value you can read off or type back
+        # in. It reads as the ruler counts and takes either unit typed.
+        self._position = NumericField(
+            0,
+            minimum=0,
+            maximum=LONGEST,
+            step=TIME_STEP,
+            decimals=0,
+            format=Position(self._tempo_now, self._ruler_unit),
         )
+        self._position.setObjectName("PlayheadReadout")
+        self._position.setFixedWidth(96)
+        self._position.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._position.setToolTip(
+            "Playhead position, as the ruler counts - drag, or click and type\n"
+            "Takes bars.beats.ticks, minutes:seconds, or s and ms."
+        )
+        self._position.committed.connect(lambda sample: self.seek(round(sample)))
         bar.addWidget(self._position)
         bar.addSeparator()
         # The open project's tempo, signature and snap, read back after every
@@ -495,16 +525,20 @@ class MainWindow(QMainWindow):
         self._arm.setToolTip(f"Automation write-arm  (F-32)\nNot built yet — {_M6}.")
         bar.addWidget(self._arm)
 
-    def _tool_action(
-        self, name: str, text: str, shortcut: str, arrives: str
-    ) -> QAction:
-        action = QAction(icons.icon(name), text, self)
-        action.setToolTip(f"{text}  ({shortcut})\nNot built yet — {arrives}.")
-        action.setEnabled(False)
+    def _transport(self, menu: QMenu, icon: str, text: str, shortcut: str) -> QAction:
+        """A transport action, with its icon for the toolbar. Without an
+        output it is disabled, and says why - never a milestone, now that it
+        is built."""
+        action = self._add(menu, text, shortcut)
+        action.setIcon(icons.icon(icon))
         # icons.icon() memoises the rendered QIcon, so a theme change needs
         # the action's icon set again rather than merely invalidated - phase
         # 1's Outcome flagged this and D-82 is where it gets paid for.
-        self._icon_actions.append((action, name))
+        self._icon_actions.append((action, icon))
+        if self._player is None:
+            action.setEnabled(False)
+            reason = self._unavailable or "no audio output"
+            action.setToolTip(f"{action.toolTip()}\nCannot be heard: {reason}")
         return action
 
     def _chip(self, text: str, *, primary: bool = False) -> QLabel:
@@ -590,11 +624,13 @@ class MainWindow(QMainWindow):
 
         self._xruns = QLabel("xruns 0")
         self._xruns.setStyleSheet(f"color: {theme.color('text.disabled')};")
-        self._xruns.setToolTip("Audio dropouts since the stream started")
+        self._xruns.setToolTip(
+            "Audio dropouts since the application started - quiet at none"
+        )
         bar.addPermanentWidget(self._xruns)
 
         # 04-ui-spec.md, *Accessibility and feel*: left to right, the master
-        # meter (M3), the notice count, the version.
+        # meter (phase 10), the notice count, the version.
         self._notice_count = NoticeCount(self._notices)
         bar.addPermanentWidget(self._notice_count)
         self._notices.observe(self._notices_changed)
@@ -693,10 +729,30 @@ class MainWindow(QMainWindow):
         return self._player.audition(audio.audio)
 
     def tick(self) -> None:
-        """What the timer does: the player's device looked at from this
-        thread. A test calls it directly rather than waiting for the timer."""
-        if self._player is not None:
-            self._player.poll()
+        """What the timer does, TICK_HZ times a second: the device looked at
+        from this thread, the playhead drawn where the engine says it is,
+        the page turned if it has left the view, and the xruns counted. A
+        test calls it directly rather than waiting for the timer."""
+        player = self._player
+        if player is None:
+            return
+        player.poll()
+        if self._playing and not player.running:
+            self._set_playing(False)  # the device went: stopped, where it was
+        engine = player.engine
+        if self._seek_mark is not None:
+            if not engine.caught_up(self._seek_mark):
+                return  # the engine's playhead is from before the seek
+            self._seek_mark = None
+        position = engine.playhead
+        if player.running and position != self._timeline.playhead():
+            # Only the engine moves it here - a person's seek has already
+            # been drawn - so the page follows it, including the last few
+            # blocks before a pause the previous tick had not seen.
+            self._timeline.set_playhead(position)
+            self._position.set_value(position)
+            self._turn_page(position)
+        self._show_xruns()
 
     def _report_audio_problem(self, message: str) -> None:
         self._notices.add(Severity.WARN, message)
@@ -754,6 +810,7 @@ class MainWindow(QMainWindow):
         self._pool.tree.viewport().update()
         self._timeline.media_changed()
         self._parameters.refresh()
+        self._feed_update()
 
     def import_files(self) -> bool:
         """File > Import Audio. Several files, prepared on workers."""
@@ -962,6 +1019,24 @@ class MainWindow(QMainWindow):
             summary = action.toolTip().partition("\n")[0]
             action.setToolTip(summary if able else f"{summary}\n{nothing}")
         self._clipboard_changed()
+        self._loop_changed()
+
+    def _loop_changed(self) -> None:
+        """The loop switch after a change to the project: off for a project
+        just opened (D-108), off when an Undo took the region away, and the
+        engine told the region as it now stands."""
+        project = self._document.project
+        if project is not self._looping_for or project.loop is None:
+            self._looping_for = project
+            self._loop.setChecked(False)
+        able = self._player is not None and project.loop is not None
+        self._loop.setEnabled(able)
+        summary = self._loop.toolTip().partition("\n")[0]
+        if able:
+            self._loop.setToolTip(summary)
+        elif self._player is not None:
+            self._loop.setToolTip(f"{summary}\nDraw a loop region in the ruler first.")
+        self._send_loop()
 
     # ----------------------------------------------------------- theming
 
@@ -1093,8 +1168,9 @@ class MainWindow(QMainWindow):
         self._arm.setIcon(icons.icon("arm"))
         for label, token in self._chips:
             label.setStyleSheet(f"color: {theme.color(token)}; padding: 0 8px;")
-        for label in (self._xruns, self._version):
-            label.setStyleSheet(f"color: {theme.color('text.disabled')};")
+        self._version.setStyleSheet(f"color: {theme.color('text.disabled')};")
+        self._show_xruns()
+        self._play.setIcon(icons.icon("pause" if self._playing else "play"))
 
     def toggle_bypass(self) -> None:
         """B: HRTF bypass on every selected channel, as one edit. If any is
@@ -1154,6 +1230,7 @@ class MainWindow(QMainWindow):
         """What the ruler counts in, and so what the pane's positions read."""
         self._timeline.set_unit(unit)
         self._parameters.refresh()
+        self._position.refresh()
 
     def parameters(self) -> ParametersPane:
         return self._parameters
@@ -1253,14 +1330,106 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Esc clears the selection while the transport is stopped (04,
-        *Selection*). Until phase 9 it always is: Transport > Stop, which
-        owns Esc, is disabled, and a disabled action's shortcut lets the key
-        through to here. Phase 9's Stop must do the same when stopped."""
+        *Selection*). With an output, Transport > Stop owns Esc and does it
+        itself (D-110); without one, Stop is disabled, a disabled action's
+        shortcut lets the key through, and it arrives here."""
         if event.key() == Qt.Key.Key_Escape:
             self._document.selection.clear()
             event.accept()
             return
         super().keyPressEvent(event)
+
+    # ---------------------------------------------------------- transport
+
+    def playing(self) -> bool:
+        return self._playing
+
+    def play_pause(self) -> None:
+        """Space: play from the playhead, or pause where it is (D-110)."""
+        if self._player is None:
+            return
+        if self._playing:
+            self._player.pause()
+            self._set_playing(False)
+            return
+        self._started_at = self._timeline.playhead()
+        if self._player.play():
+            self._set_playing(True)
+
+    def stop(self) -> None:
+        """Esc: stop, and put the playhead back where playback last started.
+        With the transport already stopped, clear the selection (D-110)."""
+        if self._player is None or not self._playing:
+            self._document.selection.clear()
+            return
+        self._player.pause()
+        self._set_playing(False)
+        self.seek(self._started_at)
+
+    def return_to_start(self) -> None:
+        """Enter: the playhead to 0, playing or not - and, playing, 0 is
+        where Stop goes back to."""
+        if self._playing:
+            self._started_at = 0
+        self.seek(0)
+
+    def seek(self, sample: int) -> None:
+        """Put the playhead at `sample`, and the engine there too."""
+        sample = max(sample, 0)
+        self._timeline.set_playhead(sample)
+        self._position.set_value(sample)
+        if self._player is not None:
+            self._player.seek(sample)
+            self._seek_mark = self._player.engine.sent()
+
+    def set_looping(self, on: bool) -> None:
+        """L, or a region just drawn: loop over the region, or not."""
+        self._timeline.set_looping(on and self._document.project.loop is not None)
+        self._send_loop()
+
+    def _send_loop(self) -> None:
+        if self._player is None:
+            return
+        region = self._document.project.loop
+        if region is None:
+            self._player.set_loop(0, 0, False)
+        else:
+            self._player.set_loop(region.start, region.end, self._loop.isChecked())
+
+    def _set_playing(self, on: bool) -> None:
+        self._playing = on
+        self._play.setIcon(icons.icon("pause" if on else "play"))
+
+    def _feed_update(self) -> None:
+        if self._feed is not None:
+            self._feed.update(self._document.project)
+
+    def _ruler_unit(self) -> Unit:
+        """What the ruler counts in - bars while the window is still being
+        built, which is what the ruler starts in."""
+        timeline = self.__dict__.get("_timeline")
+        return timeline.unit() if timeline is not None else Unit.BARS
+
+    def _tempo_now(self) -> tuple[float, tuple[int, int]]:
+        project = self._document.project
+        return project.bpm, project.time_signature
+
+    def _turn_page(self, sample: int) -> None:
+        """A playhead that has left the view brings the view to it, a tenth
+        of the way in (D-110)."""
+        first, last = self._axis.visible()
+        if not first <= sample < last:
+            self._axis.scroll_to(
+                round(sample / self._axis.scale - self._axis.width / 10)
+            )
+
+    def _show_xruns(self) -> None:
+        """Quiet at none, and `error` from the first (04, *Accessibility and
+        feel*)."""
+        count = self._player.engine.xruns if self._player is not None else 0
+        self._xruns.setText(f"xruns {count}")
+        token = "error" if count else "text.disabled"
+        self._xruns.setStyleSheet(f"color: {theme.color(token)};")
 
     def notices(self) -> NoticeLog:
         """This session's notice log, for anything that needs to report.
