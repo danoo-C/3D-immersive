@@ -80,6 +80,14 @@
       "border": "border",
       "text": "text.secondary"
     },
+    "info": {
+      "background": "surface.raised",
+      "bar": "accent",
+      "border": "border",
+      "more": "text.secondary",
+      "text": "text.primary",
+      "track": "surface.hover"
+    },
     "input": {
       "background": "surface.window",
       "border": "border",

@@ -125,7 +125,8 @@ def test_the_icon_cache_is_dropped_on_a_switch(window: MainWindow) -> None:
 
     window.apply_theme(loud())
 
-    assert icons.icon.cache_info().currsize <= len(window._icon_actions) + 1
+    # The actions' icons, ARM's, and the info box's ✕.
+    assert icons.icon.cache_info().currsize <= len(window._icon_actions) + 2
     before = icons.icon("play")
     window.apply_theme(theme_io.builtin())
     assert icons.icon("play") is not before, "a re-render, not the cached one"
@@ -555,3 +556,13 @@ def test_the_accent_reaches_actual_pixels(window: MainWindow) -> None:
     }
 
     assert "#00FF00" in colours, sorted(colours)
+
+
+def test_the_info_box_cancel_is_rendered_again_on_a_switch(
+    window: MainWindow,
+) -> None:
+    """Its ✕ is a memoised icon too, and the window's walk reaches it."""
+    cancel = window.info_box()._cancel
+    before = cancel.icon().cacheKey()
+    window.apply_theme(loud())
+    assert cancel.icon().cacheKey() != before

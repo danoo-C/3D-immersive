@@ -149,3 +149,24 @@ and a canary test watches for the fix). Fourteen mutations, all caught; two
 only after their tests were tightened. Rising-only progress hid a hash
 stage counted from 0, and a stage's own cancel check hid the one between
 stages.
+
+**Step 3 — the activities and the info box.** Any piece of work begins,
+updates and finishes an activity, and the box at the right end of the
+transport toolbar shows the first begun. Two things were found by looking,
+not by the tests as first written:
+
+- **At the window's narrowest, 1024 px, a 260 px box did not fit.** Qt folded
+  it into the toolbar's overflow menu, the risk the plan named. It now gives
+  way down to 150 px, eliding its label, and a test holds it in sight at
+  that width.
+- **The ✕ at 20 px showed nothing.** The buttons' 10 px padding left it no
+  room for its icon, and the button had been trimmed to 20 px so the box
+  would be no taller than the toolbar's buttons. It is unpadded now.
+
+The bar counts in thousandths, not in the activity's numbers, because
+`QProgressBar` holds a 32-bit int and an import counted in bytes passes
+2 GB. Eighteen mutations, all caught; three only once their tests were
+tightened (which label was drawn, where the box sits, the ✕'s size). A
+note for later sweeps: with `-x` under xdist, tests cut short by the stop
+are listed as failures, so the first FAILED line can name the wrong
+catcher. Attribution is read from runs without `-x`.

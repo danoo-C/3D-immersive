@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QSizePolicy,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -57,6 +58,7 @@ from immersive.core.model import MediaFile, Project, SnapSetting
 from immersive.core.relink import relink
 from immersive.core.selection import Kind
 from immersive.ui import icons, theme, theme_io, theme_menu
+from immersive.ui.activity import Activities
 from immersive.ui.explorer.media_pool import MediaPool
 from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
@@ -69,6 +71,7 @@ from immersive.ui.timeline.grid import Unit, snap_text
 from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.units import Plain, Position
+from immersive.ui.widgets.info_box import InfoBox
 from immersive.ui.widgets.notices import NoticeCount
 from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.placeholder import Placeholder
@@ -177,6 +180,8 @@ class MainWindow(QMainWindow):
         #: Everything this session has reported (F-56, D-65). Built before
         #: the status bar, which draws it.
         self._notices = NoticeLog()
+        #: Anything slow, as the info box shows it (D-116).
+        self._activities = Activities()
         if player is not None:
             # The player reports on this thread only: a device lost on
             # PortAudio's is found by `poll`, from the tick below.
@@ -537,6 +542,15 @@ class MainWindow(QMainWindow):
         self._arm.setEnabled(False)
         self._arm.setToolTip(f"Automation write-arm  (F-32)\nNot built yet — {_M6}.")
         bar.addWidget(self._arm)
+
+        # The info box, at the right end past a spacer that takes the free
+        # width, so it comes and goes without moving anything (D-116).
+        spacer = QWidget()
+        spacer.setObjectName("ToolbarSpacer")
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        bar.addWidget(spacer)
+        self._info = InfoBox(self._activities)
+        self._info.attach(bar.addWidget(self._info))
 
     def _transport(self, menu: QMenu, icon: str, text: str, shortcut: str) -> QAction:
         """A transport action, with its icon for the toolbar. Without an
@@ -1457,6 +1471,14 @@ class MainWindow(QMainWindow):
         self._xruns.setText(f"xruns {count}")
         token = "error" if count else "text.disabled"
         self._xruns.setStyleSheet(f"color: {theme.color(token)};")
+
+    def activities(self) -> Activities:
+        """Anything slow begins an activity here, and the info box shows it
+        (D-116): the import and the load today, render at M7."""
+        return self._activities
+
+    def info_box(self) -> InfoBox:
+        return self._info
 
     def notices(self) -> NoticeLog:
         """This session's notice log, for anything that needs to report.

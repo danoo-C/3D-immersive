@@ -230,3 +230,23 @@ QToolButton#Bypass:checked {
     background-color: $channel_bypass_background;
     color: $channel_bypass_text;
 }
+
+/* The info box (D-116): at the right end of the transport toolbar, what is
+   under way - a label, a thin bar, and a ✕ for work that can be stopped. */
+QFrame#InfoBox {
+    background-color: $info_background;
+    border: 1px solid $info_border;
+    border-radius: 4px;
+}
+QLabel#InfoLabel { background: transparent; color: $info_text; font-size: 12px; }
+QLabel#InfoMore { background: transparent; color: $info_more; font-size: 12px; }
+QProgressBar#InfoBar {
+    background-color: $info_track;
+    border: none;
+    border-radius: 2px;
+}
+QProgressBar#InfoBar::chunk { background-color: $info_bar; border-radius: 2px; }
+/* The ✕ is 20 px, to fit the toolbar's row: the buttons' padding would
+   leave it no room for its icon. */
+QToolButton#InfoCancel { padding: 0px; }
+QWidget#ToolbarSpacer { background: transparent; }

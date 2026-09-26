@@ -21,6 +21,7 @@ pytestmark = pytest.mark.gui
 EXPECTED = (
     "app",
     "arm",
+    "cancel",
     "loop",
     "pause",
     "play",

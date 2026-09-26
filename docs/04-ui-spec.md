@@ -383,7 +383,8 @@ selected header as `channel.selected.background` and
 | curve, keyframe diamond, bezier handle, value axis | M6 |
 | input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one. Phase 7 gave it `disabled.text`, for the pane's fields a later milestone brings |
 | check box, combo box, parameters pane | M3 — built at phase 7, the first to draw either input: the combo box as `combo`, and the check box as the painted `check` group, since a sheet that styles a check box's indicator loses its tick. The pane's heading and labels are `pane` |
-| dialog, progress bar, spin box, slider | M8 — the first milestone with dialogs and a preferences form. Phase 7 drew no spin box: the style's arrows came out black on the dark panel and the sheet's border triangles render as bars, so a count is a numeric field like every other number |
+| dialog, spin box, slider | M8 — the first milestone with dialogs and a preferences form. Phase 7 drew no spin box: the style's arrows came out black on the dark panel and the sheet's border triangles render as bars, so a count is a numeric field like every other number |
+| info box, progress bar | M2 — built at phase 8 as `info`: the box at the right end of the transport toolbar that shows any activity (D-116), its label, its *+n more*, and its thin bar, whose chunk is `info.bar` on `info.track`. Listed under M8 until the import asked for a bar first |
 
 **Painted groups.** Some widgets draw with a painter rather than a
 stylesheet — the waveform is the first, and clips, the spatial views and the
