@@ -3,6 +3,7 @@ it again. Marked gui. Built as a panel on its own, over real samples."""
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -431,15 +432,11 @@ def test_below_the_last_lane_a_drop_makes_a_channel_and_one_undo_removes_it(
 ) -> None:
     arrangement = Arrangement(tmp_path, channels=2)
     document = arrangement.document
-    media = arrangement.media.id
 
-    drop_at(arrangement, pool_drag(media, media), 0, mid(4))
+    drop_at(arrangement, pool_drag(arrangement.media.id), 0, mid(4))
 
     assert len(document.project.channels) == 3
-    assert [clip.start for clip in document.project.channels[2].clips] == [
-        0,
-        arrangement.media.frames,
-    ]
+    assert [clip.start for clip in document.project.channels[2].clips] == [0]
     assert len(arrangement.panel.headers.headers()) == 3
     document.undo()
     assert len(document.project.channels) == 2
@@ -505,3 +502,205 @@ def test_the_outline_shows_where_it_will_land_until_the_drag_leaves(
 
     view.dragLeaveEvent(QDragLeaveEvent())
     assert view.landing() is None
+
+
+# --------------------------------------------------------------------------- #
+# several samples: in parallel or in series (F-58, D-112)
+# --------------------------------------------------------------------------- #
+
+
+def answer(arrangement: Arrangement, layout: str) -> None:
+    """Choose `layout` in the menu the drop opened."""
+    menu = arrangement.panel.view.offered()
+    assert menu is not None, "the drop asked nothing"
+    [action] = [a for a in menu.actions() if a.data() == layout]
+    assert action.isEnabled()
+    action.trigger()
+    menu.close()
+
+
+def test_one_sample_asks_nothing(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    drop_at(arrangement, pool_drag(arrangement.media.id), 0, mid(0))
+    assert arrangement.panel.view.offered() is None
+    assert len(arrangement.document.project.channels[0].clips) == 1
+
+
+def test_several_samples_ask_and_nothing_lands_before_the_answer(
+    tmp_path: Path,
+) -> None:
+    arrangement = Arrangement(tmp_path)
+    document = arrangement.document
+    media = arrangement.media.id
+    before = copy.deepcopy(document.project)
+    undoable = document.can_undo
+
+    assert drop_at(arrangement, pool_drag(media, media, media), 110, mid(1))
+
+    menu = arrangement.panel.view.offered()
+    assert menu is not None
+    texts = [action.text() for action in menu.actions() if action.text()]
+    assert texts == [
+        "Drop 3 Samples",
+        "In &Parallel, a New Channel for Each",
+        "In &Series, on Channel 2",
+    ]
+    assert document.project == before and document.can_undo == undoable
+
+
+def test_in_parallel_each_is_a_new_channel_at_the_lane_named_after_it(
+    tmp_path: Path,
+) -> None:
+    arrangement = Arrangement(tmp_path, channels=2)
+    document = arrangement.document
+    media = arrangement.media.id
+    [first, second] = document.project.channels
+
+    drop_at(arrangement, pool_drag(media, media), 110, mid(1))
+    answer(arrangement, "parallel")
+
+    channels = document.project.channels
+    assert [channel.name for channel in channels] == [
+        "Channel 1",
+        "half",
+        "half 2",
+        "Channel 2",
+    ]
+    assert channels[0] is first and channels[3] is second
+    assert [[clip.start for clip in c.clips] for c in channels[1:3]] == [
+        [54_000],
+        [54_000],
+    ], "all from where it was dropped, snapped"
+    assert second.clips == []
+    assert len(arrangement.panel.headers.headers()) == 4
+    document.undo()
+    assert document.project.channels == [first, second], "one undo, all of it"
+
+
+def test_in_series_below_the_last_lane_one_new_channel_holds_them_all(
+    tmp_path: Path,
+) -> None:
+    arrangement = Arrangement(tmp_path, channels=2)
+    document = arrangement.document
+    media = arrangement.media.id
+
+    drop_at(arrangement, pool_drag(media, media), 0, mid(4))
+    menu = arrangement.panel.view.offered()
+    assert menu is not None
+    assert "In &Series, on a New Channel" in [a.text() for a in menu.actions()]
+    answer(arrangement, "series")
+
+    assert len(document.project.channels) == 3
+    assert [clip.start for clip in document.project.channels[2].clips] == [
+        0,
+        arrangement.media.frames,
+    ]
+    document.undo()
+    assert len(document.project.channels) == 2
+
+
+def test_closing_the_menu_drops_nothing(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    document = arrangement.document
+    media = arrangement.media.id
+    before = copy.deepcopy(document.project)
+
+    drop_at(arrangement, pool_drag(media, media), 0, mid(0))
+    menu = arrangement.panel.view.offered()
+    assert menu is not None
+    menu.close()
+
+    assert arrangement.panel.view.offered() is None
+    assert document.project == before
+
+
+def test_enter_takes_the_answer_given_last(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path, channels=1)
+    view = arrangement.panel.view
+    media = arrangement.media.id
+
+    def active() -> object:
+        menu = view.offered()
+        assert menu is not None
+        chosen = menu.activeAction()
+        assert chosen is not None
+        return chosen.data()
+
+    drop_at(arrangement, pool_drag(media, media), 0, mid(0))
+    assert active() == "parallel", "at first"
+    answer(arrangement, "series")
+
+    drop_at(arrangement, pool_drag(media, media), 0, mid(3))
+    assert active() == "series"
+
+
+def test_shift_over_clips_leaves_only_parallel(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    arrangement.drop(0, 0)
+    document = arrangement.document
+    media = arrangement.media.id
+    shift = Qt.KeyboardModifier.ShiftModifier
+    drop_at(arrangement, pool_drag(media, media), 0, mid(1))
+    answer(arrangement, "series")  # the last answer, and not to be Enter's now
+
+    assert drag_over(arrangement, pool_drag(media, media), 100, mid(0), shift)
+    assert drop_at(arrangement, pool_drag(media, media), 100, mid(0), shift)
+    menu = arrangement.panel.view.offered()
+    assert menu is not None
+    [series] = [a for a in menu.actions() if a.data() == "series"]
+    assert not series.isEnabled()
+    assert series.text().endswith("(it would overlap)")
+    active = menu.activeAction()
+    assert active is not None and active.data() == "parallel", "Enter's, instead"
+    answer(arrangement, "parallel")
+    assert len(document.project.channels) == 4
+    assert len(document.project.channels[2].clips) == 1, "Channel 1, untouched"
+
+
+def test_an_answer_about_a_project_since_replaced_drops_nothing(
+    tmp_path: Path,
+) -> None:
+    arrangement = Arrangement(tmp_path)
+    document = arrangement.document
+    media = arrangement.media.id
+    drop_at(arrangement, pool_drag(media, media), 0, mid(0))
+    menu = arrangement.panel.view.offered()
+    assert menu is not None
+
+    document.new()
+    [parallel] = [a for a in menu.actions() if a.data() == "parallel"]
+    parallel.trigger()
+
+    assert document.project.channels == [] and not document.can_undo
+
+
+def test_a_channel_name_is_not_a_mnemonic_in_the_menu(tmp_path: Path) -> None:
+    arrangement = Arrangement(tmp_path)
+    document = arrangement.document
+    document.project.channels[0].name = "Drums & Bass"
+    media = arrangement.media.id
+    drop_at(arrangement, pool_drag(media, media), 0, mid(0))
+    menu = arrangement.panel.view.offered()
+    assert menu is not None
+    assert "In &Series, on Drums && Bass" in [a.text() for a in menu.actions()]
+
+
+def test_while_several_are_dragged_the_outline_is_the_first(
+    tmp_path: Path,
+) -> None:
+    """Where both layouts start it; the rest depends on the answer."""
+    arrangement = Arrangement(tmp_path)
+    media = arrangement.media.id
+    drag_over(arrangement, pool_drag(media, media), 0, mid(1))
+    drop = theme.group_color("timeline", "drop").upper()
+    image = arrangement.grab()
+
+    def outlined(x: int) -> bool:
+        return drop in {
+            image.pixelColor(x, y).name().upper()
+            for y in range(LANE_HEIGHT, 2 * LANE_HEIGHT)
+        }
+
+    first_end = round(arrangement.media.frames / SCALE)
+    assert outlined(first_end - 1) or outlined(first_end)
+    assert not outlined(first_end + round(arrangement.media.frames / SCALE / 2))

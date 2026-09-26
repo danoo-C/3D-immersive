@@ -9,8 +9,11 @@ tested without a window.
 - **The start** is the sample under the pointer, snapped to the grid and to
   every clip's edges on any channel (F-13, F-17), by the target channel's
   own snap setting (F-18) - or exactly under the pointer while `Alt` is held.
-- **Several samples** go end to end from there, in the order the pool lists
-  them; below the last lane, one new channel holds them all.
+- **Several samples** are laid out as the person answers when they land
+  (F-58, D-112): *in series*, end to end from there in the order the pool
+  lists them, on the lane - or below the last, on one new channel holding
+  them all; or *in parallel*, each on a new channel of its own, inserted
+  at the lane, named after its sample, all starting there.
 - **An overlap** is settled by `DropClips` (D-95) - unless Shift is held,
   which refuses it instead (03, *Rules*).
 """
@@ -18,7 +21,9 @@ tested without a window.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum
+from pathlib import PurePath
 
 from immersive.core.commands import Command, Compound
 from immersive.core.edits import AddChannel, DropClips
@@ -36,6 +41,15 @@ from immersive.core.time import snap
 from immersive.ui.timeline.metrics import LANE_HEIGHT
 
 
+class Layout(Enum):
+    """How several samples dropped together are laid out (D-112)."""
+
+    #: End to end on one channel, in the pool's order.
+    SERIES = "series"
+    #: A new channel each, all starting at the drop.
+    PARALLEL = "parallel"
+
+
 @dataclass(frozen=True)
 class Landing:
     """Where each dropped sample would start, and whether it may."""
@@ -46,8 +60,14 @@ class Landing:
     placed: tuple[tuple[MediaFile, int], ...]
     #: Below the last lane: the drop makes the channel it lands on.
     creates: bool
-    #: Shift was held over an occupied span, so the drop is refused.
+    #: Shift was held over an occupied span, so the drop is refused - laid
+    #: out in series, the only layout that can overlap anything.
     refused: bool
+
+    @property
+    def asks(self) -> bool:
+        """Whether the layout is asked for: several samples (D-112)."""
+        return len(self.placed) > 1
 
     @property
     def start(self) -> int:
@@ -120,9 +140,16 @@ def landing(
     return Landing(lane, tuple(placed), creates, refused=refuse_overlap and overlaps)
 
 
-def dropped(project: Project, where: Landing, palette: Sequence[str]) -> Command:
-    """The one command a drop pushes: its clips placed, and below the last
-    lane the channel they are placed on, so one Undo takes back both."""
+def dropped(
+    project: Project,
+    where: Landing,
+    palette: Sequence[str],
+    layout: Layout = Layout.SERIES,
+) -> Command:
+    """The one command a drop pushes: its clips placed, and the channels
+    they are placed on if it makes any, so one Undo takes back all of it."""
+    if layout is Layout.PARALLEL:
+        return _in_parallel(project, where, palette)
     taken = all_ids(project)
     clips = []
     for sample, start in where.placed:
@@ -135,3 +162,40 @@ def dropped(project: Project, where: Landing, palette: Sequence[str]) -> Command
             [AddChannel(project, channel), DropClips(project, channel, clips)]
         )
     return DropClips(project, project.channels[where.lane], clips)
+
+
+def _in_parallel(project: Project, where: Landing, palette: Sequence[str]) -> Command:
+    """A new channel for each sample, inserted at the lane in the pool's
+    order, each holding its sample from the drop's start (D-112).
+
+    Each channel is made against the project as it will stand with the ones
+    before it, as a paste makes its channels, so the colours carry on in
+    turn; its name is its sample's.
+    """
+    taken = all_ids(project)
+    will_be = project
+    commands: list[Command] = []
+    for offset, (sample, _) in enumerate(where.placed):
+        channel = replace(
+            new_channel(will_be, palette),
+            name=channel_name(sample, {c.name for c in will_be.channels}),
+        )
+        will_be = replace(will_be, channels=[*will_be.channels, channel])
+        clip_id = mint_id(CLIP_PREFIX, taken)
+        taken.add(clip_id)
+        clip = Clip(clip_id, sample.id, where.start, 0, sample.frames)
+        commands.append(AddChannel(project, channel, where.lane + offset))
+        commands.append(DropClips(project, channel, [clip]))
+    return Compound(commands)
+
+
+def channel_name(sample: MediaFile, taken: set[str]) -> str:
+    """A channel holding `sample` alone is named after it: its file name
+    without the suffix, and a number after it if that name is taken."""
+    name = PurePath(sample.name).stem or sample.name
+    number = 2
+    chosen = name
+    while chosen in taken:
+        chosen = f"{name} {number}"
+        number += 1
+    return chosen

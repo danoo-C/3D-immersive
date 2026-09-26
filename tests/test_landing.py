@@ -16,7 +16,13 @@ from immersive.core.model import (
     validate,
 )
 from immersive.core.time import SAMPLE_RATE, Division
-from immersive.ui.timeline.landing import dropped, edges, landing
+from immersive.ui.timeline.landing import (
+    Layout,
+    channel_name,
+    dropped,
+    edges,
+    landing,
+)
 from immersive.ui.timeline.metrics import LANE_HEIGHT
 
 #: 480 samples a pixel; at 120 BPM a sixteenth is 6 000 samples, 12.5 px.
@@ -178,4 +184,77 @@ def test_every_dropped_clip_has_an_id_of_its_own(count: int) -> None:
     assert where is not None
     command = dropped(project, where, PALETTE)
     command.do()
+    assert validate(project) == []
+
+
+# --------------------------------------------------------------------------- #
+# in parallel (D-112)
+# --------------------------------------------------------------------------- #
+
+
+def test_one_sample_asks_nothing_and_several_ask() -> None:
+    project = a_project()
+    one = landing(project, [KICK.id], x=0, y=lane(0), scale=SCALE)
+    two = landing(project, [KICK.id, PAD.id], x=0, y=lane(0), scale=SCALE)
+    assert one is not None and two is not None
+    assert not one.asks and two.asks
+
+
+def test_in_parallel_each_sample_is_a_new_channel_inserted_at_the_lane() -> None:
+    project = a_project(Clip("k-00000001", KICK.id, 0, 0, 30_000))
+    [first, second] = project.channels
+    before = copy.deepcopy(project)
+    stack = UndoStack(project)
+    where = landing(project, [PAD.id, KICK.id], x=25, y=lane(1), scale=SCALE)
+    assert where is not None
+
+    stack.push(dropped(project, where, PALETTE, Layout.PARALLEL))
+
+    channels = project.channels
+    assert [c.name for c in channels] == [first.name, "pad", "kick", second.name]
+    assert channels[0] is first and channels[3] is second
+    assert [(c.clips[0].media_id, c.clips[0].start) for c in channels[1:3]] == [
+        (PAD.id, where.start),
+        (KICK.id, where.start),
+    ]
+    assert [c.color for c in channels[1:3]] == [PALETTE[2], PALETTE[0]], "in turn"
+    assert second.clips == [] and len(first.clips) == 1
+    assert validate(project) == []
+    stack.undo()
+    assert project == before
+
+
+def test_in_parallel_below_the_last_lane_the_channels_go_at_the_end() -> None:
+    project = a_project()
+    where = landing(project, [PAD.id, KICK.id], x=0, y=lane(9), scale=SCALE)
+    assert where is not None and where.creates
+    dropped(project, where, PALETTE, Layout.PARALLEL).do()
+    assert [c.name for c in project.channels[2:]] == ["pad", "kick"]
+
+
+def test_in_parallel_nothing_is_overwritten_even_where_series_is_refused() -> None:
+    project = a_project(Clip("k-00000001", KICK.id, 0, 0, 30_000))
+    where = landing(
+        project, [PAD.id, KICK.id], x=0, y=lane(0), scale=SCALE, refuse_overlap=True
+    )
+    assert where is not None and where.refused
+    dropped(project, where, PALETTE, Layout.PARALLEL).do()
+    [kept] = project.channels[2].clips
+    assert (kept.start, kept.length) == (0, 30_000)
+
+
+def test_a_channel_is_named_after_its_sample_and_numbered_past_a_taken_name() -> None:
+    assert channel_name(KICK, set()) == "kick"
+    assert channel_name(KICK, {"kick"}) == "kick 2"
+    assert channel_name(KICK, {"kick", "kick 2"}) == "kick 3"
+    bare = MediaFile("m-00000003", "/s/README", "README", SAMPLE_RATE, 1, 10)
+    assert channel_name(bare, set()) == "README"
+
+
+def test_the_same_sample_twice_in_parallel_is_two_names() -> None:
+    project = a_project()
+    where = landing(project, [KICK.id, KICK.id], x=0, y=lane(0), scale=SCALE)
+    assert where is not None
+    dropped(project, where, PALETTE, Layout.PARALLEL).do()
+    assert [c.name for c in project.channels[:2]] == ["kick", "kick 2"]
     assert validate(project) == []

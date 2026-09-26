@@ -43,11 +43,17 @@ from PySide6.QtGui import (
     QResizeEvent,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGraphicsScene,
+    QGraphicsView,
+    QMenu,
+    QWidget,
+)
 
 from immersive.core.document import Document
 from immersive.core.edits import Edge, FadeClips, MoveClips, TrimClips
-from immersive.core.model import Channel, Clip, Fade
+from immersive.core.model import Channel, Clip, Fade, Project
 from immersive.core.selection import Kind, between, lane_of
 from immersive.ui import theme
 from immersive.ui.explorer.media_pool import MIME
@@ -63,7 +69,7 @@ from immersive.ui.timeline.dragging import (
     targets,
 )
 from immersive.ui.timeline.grid import Level, grid_lines, tempo_of
-from immersive.ui.timeline.landing import Landing, dropped, landing
+from immersive.ui.timeline.landing import Landing, Layout, dropped, landing
 from immersive.ui.timeline.metrics import LANE_HEIGHT
 
 #: How far one wheel notch zooms. Five notches is about a factor of three.
@@ -122,6 +128,10 @@ class TimelineView(QGraphicsView):
         self._laid_out_at: float | None = None
         #: Where a drag from the pool would land, while one is over the lanes.
         self._landing: Landing | None = None
+        #: The layout menu a drop of several samples opened, and the answer
+        #: it was given last - what `Enter` takes next time (D-112).
+        self._offered: QMenu | None = None
+        self._last_layout = Layout.PARALLEL
         #: Where a left press began, until its release.
         self._press: QPointF | None = None
         #: A selected clip pressed without a modifier: selected alone on the
@@ -663,9 +673,12 @@ class TimelineView(QGraphicsView):
 
     def _hover(self, event: QDragMoveEvent) -> None:
         """Show where it would land, or refuse it - so the pointer says no
-        before the release, rather than accepting and doing nothing."""
+        before the release, rather than accepting and doing nothing. Several
+        samples are never refused: laid out in parallel they overlap
+        nothing, and which layout is asked at the release (D-112)."""
         where = self._landing_of(event)
-        self._landing = where if where is not None and not where.refused else None
+        taken = where is not None and (where.asks or not where.refused)
+        self._landing = where if taken else None
         if self._landing is None:
             event.ignore()
         else:
@@ -683,16 +696,75 @@ class TimelineView(QGraphicsView):
         self.viewport().update()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        """One command, whatever the drop does (F-4)."""
+        """One command, whatever the drop does (F-4). Several samples ask
+        first how they are laid out, in a menu at the pointer (D-112)."""
         where = self._landing_of(event)
         self._landing = None
         self.viewport().update()
-        if where is None or where.refused:
+        if where is None or (where.refused and not where.asks):
             event.ignore()
             return
-        project = self._document.project
-        self._document.push(dropped(project, where, theme.active().channels))
         event.acceptProposedAction()
+        if where.asks:
+            at = self.viewport().mapToGlobal(event.position().toPoint())
+            self.layout_menu(where).popup(at)
+        else:
+            self._drop(where, Layout.SERIES)
+
+    def layout_menu(self, where: Landing) -> QMenu:
+        """The question several samples dropped at `where` ask: in parallel
+        or in series (F-58, D-112). Choosing drops them; closing it, `Esc`
+        or a click elsewhere, drops nothing. `Enter` takes the answer given
+        last, in parallel at first.
+
+        Built here and opened with `popup` rather than `exec`, which would
+        wait for a person - and hang any test that reached it.
+        """
+        project = self._document.project
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        heading = menu.addAction(f"Drop {len(where.placed)} Samples")
+        heading.setEnabled(False)
+        menu.addSeparator()
+
+        parallel = menu.addAction("In &Parallel, a New Channel for Each")
+        target = (
+            "a New Channel"
+            if where.creates
+            else project.channels[where.lane].name.replace("&", "&&")
+        )
+        series = menu.addAction(f"In &Series, on {target}")
+        if where.refused:
+            series.setText(f"{series.text()} (it would overlap)")
+            series.setEnabled(False)
+        for action, layout in ((parallel, Layout.PARALLEL), (series, Layout.SERIES)):
+            action.setData(layout.value)
+            action.triggered.connect(
+                lambda _checked=False, layout=layout: self._chosen(
+                    project, where, layout
+                )
+            )
+        last = series if self._last_layout is Layout.SERIES else parallel
+        menu.setActiveAction(last if last.isEnabled() else parallel)
+        self._offered = menu
+        return menu
+
+    def offered(self) -> QMenu | None:
+        """The layout menu a drop has opened, while it is open."""
+        menu = self._offered
+        return menu if menu is not None and menu.isVisible() else None
+
+    def _chosen(self, project: Project, where: Landing, layout: Layout) -> None:
+        """An answer to the layout menu - dropped only onto the project it
+        was asked about, in case another replaced it in between."""
+        if self._document.project is not project:
+            return
+        self._last_layout = layout
+        self._drop(where, layout)
+
+    def _drop(self, where: Landing, layout: Layout) -> None:
+        project = self._document.project
+        self._document.push(dropped(project, where, theme.active().channels, layout))
 
     # ----------------------------------------------------------- painting
 
@@ -758,7 +830,9 @@ class TimelineView(QGraphicsView):
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             top = self._landing.lane * LANE_HEIGHT + 1
-            for sample, start in self._landing.placed:
+            # Several samples: the first, where either layout starts them.
+            placed = self._landing.placed
+            for sample, start in placed[:1] if self._landing.asks else placed:
                 painter.drawRect(
                     QRectF(start / scale, top, sample.frames / scale, LANE_HEIGHT - 3)
                 )

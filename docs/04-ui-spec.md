@@ -470,13 +470,19 @@ thumbnail. Filter box at the top.
 A drop lands on the lane under the pointer, at the sample under it snapped
 to the grid and to every clip's edges on any channel (F-13, F-17), by that
 channel's own snap setting (F-18), or exactly where it was dropped while
-`Alt` is held. Several rows dropped together go end to end from there, in
-the order the pool lists them, and below the last lane one new channel holds
-them all. A dashed outline shows where it will land before the release. A
+`Alt` is held. Several rows dropped together ask how, in a menu at the
+pointer (F-58, D-112): **In Parallel, a New Channel for Each** inserts a
+channel per sample at that lane, in the order the pool lists them, each
+named after its sample and all starting there; **In Series** puts them end
+to end from there on the lane, or below the last lane on one new channel
+holding them all. `Esc` drops nothing, and `Enter` takes the answer given
+last. A dashed outline shows where it will land before the release - for
+several, the first sample, where both answers start. A
 drop over existing clips trims them to make room, removes those it covers,
 and splits one it lands inside (D-95); with Shift held, a drop that would
-overlap is refused, and the pointer says so before the release. Each drop is
-one Undo, the new channel included.
+overlap is refused, and the pointer says so before the release; several
+rows are offered only in parallel there, which overlaps nothing. Each drop
+is one Undo, the new channels included.
 - Missing files show in `warn` with a relink action.
 
 The folders mirror those beneath what was imported: the deepest folder every

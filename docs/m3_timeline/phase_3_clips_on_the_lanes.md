@@ -55,9 +55,20 @@ clips → phase 4. Fade handles → phase 7. Hearing them → phases 8 and 9.
 - [x] `clip body` is in `04` and the bundled theme.
 - [x] A screenshot of a real arrangement is taken and looked at.
 
+**Amended after the milestone's phases were built (2026-09-26).** Dropping
+several samples asks whether they go *in parallel*, a new channel each, or
+*in series*, end to end as before - asked for once there were stems to drop,
+and added here, where drops were built (F-58, D-112).
+
+- [x] Several rows dropped together open a menu at the pointer, and nothing
+      lands until it is answered: in parallel, a new channel per sample is
+      inserted at the lane, named after it, all from the snapped start; in
+      series, as before. `Esc` drops nothing, `Enter` repeats the last
+      answer, and either answer is one Undo.
+
 ## Implements
 
-F-3 (drawn), F-13, F-17 (on drop), F-21 — *Timeline* and *Media pool* in
+F-3 (drawn), F-13, F-17 (on drop), F-21, F-58 — *Timeline* and *Media pool* in
 [04-ui-spec.md](../04-ui-spec.md), *Rules* in
 [03-data-model.md](../03-data-model.md).
 
@@ -106,3 +117,19 @@ real drag in progress.
 
 The phase adds 57 tests. The suite is 1574: 13 s serially, 5.5 s in
 parallel, 3.4 s in the fast lane.
+
+**In parallel or in series, added after (D-112).** The layout is asked in a
+menu opened with `popup`, not `exec`, so the drop has returned - and the
+drag with it - before anyone answers, and no test can hang on it. The
+answer is checked against the project it was asked about, in case another
+replaced it meanwhile. The new channels are made the way a paste makes its
+own, each against the project as it will stand with the ones before it, so
+the colours carry on in turn. Nineteen mutations, all caught, one only after
+the Shift test was made to start from *In Series* as the last answer: Qt
+highlights no disabled action, so without the fallback `Enter` would have
+done nothing. It adds 16 tests: the suite is 2131.
+
+**Looked at**: the menu over three samples, plain and with Shift over a
+clip (*In Series* greyed, *(it would overlap)*), and the lanes after *In
+Parallel*: *half*, *half 2* and *half 3* above *Channel 1*, coloured in
+turn, each from the snapped second.
