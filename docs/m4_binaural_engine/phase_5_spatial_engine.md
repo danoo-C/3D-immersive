@@ -1,6 +1,6 @@
 # M4 · Phase 5 — The engine, spatial
 
-**Status:** not started · **Plan:** not written yet
+**Status:** planned · **Plan:** [plans/phase_5_spatial_engine.md](plans/phase_5_spatial_engine.md)
 
 ## Goal
 
@@ -32,10 +32,13 @@ position from the pane → phase 7.
       earlier in the right, and one at −X the reverse.
 - [ ] Halving the distance past `ref_distance` raises the level by
       `rolloff × 6.02` dB, and inside `min_distance` it stops rising.
-- [ ] A 440 Hz sawtooth orbiting at 1 rev/s shows block-rate sidebands at
-      least 30 dB below the spike's uncrossfaded figure. With the crossfade
-      disabled by a test-only switch, they are back, so the crossfade is
-      provably running (the roadmap's named test, measured).
+- [ ] A band-limited 440 Hz sawtooth orbiting at 1 rev/s has block-rate
+      sidebands at least 20 dB lower with the crossfade than with it
+      disabled by a test-only switch - S0's measure and S0's line, where it
+      measured 33.7 dB - so the crossfade is provably running (the
+      roadmap's named test, measured). *Amended while planning: as first
+      written this compared against S0's uncrossfaded figure, a number from
+      another engine; the A/B within this one is the measure S0 used.*
 - [ ] No sample is discontinuous across a seek or a snapshot swap: the
       first block after either does not crossfade from a stale filter.
 - [ ] `process()` allocates nothing and keeps nothing with 32 spatial
