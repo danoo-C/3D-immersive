@@ -65,4 +65,9 @@ def run(
     for problem in problems:
         window.notices().add(Severity.WARN, problem)
     window.show()
-    return app.exec()
+    # The HRTF set, on a worker (D-120): here, where a real launch is, and
+    # never in the window's constructor, where every test is.
+    window.prepare_hrtf()
+    code = app.exec()
+    window.stop_work()
+    return code

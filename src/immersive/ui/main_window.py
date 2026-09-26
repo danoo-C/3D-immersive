@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from immersive import __version__
 from immersive.audio.feed import Feed
+from immersive.audio.hrtf.bank import Bank
 from immersive.audio.player import Player
 from immersive.core.commands import Compound
 from immersive.core.document import Document
@@ -60,6 +61,7 @@ from immersive.core.selection import Kind
 from immersive.ui import icons, theme, theme_io, theme_menu
 from immersive.ui.activity import Activities, Activity
 from immersive.ui.explorer.media_pool import MediaPool
+from immersive.ui.hrtf import Preparer
 from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
@@ -207,6 +209,16 @@ class MainWindow(QMainWindow):
         #: What the info box shows of each, while it runs (D-116).
         self._import_activity: Activity | None = None
         self._load_activity: Activity | None = None
+        #: The project's HRTF set, prepared on a worker when the application
+        #: asks (D-120) - never because a window was built.
+        self._hrtf = Preparer(self)
+        self._hrtf.prepared.connect(self._hrtf_prepared)
+        self._hrtf.refused.connect(self._hrtf_refused)
+        self._hrtf.progressed.connect(self._hrtf_progressed)
+        self._bank: Bank | None = None
+        #: The set and block asked for, once anything has asked.
+        self._hrtf_wanted: tuple[str, int] | None = None
+        self._hrtf_activity: Activity | None = None
         self._loading: list[MediaFile] = []
         self._loading_into: Project | None = None
         #: The project an import in flight is for. A different one by the
@@ -726,6 +738,8 @@ class MainWindow(QMainWindow):
         # Reaching here, the open succeeded: every failure returned above.
         self._store.clear()
         self._load_samples()
+        if self._hrtf_wanted is not None:
+            self.prepare_hrtf()  # the set it names, if it names another
 
         missing = [
             media for media in self._document.project.media_pool if media.missing
@@ -1015,8 +1029,7 @@ class MainWindow(QMainWindow):
         closing does not wait for a folder to finish decoding.
         """
         if self._may_discard():
-            self._importer.cancel()
-            self._loader.cancel()
+            self.stop_work()
             if self._player is not None:
                 self._player.close()
             event.accept()
@@ -1560,6 +1573,63 @@ class MainWindow(QMainWindow):
         self._xruns.setText(f"xruns {count}")
         token = "error" if count else "text.disabled"
         self._xruns.setStyleSheet(f"color: {theme.color(token)};")
+
+    def stop_work(self) -> None:
+        """Ask everything on a worker to stop at its next chunk: imports,
+        loads, and preparing the HRTF set. A close does this, and so does
+        `app.run` when the loop ends by other means."""
+        self._importer.cancel()
+        self._loader.cancel()
+        self._hrtf.cancel()
+        if self._hrtf_activity is not None:
+            self._hrtf_activity.finish()
+            self._hrtf_activity = None
+
+    # ------------------------------------------------------------- hrtf
+
+    def prepare_hrtf(self) -> bool:
+        """Prepare the project's HRTF set on a worker, at the output's block
+        size (D-120), showing it in the info box. Asked for by `app.run` and
+        by an open once it has been - never by building a window, so no test
+        pays for a set it did not ask for. Without an output there is nothing
+        to hear a set through, and nothing is prepared."""
+        if self._player is None:
+            return False
+        wanted = (self._document.project.hrtf.id, self._player.engine.block)
+        if wanted == self._hrtf_wanted and (self._bank is not None or self._hrtf.busy):
+            return False
+        self._hrtf_wanted = wanted
+        self._hrtf.start(*wanted)
+        if self._hrtf_activity is None:
+            self._hrtf_activity = self._activities.begin(
+                "Preparing the HRTF set", maximum=1000
+            )
+        return True
+
+    def bank(self) -> Bank | None:
+        """The prepared HRTF set, once it is."""
+        return self._bank
+
+    def _hrtf_progressed(self, thousandths: int) -> None:
+        if self._hrtf_activity is not None:
+            self._hrtf_activity.update(thousandths)
+
+    def _hrtf_prepared(self, bank: Bank) -> None:
+        self._bank = bank
+        self._end_hrtf_activity()
+
+    def _hrtf_refused(self, refused: Refused) -> None:
+        self._end_hrtf_activity()
+        self._notices.add(
+            Severity.WARN,
+            f"{refused.path} {refused.reason}",
+            ["Sounds cannot be placed around the listener until it is there."],
+        )
+
+    def _end_hrtf_activity(self) -> None:
+        if self._hrtf_activity is not None:
+            self._hrtf_activity.finish()
+            self._hrtf_activity = None
 
     def activities(self) -> Activities:
         """Anything slow begins an activity here, and the info box shows it

@@ -279,3 +279,19 @@ def test_a_launch_with_no_audio_stack_starts_and_says_what_to_install(
     assert seen["exit"] == 0
     assert seen["player"] is None
     assert seen["notices"] == [reason]
+
+
+@pytest.mark.gui
+def test_a_launch_asks_for_the_hrtf_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Here, and not in the window's constructor, which every test reaches."""
+    from immersive.ui.main_window import MainWindow
+
+    asked: list[bool] = []
+
+    def recorded(self: MainWindow) -> bool:
+        asked.append(True)
+        return True
+
+    monkeypatch.setattr(MainWindow, "prepare_hrtf", recorded)
+    launched(monkeypatch, Backend())
+    assert asked == [True]
