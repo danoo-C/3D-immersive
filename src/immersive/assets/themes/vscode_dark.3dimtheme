@@ -36,12 +36,32 @@
       "solo.background": "accent.text",
       "solo.text": "surface.window"
     },
+    "check": {
+      "background": "surface.window",
+      "box": "text.disabled",
+      "checked": "accent",
+      "disabled": "text.disabled",
+      "focus": "accent",
+      "text": "text.primary",
+      "tick": "text.primary"
+    },
     "clip": {
       "body": "channel",
       "missing": "text.disabled",
       "selected.border": "accent",
       "text": "text.primary",
       "waveform": "channel"
+    },
+    "combo": {
+      "background": "surface.window",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "focus.border": "accent",
+      "list.background": "surface.raised",
+      "list.border": "border",
+      "list.selected.background": "surface.hover",
+      "list.text": "text.primary",
+      "text": "text.primary"
     },
     "filter": {
       "background": "surface.window",
@@ -61,6 +81,7 @@
     "input": {
       "background": "surface.window",
       "border": "border",
+      "disabled.text": "text.disabled",
       "focus.border": "accent",
       "text": "text.primary"
     },

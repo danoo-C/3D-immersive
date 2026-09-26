@@ -15,6 +15,15 @@ engine's command ring (M3 phase 8), not a stream of undo entries.
 
 A value outside the range is clamped, and the field shows the clamped value,
 which is how it says so. Text that is not a number puts the old value back.
+
+**What it shows and takes is its format's** (`units.Format`): a gain in
+decibels by default, or a duration or a position on the timeline, whose
+value is in samples. `decimals` is how finely the value itself is held.
+
+**It can read `—`**, for several things selected whose values differ
+(04, *Selection*). A press on it then opens it for typing rather than
+dragging, since a drag has no value to start from, and whatever is typed
+is committed even if it happens to equal the value last shown.
 """
 
 from __future__ import annotations
@@ -23,13 +32,16 @@ from PySide6.QtCore import QEvent, QPointF, Qt, Signal
 from PySide6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QLineEdit, QWidget
 
-from immersive.ui.units import parse, show
+from immersive.ui.units import Format, Plain
 
 #: How far a press has to move before it is a drag rather than a click.
 THRESHOLD = 3
 
 #: What Shift does to the rate of a drag.
 FINE = 0.1
+
+#: What a field reads while the things it stands for have different values.
+MIXED = "\N{EM DASH}"
 
 
 class NumericField(QLineEdit):
@@ -48,6 +60,7 @@ class NumericField(QLineEdit):
         unit: str = "",
         decimals: int = 1,
         signed: bool = False,
+        format: Format | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -55,10 +68,11 @@ class NumericField(QLineEdit):
         self._minimum = minimum
         self._maximum = maximum
         self._step = step
-        self._unit = unit
         self._decimals = decimals
-        self._signed = signed
+        self._format: Format = format or Plain(unit, decimals, signed)
         self._value = self._clamped(value)
+        #: Whether it stands for several values that differ, and reads `—`.
+        self._mixed = False
         #: Where a press began and the value it began from, until release.
         self._press: tuple[QPointF, float] | None = None
         self._scrubbing = False
@@ -71,17 +85,38 @@ class NumericField(QLineEdit):
     def value(self) -> float:
         return self._value
 
+    def mixed(self) -> bool:
+        return self._mixed
+
     def set_value(self, value: float) -> None:
         """Show `value` without committing it - the model changed, not the
         person. Ignored while someone is typing, whose text wins."""
         self._value = self._clamped(value)
+        self._mixed = False
         if self.isReadOnly():
             self.setText(self._shown(self._value))
+
+    def set_mixed(self) -> None:
+        """Read `—`: it stands for several values that differ. Like
+        `set_value`, it leaves what is being typed alone."""
+        self._mixed = True
+        if self.isReadOnly():
+            self.setText(MIXED)
+
+    def refresh(self) -> None:
+        """Show the value again in its format, which may read something that
+        has changed since - the tempo, or the ruler's unit."""
+        if self.isReadOnly():
+            self.setText(MIXED if self._mixed else self._shown(self._value))
 
     # ------------------------------------------------------------ the mouse
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if self.isReadOnly() and event.button() is Qt.MouseButton.LeftButton:
+            if self._mixed:
+                self._type()
+                event.accept()
+                return
             self._press = (event.position(), self._value)
             self._scrubbing = False
             event.accept()
@@ -122,7 +157,7 @@ class NumericField(QLineEdit):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if not self.isReadOnly():
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self._commit(parse(self.text(), self._unit))
+                self._commit(self._format.parse(self.text()))
                 event.accept()
                 return
             if event.key() == Qt.Key.Key_Escape:
@@ -133,7 +168,7 @@ class NumericField(QLineEdit):
 
     def focusOutEvent(self, event: QFocusEvent) -> None:
         if not self.isReadOnly():
-            self._commit(parse(self.text(), self._unit))
+            self._commit(self._format.parse(self.text()))
         super().focusOutEvent(event)
 
     def event(self, event: QEvent) -> bool:
@@ -160,21 +195,24 @@ class NumericField(QLineEdit):
         """Back to showing the value, read-only and ready to be dragged."""
         self.setReadOnly(True)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
-        self.setText(self._shown(self._value))
+        self.setText(MIXED if self._mixed else self._shown(self._value))
         self.deselect()
 
     def _commit(self, typed: float | None) -> None:
         """End the gesture on `typed`, clamped; tell the caller if it changed.
-        `None` - text that was not a number - ends it on the old value."""
-        before = self._value
+        `None` - text that was not a number - ends it on the old value, or
+        on `—` if that is what it read. A value typed over `—` is always
+        told: it is new to every thing but the one whose value it matched."""
+        before, mixed = self._value, self._mixed
         if typed is not None:
             self._value = self._clamped(typed)
+            self._mixed = False
         self._rest()
-        if self._value != before:
+        if typed is not None and (mixed or self._value != before):
             self.committed.emit(self._value)
 
     def _clamped(self, value: float) -> float:
         return round(min(max(value, self._minimum), self._maximum), self._decimals)
 
     def _shown(self, value: float) -> str:
-        return show(value, self._unit, decimals=self._decimals, signed=self._signed)
+        return self._format.show(value)

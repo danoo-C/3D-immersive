@@ -164,6 +164,27 @@ QLineEdit#NumericField, QLineEdit#ChannelRename {
 QLineEdit#NumericField:focus, QLineEdit#ChannelRename:focus {
     border-color: $input_focus_border;
 }
+QLineEdit#NumericField:disabled { color: $input_disabled_text; }
+
+/* Combo boxes (M3): the parameters pane is the first to draw one. 04 listed
+   them under M8, for whichever milestone drew one first. The arrow is the
+   style's own. The check box paints itself, from the painted `check` group:
+   a sheet that styles its indicator loses the tick. */
+QComboBox {
+    background-color: $combo_background;
+    color: $combo_text;
+    border: 1px solid $combo_border;
+    border-radius: 3px;
+    padding: 1px 6px;
+}
+QComboBox:focus { border-color: $combo_focus_border; }
+QComboBox:disabled { color: $combo_disabled_text; }
+QComboBox QAbstractItemView {
+    background-color: $combo_list_background;
+    color: $combo_list_text;
+    border: 1px solid $combo_list_border;
+    selection-background-color: $combo_list_selected_background;
+}
 
 /* Channel headers (M3). Every "on" carries a letter as well as a colour, and
    a channel silenced by another's solo says so in words (04, Accessibility

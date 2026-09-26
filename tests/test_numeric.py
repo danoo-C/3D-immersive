@@ -11,7 +11,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
-from immersive.ui.widgets.numeric import THRESHOLD, NumericField
+from immersive.ui.units import Duration
+from immersive.ui.widgets.numeric import MIXED, THRESHOLD, NumericField
 
 pytestmark = pytest.mark.gui
 
@@ -240,3 +241,84 @@ def test_while_typing_it_claims_what_any_text_field_does(key: Qt.Key) -> None:
     assert not field.isReadOnly()
 
     assert claims(field, key)
+
+
+# --------------------------------------------------------------------------- #
+# reading `—`, and other formats
+# --------------------------------------------------------------------------- #
+
+
+def test_a_mixed_field_reads_a_dash_until_a_value_is_set() -> None:
+    field, _ = a_field(-6.0)
+    field.set_mixed()
+    assert field.text() == MIXED and field.mixed()
+    field.set_value(-3.0)
+    assert field.text() == "-3.0 dB" and not field.mixed()
+
+
+def test_a_press_on_a_mixed_field_opens_it_for_typing_not_dragging() -> None:
+    field, commits = a_field(-6.0)
+    field.set_mixed()
+
+    drag(field, [40, 90, 140])
+
+    assert not field.isReadOnly(), "open for typing"
+    assert field.selectedText() == MIXED
+    assert commits == [], "a drag from a dash has no value to start from"
+
+
+def test_a_value_typed_over_a_dash_is_committed_even_if_it_matches() -> None:
+    """It matched one of the things, and is new to the others."""
+    field, commits = a_field(-6.0)
+    field.set_mixed()
+    typed(field, "-6")
+    assert commits == [-6.0]
+    assert field.text() == "-6.0 dB" and not field.mixed()
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Escape, Qt.Key.Key_Return])
+def test_escape_or_nonsense_over_a_dash_puts_the_dash_back(key: Qt.Key) -> None:
+    field, commits = a_field(-6.0)
+    field.set_mixed()
+    typed(field, "loud", key=key)
+    assert field.text() == MIXED and field.mixed() and commits == []
+
+
+def test_set_mixed_leaves_what_is_being_typed_alone() -> None:
+    field, _ = a_field(-6.0)
+    drag(field, [40, 40])
+    QTest.keyClicks(field, "-9")
+    field.set_mixed()
+    assert field.text() == "-9"
+
+
+def test_a_field_shows_and_takes_its_format() -> None:
+    """A duration: the value is samples, the text is seconds."""
+    field = NumericField(
+        48_000, minimum=0, maximum=480_000, step=480, decimals=0, format=Duration()
+    )
+    field.show()
+    commits: list[float] = []
+    field.committed.connect(commits.append)
+    assert field.text() == "1.000 s"
+
+    typed(field, "250 ms")
+
+    assert commits == [12_000] and field.text() == "0.250 s"
+
+
+def test_refresh_reads_the_format_again() -> None:
+    shown = ["one"]
+
+    class Changing:
+        def show(self, value: float) -> str:
+            return shown[0]
+
+        def parse(self, text: str) -> float | None:
+            return None
+
+    field = NumericField(0, minimum=0, maximum=1, step=1, format=Changing())
+    assert field.text() == "one"
+    shown[0] = "two"
+    field.refresh()
+    assert field.text() == "two"
