@@ -15,7 +15,7 @@ channel and project views of the *Parameters pane* in
 |---|---|
 | [1 — The HRTF set](phase_1_hrtf_set.md) | ✅ |
 | [2 — ITD and minimum phase](phase_2_itd_minimum_phase.md) | ✅ |
-| [3 — Directions](phase_3_directions.md) | planned |
+| [3 — Directions](phase_3_directions.md) | ✅ |
 | [4 — The bank, and its cache](phase_4_bank.md) | not started |
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | not started |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | not started |
@@ -116,3 +116,8 @@ agreement, the largest ITD 38.3 samples on the interaural axis. Checking
 every response rather than S0's twenty found that the magnitude holds to
 0.019 dB within 30 dB of each peak, but not at the floors of notches 80 dB
 down, which 256 taps cannot carry. The acceptance was amended to say so.
+
+**Phase 3.** A direction is located on the audio thread without allocating
+(D-119): a cube map of sampled cells and a walk across shared edges, in
+place of S0's KD-tree, which returns new arrays on every query. 3.5 µs a
+direction, 215 µs for 32 sources, and the ITD continuous as S0 measured.

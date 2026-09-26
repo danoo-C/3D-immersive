@@ -48,8 +48,15 @@ triangle and take **barycentric weights** over its three vertices.
 - Minimum-phase HRIRs: weighted sum in the frequency domain.
 - ITD: weighted sum of the three scalar delays.
 
-Triangle lookup is accelerated by a `cKDTree` over face centroids — nearest few
-candidates, then an exact barycentric test.
+Triangle lookup runs on the audio thread, every block, so it may not allocate
+(D-106). The `cKDTree` over face centroids, which returns new arrays on every
+query, only builds the index (D-119). That index is a cube map of 64 × 64
+cells a face, each listing the faces that contain points sampled inside it.
+A query tests its cell's few candidates exactly, by barycentric
+coordinates. One that none of them contains walks across shared edges, and
+the walk ends because the hull of points on a sphere is their Delaunay
+triangulation. For SADIE II D1: 4.2 candidates a cell, and 3.5 µs a
+direction.
 
 ### 4. Prepare the bank
 

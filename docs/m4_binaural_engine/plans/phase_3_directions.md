@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 3 — Directions
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -96,4 +96,13 @@ query, and a conservative index was 93 MB. So: sampled cells, and a walk.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, faster than the plan feared: 3.5 µs a direction against
+the prototype's 10.8, once the query was plain Python on tuples. The plan
+missed one test, the index doing its job, which it only learned when a
+broken index passed on the walk's back. It named one mutation (the
+allocating product) that D-106's own measure cannot tell from a float, and
+one (the ITD's magnitude) that belongs to phase 5.
+
+What phase 4 needs: `Lookup.build(directions)`, 1.3 s for SADIE, to cache
+with the decomposition and the bank. What phase 5 needs: `weigh()` and
+`blend()` into preallocated arrays, every block.
