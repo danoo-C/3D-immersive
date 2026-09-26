@@ -22,6 +22,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
+from immersive.core.clipboard import Clipboard
 from immersive.core.commands import Command, UndoStack
 from immersive.core.io import project_io
 from immersive.core.model import Problem, Project
@@ -43,6 +44,9 @@ class Document:
         #: - which is also what empties it on New and Open, since nothing of
         #: the old project is in the new one.
         self._selection = Selection()
+        #: What Copy and Cut took (D-99): this project's, and emptied with
+        #: the selection when the project is replaced.
+        self._clipboard = Clipboard()
 
     # ------------------------------------------------------------- reading
 
@@ -53,6 +57,10 @@ class Document:
     @property
     def selection(self) -> Selection:
         return self._selection
+
+    @property
+    def clipboard(self) -> Clipboard:
+        return self._clipboard
 
     @property
     def path(self) -> Path | None:
@@ -156,7 +164,8 @@ class Document:
         self._stack.mark_saved()
 
     def _replace(self, project: Project, path: Path | None) -> None:
-        """A new project gets a new stack: history does not cross projects.
+        """A new project gets a new stack: history does not cross projects,
+        and nor does the clipboard.
 
         Keeping the old stack would let Undo reach into a project that is no
         longer open and edit objects nobody can see.
@@ -164,6 +173,9 @@ class Document:
         self._project = project
         self._stack = UndoStack(project)
         self._path = path
+        # Emptied, not pruned: it holds copies, which no project holds, and
+        # the ids they name mean nothing in the new one (D-99).
+        self._clipboard.clear()
         self._changed()
 
     def _changed(self) -> None:

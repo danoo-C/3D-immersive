@@ -210,6 +210,11 @@ another's time is a collision to resolve, not a reordering.
 - **A split** leaves the head as the clip and makes the tail a new one;
   together they play exactly the samples the clip did. It is not made where
   either part would be shorter than `MIN_CLIP_LENGTH`.
+- **A paste lands as a drop does** (D-100). The pasted clips are new ones,
+  with fresh ids, copied from what Copy or Cut took (D-99). They keep their
+  distances from each other in time and in channels, and they overwrite what
+  they cover by the rule above. Channels a paste needs past the last are
+  made in the same edit.
 - A fade stays on its edge through a trim or a split, cut to fit what is
   left, and an edge a split or a drop made has none of its own.
 - `offset + length` must not exceed `MediaFile.frames`.

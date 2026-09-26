@@ -13,6 +13,7 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
+from immersive.core.clipboard import Clipboard
 from immersive.core.commands import Command, Compound, UndoStack
 from immersive.core.edits import (
     AddChannel,
@@ -23,6 +24,7 @@ from immersive.core.edits import (
     MoveChannel,
     MoveClip,
     MoveClips,
+    PasteClips,
     RemoveChannel,
     RemoveClip,
     RemoveClips,
@@ -44,6 +46,7 @@ from immersive.core.model import (
 from immersive.core.time import SAMPLE_RATE
 
 MEDIA = "m-00000001"
+PALETTE = ("#A855F7", "#22D3EE", "#F59E0B")
 
 
 def a_project() -> Project:
@@ -68,6 +71,12 @@ def a_channel(identifier: str = "c-00000009") -> Channel:
 
 def a_clip(identifier: str = "k-00000009", start: int = 48_000) -> Clip:
     return Clip(identifier, MEDIA, start, 0, 24_000)
+
+
+def pasting(project: Project, clips: list[Clip], lane: int, at_: int) -> PasteClips:
+    board = Clipboard()
+    board.hold(project, clips)
+    return PasteClips(project, board.held(), lane, at_, PALETTE)
 
 
 # --------------------------------------------------------------------------- #
@@ -123,6 +132,13 @@ EDITS: dict[str, Build] = {
     "split a clip": lambda p: SplitClips(p, [p.channels[0].clips[0]], 12_000),
     "duplicate clips": lambda p: DuplicateClips(p, p.channels[0].clips),
     "remove clips": lambda p: RemoveClips(p, p.channels[0].clips),
+    "paste clips onto an empty lane": lambda p: pasting(
+        p, p.channels[0].clips, 1, 10_000
+    ),
+    "paste clips over their originals": lambda p: pasting(
+        p, p.channels[0].clips, 0, 12_000
+    ),
+    "paste clips past the last lane": lambda p: pasting(p, p.channels[0].clips, 2, 0),
     "a compound of three": lambda p: Compound(
         [
             SetAttribute(p.channels[0], "name", "Renamed"),
@@ -832,7 +848,7 @@ def test_any_run_of_edits_stays_valid_and_undoes_to_where_it_began(seed: int) ->
         if not clips:
             break
         chosen = rng.sample(clips, rng.randint(1, min(3, len(clips))))
-        verb = rng.choice(["move", "trim", "split", "duplicate", "remove"])
+        verb = rng.choice(["move", "trim", "split", "duplicate", "paste", "remove"])
         if verb == "move":
             command: Command = MoveClips(
                 project, chosen, rng.randint(-60_000, 60_000), rng.randint(-2, 2)
@@ -845,6 +861,15 @@ def test_any_run_of_edits_stays_valid_and_undoes_to_where_it_began(seed: int) ->
             command = SplitClips(project, chosen, rng.randint(0, 400_000))
         elif verb == "duplicate":
             command = DuplicateClips(project, chosen)
+        elif verb == "paste":
+            if len(project.channels) > 5:
+                continue
+            command = pasting(
+                project,
+                chosen,
+                rng.randrange(len(project.channels)),
+                rng.randint(0, 400_000),
+            )
         else:
             if rng.random() < 0.7:
                 continue

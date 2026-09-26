@@ -27,6 +27,7 @@ from immersive.core.model import (
     Project,
     all_ids,
     mint_id,
+    new_channel,
 )
 
 _T = TypeVar("_T")
@@ -474,6 +475,80 @@ class DuplicateClips(_Rearrangement):
             self._list(channel, after)
             for clip, placing in changed.values():
                 self._placing(clip, placing)
+
+
+class PasteClips(_Rearrangement):
+    """Copies of `held` landed with the topmost on lane `lane` and the
+    earliest starting at `at` (D-100).
+
+    `held` is what a `Clipboard` holds: each clip with its lane counted from
+    the topmost and its start from the earliest. Every copy gets a fresh id
+    and fades of its own, and lands as a drop does, overwriting what it
+    covers. Lanes past the last become new channels, named and coloured in
+    turn from `palette`, and are part of this one edit.
+
+    `copies` is the clips it lands, in the order given, and `channels` the
+    channels it adds. A clip whose sample is not in the pool is refused here,
+    at construction: a paste never names nothing (D-99).
+    """
+
+    def __init__(
+        self,
+        project: Project,
+        held: Sequence[tuple[int, Clip]],
+        lane: int,
+        at: int,
+        palette: Sequence[str],
+    ) -> None:
+        super().__init__()
+        if lane < 0 or at < 0:
+            raise ValueError(f"a paste lands at a lane and a time, not {lane}, {at}")
+        pool = {media.id for media in project.media_pool}
+        if gone := sorted({clip.media_id for _, clip in held} - pool):
+            raise ValueError(f"{', '.join(gone)} is not in the pool")
+        self.project = project
+        self.copies: list[Clip] = []
+        self.channels: list[Channel] = []
+        if not held:
+            return
+
+        # Each new channel is made against the project as it will stand with
+        # the ones before it, so the names and the colours carry on in turn.
+        needed = lane + max(offset for offset, _ in held) + 1
+        will_be = project
+        while len(will_be.channels) < needed:
+            channel = new_channel(will_be, palette)
+            self.channels.append(channel)
+            will_be = replace(will_be, channels=[*will_be.channels, channel])
+
+        taken = all_ids(will_be)
+        arriving: dict[int, list[tuple[Clip, _Placing]]] = {}
+        for offset, clip in held:
+            copy = replace(
+                clip,
+                id=mint_id(CLIP_PREFIX, taken),
+                start=at + clip.start,
+                fade_in=replace(clip.fade_in),
+                fade_out=replace(clip.fade_out),
+            )
+            taken.add(copy.id)
+            self.copies.append(copy)
+            arriving.setdefault(lane + offset, []).append((copy, _placing(copy)))
+        for index in sorted(arriving):
+            channel = will_be.channels[index]
+            after, changed = _settle(channel.clips, arriving[index], taken)
+            self._list(channel, after)
+            for clip, placing in changed.values():
+                self._placing(clip, placing)
+
+    def do(self) -> None:
+        self.project.channels.extend(self.channels)
+        super().do()
+
+    def undo(self) -> None:
+        super().undo()
+        if self.channels:
+            del self.project.channels[-len(self.channels) :]
 
 
 class RemoveClips(_Rearrangement):

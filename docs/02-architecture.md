@@ -61,6 +61,7 @@ src/immersive/
     media_store.py       preparing a file, the session's decoded audio (D-93, M2)
     selection.py         what is currently selected, owned by the document,
                          observed by ui (D-96, M3)
+    clipboard.py         what Copy and Cut took, owned by the document (D-99, M3)
     signals.py           tiny observer so core can notify without Qt
     io/
       project_io.py      .3dim (de)serialisation + schema migration
