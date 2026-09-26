@@ -276,10 +276,13 @@ per machine and build" (D-40) is worth re-checking after a numpy upgrade.
 
 ### Metering
 
-The bus also publishes a peak per channel pair, with a decay, for the master
-meter (F-54). It is read by the UI at frame rate and written by the audio
-thread as two floats — no history, no allocation, no lock: a stale read is one
-frame of a meter, which nobody can see.
+The bus also publishes a peak per side for the master meter (F-54): the
+highest level each side has reached since the UI last took them. The audio
+thread raises two floats in a preallocated array; the UI reads both and sets
+them back to zero at frame rate (`Engine.take_peaks`). No history, no
+allocation, no lock: a block that lands between the read and the reset is one
+frame of a meter, which nobody can see. The hold and decay a meter shows are
+the meter's own, drawn on the UI thread.
 
 Per-channel meters are deliberately absent (D-55). What the master meter is
 *for* is the thing that is genuinely hard to predict here: 32 sources summing
@@ -293,9 +296,14 @@ graph steps discontinuously ~94 times a second. Two separate mechanisms.
 
 ### Gains: a per-sample ramp
 
-Channel, distance, pan and master gains are smoothed per sample with a one-pole
-ramp across the block. Cheap, and scalar gains have no memory, so nothing more
-is needed.
+Channel, distance, pan and master gains are smoothed per sample with a linear
+ramp across one block: each sample moves an equal step from where the last
+block left the gain, and the block's last sample lands on the new value. Cheap,
+and scalar gains have no memory, so nothing more is needed. Linear rather than
+the one-pole this section first named, because a one-pole never arrives: a
+gain that has reached its target costs one multiply per sample, or none at
+0 dB, which is what keeps a whole-sample clip bit-transparent (D-42). Mute and
+solo are gains of nothing (D-105), so they ramp too, and do not click.
 
 ### Filters: an unconditional per-block crossfade
 
@@ -370,10 +378,24 @@ Bookkeeping:
 
 Given a block `[t, t+block)`, for each channel find the clips overlapping it.
 Clips are kept sorted and non-overlapping (see
-[03-data-model.md](03-data-model.md)), so this is a cursor advance, not a search.
-Clip reads are `numpy` slices out of the resident decoded array at
-`offset + (t - start)`, with fade envelopes multiplied in from precomputed
-tables.
+[03-data-model.md](03-data-model.md)), so their ends are sorted too, and the
+first clip a block needs is one binary search on them. This section first
+named a cursor advanced along the clips; at tens of clips a channel the search
+costs as little, and it keeps no state, so a seek or a snapshot swap has no
+cursor to reset. Clip reads are `numpy` slices out of the resident decoded
+array at `offset + (t - start)`, with fade envelopes multiplied in from
+precomputed tables.
+
+**What plays is a snapshot** (D-105): each channel's clips with their samples,
+their gain as a factor, and their head and tail tables, built on the UI thread
+and never written after. A channel's gain, mute and solo arrive separately,
+through the command ring, as one linear gain each.
+
+**A fade is sampled from `FadeShape.gain`**, the curve the clip draws. A
+fade-in `L` samples long is `gain(k / L)` at its `k`th sample, so its first
+sample is silent and the one after it whole; a fade-out is the same table
+backwards, so its last sample is silent. Tables are shared between clips with
+the same fade, and read-only.
 
 ### Implicit edge fades
 
@@ -388,11 +410,12 @@ full-length stem placed at 0 therefore stays bit-transparent, which matters
 because that is exactly the bypassed-backing-track case (D-32).
 
 The implicit fade is not stored in the project and not drawn in the UI. An
-explicit fade replaces it rather than adding to it. See the Rules in
-[03-data-model.md](03-data-model.md).
+explicit fade replaces it rather than adding to it, and it is never more than
+half the clip. See the Rules in [03-data-model.md](03-data-model.md).
 
-Seeking resets cursors, zeroes the overlap-add tails, and sets
-`H_prev = H_cur`.
+Seeking moves the playhead, through the command ring so it cannot race a swap.
+From M4 it also zeroes the overlap-add tails and sets `H_prev = H_cur`; the
+flat engine has neither.
 
 ## The output stream
 
@@ -467,13 +490,21 @@ dispatch legitimately differ in the last bits.
 ## Realtime safety checklist
 
 Enforced by review and by a test that runs `process()` under
-`tracemalloc` asserting zero allocation:
+`tracemalloc` asserting zero allocation. In Python that means what D-106 says:
+no memory kept from one block to the next, and no numpy array made inside a
+block. A slice is a view and an integer past 256 is an object, and those few
+dozen bytes are not what the rule is for. The test runs 500 blocks of 2048
+frames through every path, and fails on anything kept or on any block raising
+traced memory's peak by 2 KiB:
 
 - No allocation, no `append`, no f-strings, no `logging` inside `process()`.
 - No locks. UI→audio is the command ring; structural changes are an atomic
   snapshot swap.
 - `gc.freeze()` after load; explicit collection on the UI thread only.
 - Every numpy op writes into a preallocated buffer via `out=`.
+- **No ufunc broadcasts.** A `(B, 1)` ramp over a `(B, 2)` block allocates
+  17 KiB behind `out=`, measured. Buffers are planar, one contiguous row per
+  ear, and a ramp is applied a row at a time.
 - **numpy ≥ 2.0 is required, not merely preferred.** The rule above is only
   achievable because `np.fft.rfft` and `np.fft.irfft` accept `out=` and operate
   on float32 without silently upcasting to float64. Both arrived in numpy 2.0.

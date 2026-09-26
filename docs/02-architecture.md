@@ -70,6 +70,7 @@ src/immersive/
 
   audio/
     engine.py            the realtime graph. THE SEAM.
+    feed.py              the UI thread's side: snapshots and commands (D-105, M3)
     device.py            sounddevice stream lifecycle, device enumeration
     scheduler.py         timeline → which clips are active this block
     dsp.py               gain, fades, resampling, limiter
@@ -305,6 +306,16 @@ The audio thread never reads the `Project` model. Instead:
 - **Structural changes** (add clip, load media) build a new immutable
   *engine snapshot* on the UI thread and hand it over with one atomic pointer
   swap. The old snapshot is freed on the UI thread, never in the callback.
+
+Which is which is D-105's. Clips, samples, clip gain, fades and the channels'
+order are the snapshot's; a channel's gain, mute and solo, folded into one
+linear gain on the UI thread, and a seek are the ring's. A gain command names
+the generation of the snapshot it was worked out against, and one naming
+another is dropped: after a reorder its channel's index means someone else.
+The feed (`audio/feed.py`) decides which to send after every change the
+document reports, and holds every snapshot it has handed over until the engine
+has moved past it - the engine never holds the only reference, so it is the
+feed, on the UI thread, that frees one.
 
 ### Keeping the callback honest
 
