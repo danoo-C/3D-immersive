@@ -22,11 +22,24 @@ from dataclasses import replace
 from typing import Any, TypeVar
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QIcon,
+    QPainter,
+    QPaintEvent,
+    QPalette,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMenu,
+    QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -41,11 +54,24 @@ from immersive.core.edits import (
     SlipClips,
     fade_room,
 )
-from immersive.core.model import MIN_CLIP_LENGTH, Clip, Fade, FadeShape
-from immersive.ui.timeline.grid import Unit
-from immersive.ui.units import Duration, Plain, Position
+from immersive.core.io.peaks import Pyramid
+from immersive.core.model import (
+    MIN_CLIP_LENGTH,
+    Channel,
+    Clip,
+    Fade,
+    FadeShape,
+    MediaFile,
+    SnapSetting,
+)
+from immersive.core.time import SAMPLE_RATE
+from immersive.ui import theme
+from immersive.ui.timeline.grid import Unit, snap_text
+from immersive.ui.timeline.snap_menu import fill_snap_menu
+from immersive.ui.units import Duration, Plain, Position, clock
 from immersive.ui.widgets.check import CheckBox
 from immersive.ui.widgets.numeric import MIXED, NumericField
+from immersive.ui.widgets.waveform import Waveform
 
 #: Why a field is drawn but dead, by the milestone that brings it.
 M4 = "the binaural engine arrives at M4"
@@ -72,6 +98,7 @@ TIME_STEP = 480
 SHAPES = {FadeShape.LINEAR: "Linear", FadeShape.EQUAL_POWER: "Equal power"}
 
 _T = TypeVar("_T")
+_W = TypeVar("_W", bound=QWidget)
 
 
 def common(values: Sequence[_T]) -> tuple[bool, _T | None]:
@@ -98,7 +125,7 @@ def show_check(box: CheckBox, values: Sequence[bool]) -> None:
         box.set_mixed()
 
 
-def dead(widget: QWidget, what: str, arrives: str) -> QWidget:
+def dead(widget: _W, what: str, arrives: str) -> _W:
     """Drawn, disabled, and saying why and until when."""
     widget.setEnabled(False)
     widget.setToolTip(f"{what}\nNot built yet — {arrives}.")
@@ -464,9 +491,303 @@ class ClipView(View):
         )
 
 
-class Summary(View):
-    """A kind whose view is not built yet: what is selected, and nothing to
-    edit. Replaced in the steps that build each."""
+class ChannelView(View):
+    """One channel or several: what the header edits - name, colour, gain,
+    mute, solo, bypass and snap - and the position and pan that later
+    milestones bring, drawn until then.
 
-    def __init__(self, document: Document, heading: str) -> None:
-        super().__init__(document, heading)
+    The header and the pane read the same channel after every change, so an
+    edit in either shows in both. Several channels take every field but the
+    name, which reads `—` and is disabled: one name for several channels is
+    never wanted, and giving it loses every other name at once.
+    """
+
+    def __init__(self, document: Document) -> None:
+        super().__init__(document, "Channel")
+        self.name = QLineEdit()
+        self.name.setObjectName("PaneText")
+        self.name.setToolTip("The channel's name — type, then Enter")
+        self.name.editingFinished.connect(self._rename)
+        self.row("Name", self.name)
+
+        self.colour = QToolButton()
+        self.colour.setObjectName("ColourSwatch")
+        self.colour.setToolTip("The channel's colour, from the theme's palette")
+        self.colour.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.colour.setMenu(QMenu(self.colour))
+        self.colour.menu().aboutToShow.connect(self.colour_menu)
+        self.row("Colour", self.colour)
+
+        self.gain = numeric(
+            0,
+            minimum=GAIN_FLOOR,
+            maximum=GAIN_CEILING,
+            step=0.1,
+            unit="dB",
+            signed=True,
+            tip="Channel gain — drag, or click and type",
+            committed=lambda value: self._set("gain_db", value),
+        )
+        self.row("Gain", self.gain)
+
+        self.mute = CheckBox("Mute")
+        self.solo = CheckBox("Solo")
+        self.bypass = CheckBox("HRTF bypass")
+        self.mute.setToolTip("Mute — mute wins over solo")
+        self.solo.setToolTip("Solo — several can be soloed")
+        self.bypass.setToolTip(
+            "HRTF bypass  (B)\nStraight to the stereo bus, unprocessed — heard at M4"
+        )
+        for box, name in (
+            (self.mute, "mute"),
+            (self.solo, "solo"),
+            (self.bypass, "hrtf_bypass"),
+        ):
+            box.clicked.connect(lambda on, name=name: self._set(name, bool(on)))
+            self.row("", box)
+
+        self.snap = QToolButton()
+        self.snap.setObjectName("PaneSnap")
+        self.snap.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.snap.setMenu(QMenu(self.snap))
+        self.snap.menu().aboutToShow.connect(self.snap_menu)
+        self.row("Snap", self.snap)
+
+        self.position = [
+            dead(
+                numeric(0, minimum=-100, maximum=100, step=0.01, unit="m", decimals=2),
+                f"{axis}: where the channel sits, in metres",
+                M5,
+            )
+            for axis in ("X", "Y", "Z")
+        ]
+        for axis, field in zip(("X", "Y", "Z"), self.position, strict=True):
+            self.row(f"Position {axis}", field)
+        self.pan = numeric(0, minimum=-1, maximum=1, step=0.01, decimals=2)
+        self._pan_row = self.row(
+            "Pan", dead(self.pan, "Left or right, on the bypass path", M4)
+        )
+
+    def _channels(self) -> list[Channel]:
+        return self._document.selection.channels()
+
+    def show_values(self) -> None:
+        channels = self._channels()
+        if not channels:
+            return
+        count = len(channels)
+        self.set_heading("Channel" if count == 1 else f"{count} channels")
+        if not self.name.hasFocus():
+            single = count == 1
+            self.name.setEnabled(single)
+            self.name.setText(channels[0].name if single else MIXED)
+            self.name.setToolTip(
+                "The channel's name — type, then Enter"
+                if single
+                else "Rename one channel at a time"
+            )
+        same, colour = common([channel.color for channel in channels])
+        if same and colour is not None:
+            swatch = QPixmap(12, 12)
+            swatch.fill(QColor(colour))
+            self.colour.setIcon(QIcon(swatch))
+            self.colour.setText("")
+        else:
+            self.colour.setIcon(QIcon())
+            self.colour.setText(MIXED)
+        show_number(self.gain, [channel.gain_db for channel in channels])
+        show_check(self.mute, [channel.mute for channel in channels])
+        show_check(self.solo, [channel.solo for channel in channels])
+        show_check(self.bypass, [channel.hrtf_bypass for channel in channels])
+        same, override = common([channel.snap_override for channel in channels])
+        if not same:
+            self.snap.setText(MIXED)
+        elif override is None:
+            self.snap.setText("Follows the project")
+        else:
+            self.snap.setText(snap_text(override).removeprefix("Snap "))
+        for field, values in zip(
+            self.position,
+            (
+                [c.position.x for c in channels],
+                [c.position.y for c in channels],
+                [c.position.z for c in channels],
+            ),
+            strict=True,
+        ):
+            show_number(field, values)
+        show_number(self.pan, [channel.pan for channel in channels])
+        # 04: pan only when bypassed - it means nothing on the spatial path.
+        bypassed = all(channel.hrtf_bypass for channel in channels)
+        self.pan.setVisible(bypassed)
+        label = self._form.labelForField(self.pan)
+        if label is not None:
+            label.setVisible(bypassed)
+
+    def colour_menu(self) -> QMenu:
+        """The theme's channel palette, the shared colour checked."""
+        menu = self.colour.menu()
+        menu.clear()
+        channels = self._channels()
+        for number, colour in enumerate(theme.active().channels, start=1):
+            swatch = QPixmap(12, 12)
+            swatch.fill(QColor(colour))
+            action = QAction(QIcon(swatch), f"Colour {number}", menu)
+            action.setCheckable(True)
+            action.setChecked(all(c.color.upper() == colour.upper() for c in channels))
+            action.triggered.connect(
+                lambda _checked=False, colour=colour: self._set("color", colour)
+            )
+            menu.addAction(action)
+        return menu
+
+    def snap_menu(self) -> QMenu:
+        """The header's snap menu, for every selected channel: what the first
+        one does is checked, and a choice is made for all of them."""
+        channels = self._channels()
+        project = self._document.project
+        override = channels[0].snap_override if channels else None
+
+        def choose(chosen: SnapSetting | None) -> None:
+            self._set("snap_override", chosen)
+
+        return fill_snap_menu(
+            self.snap.menu(),
+            override if override is not None else project.snap,
+            choose,
+            following=override is None,
+        )
+
+    def _set(self, name: str, value: object) -> None:
+        self._push(set_on_all(self._channels(), name, value))
+
+    def _rename(self) -> None:
+        channels = self._channels()
+        text = self.name.text().strip()
+        if len(channels) == 1 and text:
+            self._set("name", text)
+        else:
+            self.show_values()
+
+
+class Elided(QLabel):
+    """One line, cut in the middle to fit rather than run past the pane's
+    edge - a path's two ends are the parts worth reading. The tooltip has
+    all of it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def full(self) -> str:
+        return self._full
+
+    def set_full(self, text: str) -> None:
+        self._full = text
+        self.setToolTip(text)
+        self.setText(text)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        try:
+            painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                self.fontMetrics().elidedText(
+                    self._full, Qt.TextElideMode.ElideMiddle, self.width()
+                ),
+            )
+        finally:
+            painter.end()
+
+
+class MediaView(View):
+    """One sample or several: where its file is, what it was before
+    resampling, how long it is, and all of it drawn. The audition button
+    plays it straight to the output, or says why it cannot (F-8)."""
+
+    def __init__(
+        self,
+        document: Document,
+        peaks: Callable[[str], Pyramid | None],
+        audition: Callable[[str], bool] | None,
+        unavailable: str,
+    ) -> None:
+        super().__init__(document, "Sample")
+        self._peaks = peaks
+        self._audition = audition
+        self._unavailable = unavailable
+        self.path = Elided()
+        self.row("Path", self.path)
+        self.rate = QLabel()
+        self.row("Source rate", self.rate)
+        self.channels = QLabel()
+        self.row("Channels", self.channels)
+        self.length = QLabel()
+        self.row("Duration", self.length)
+        self.waveform = Waveform()
+        self.waveform.setMinimumHeight(64)
+        self.row("", self.waveform)
+        self.hear = QToolButton()
+        self.hear.setObjectName("Audition")
+        self.hear.setText("Audition")
+        self.hear.clicked.connect(self._hear)
+        self.row("", self.hear)
+
+    def _media(self) -> list[MediaFile]:
+        return self._document.selection.media()
+
+    def show_values(self) -> None:
+        media = self._media()
+        if not media:
+            return
+        count = len(media)
+        self.set_heading(media[0].name if count == 1 else f"{count} samples")
+
+        def shared(values: Sequence[object], shown: Callable[[Any], str]) -> str:
+            same, value = common(list(values))
+            return shown(value) if same else MIXED
+
+        self.path.set_full(shared([m.path for m in media], str))
+        self.rate.setText(
+            shared(
+                [m.source_rate for m in media],
+                lambda rate: f"{rate:,} Hz".replace(",", " "),
+            )
+        )
+        self.channels.setText(
+            shared(
+                [m.channels for m in media],
+                lambda n: {1: "Mono", 2: "Stereo"}.get(n, str(n)),
+            )
+        )
+        self.length.setText(shared([m.frames for m in media], duration_of))
+        one = media[0] if count == 1 else None
+        self.waveform.setVisible(one is not None)
+        if one is not None:
+            self.waveform.set_peaks(self._peaks(one.id), missing=one.missing)
+
+        why = ""
+        if count != 1:
+            why = "Select one sample to hear it"
+        elif one is not None and one.missing:
+            why = "Its file is missing"
+        elif self._audition is None:
+            why = f"Cannot be heard: {self._unavailable or 'no audio output'}"
+        self.hear.setEnabled(not why)
+        self.hear.setToolTip(why or "Play it straight to the output")
+
+    def _hear(self) -> None:
+        media = self._media()
+        if self._audition is not None and len(media) == 1:
+            self._audition(media[0].id)
+
+
+def duration_of(frames: int) -> str:
+    """A sample's whole length, with the room the pool's column lacks:
+    `1.400 s`, or `3:12.500` from a minute on."""
+    if frames < 60 * SAMPLE_RATE:
+        return Duration("s").show(frames)
+    return clock(frames)

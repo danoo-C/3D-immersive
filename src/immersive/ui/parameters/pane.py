@@ -23,8 +23,15 @@ from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QFrame, QScrollArea, QWidget
 
 from immersive.core.document import Document
+from immersive.core.io.peaks import Pyramid
 from immersive.core.selection import Kind
-from immersive.ui.parameters.views import ClipView, ProjectView, Summary, View
+from immersive.ui.parameters.views import (
+    ChannelView,
+    ClipView,
+    MediaView,
+    ProjectView,
+    View,
+)
 from immersive.ui.timeline.grid import Unit
 from immersive.ui.widgets.placeholder import Panel
 
@@ -45,11 +52,17 @@ class ParametersPane(Panel):
         document: Document,
         *,
         unit: Callable[[], Unit],
+        peaks: Callable[[str], Pyramid | None] = lambda _media_id: None,
+        audition: Callable[[str], bool] | None = None,
+        unavailable: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(TITLE, parent)
         self._document = document
         self._unit = unit
+        self._peaks = peaks
+        self._audition = audition
+        self._unavailable = unavailable
         self._view: View | None = None
         #: The kind the view was built for; `None` is the project's.
         self._kind: Kind | None = None
@@ -85,7 +98,7 @@ class ParametersPane(Panel):
 
     def refresh(self) -> None:
         """Something the fields show changed outside the model - the ruler's
-        unit - so show them again."""
+        unit, or a sample's peaks arriving - so show them again."""
         self.view().refresh()
 
     def set_collapsed(self, collapsed: bool) -> None:
@@ -133,8 +146,6 @@ class ParametersPane(Panel):
             return ProjectView(document)
         if kind is Kind.CLIPS:
             return ClipView(document, self._unit)
-        count = len(document.selection)
-        noun = {Kind.CLIPS: "clip", Kind.CHANNELS: "channel", Kind.MEDIA: "sample"}[
-            kind
-        ]
-        return Summary(document, f"{count} {noun}{'s' if count != 1 else ''}")
+        if kind is Kind.CHANNELS:
+            return ChannelView(document)
+        return MediaView(document, self._peaks, self._audition, self._unavailable)

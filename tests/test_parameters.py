@@ -4,10 +4,14 @@ the clip's, the channel's and the sample's fields. Marked gui."""
 from __future__ import annotations
 
 import copy
+import time
 from collections.abc import Iterator
+from pathlib import Path
 
+import numpy as np
 import pytest
-from PySide6.QtCore import QEvent, QPointF, Qt
+import soundfile
+from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSplitter
@@ -15,13 +19,29 @@ from PySide6.QtWidgets import QApplication, QSplitter
 from immersive.app import build_application
 from immersive.core.document import Document
 from immersive.core.edits import AddChannel, AddMedia, DropClips, SetAttribute
-from immersive.core.model import Clip, Fade, FadeShape, MediaFile, new_channel
+from immersive.core.io.peaks import build
+from immersive.core.model import (
+    Clip,
+    Fade,
+    FadeShape,
+    MediaFile,
+    SnapSetting,
+    new_channel,
+)
 from immersive.core.selection import Kind
-from immersive.core.time import SAMPLE_RATE, to_bar_beat
+from immersive.core.time import SAMPLE_RATE, Division, to_bar_beat
 from immersive.ui import theme
 from immersive.ui.main_window import COMMON_SIGNATURES, MainWindow
-from immersive.ui.parameters.views import ClipView, ProjectView
+from immersive.ui.parameters.pane import ParametersPane
+from immersive.ui.parameters.views import (
+    ChannelView,
+    ClipView,
+    MediaView,
+    ProjectView,
+    duration_of,
+)
 from immersive.ui.timeline.grid import Unit
+from immersive.ui.timeline.headers import ChannelHeader
 from immersive.ui.widgets.numeric import MIXED, NumericField
 
 pytestmark = pytest.mark.gui
@@ -62,6 +82,16 @@ def a_window(lanes: int = 2) -> tuple[MainWindow, list[list[Clip]]]:
     window.show()
     QApplication.processEvents()
     return window, grid
+
+
+def finish(window: MainWindow, timeout: float = 20.0) -> None:
+    """Until the workers preparing samples are done, and their results in."""
+    deadline = time.monotonic() + timeout
+    while window.importing():
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+        if time.monotonic() > deadline:
+            raise AssertionError("the samples did not finish loading")
+    QApplication.processEvents()
 
 
 def stacked(window: MainWindow) -> int:
@@ -506,3 +536,292 @@ def test_the_start_reads_the_new_bars_after_a_tempo_change() -> None:
     window, _, view = a_clip_selected((0, 1))
     window.document().push(SetAttribute(window.document().project, "bpm", 60.0))
     assert view.start.text() == "1.3.000"
+
+
+# --------------------------------------------------------------------------- #
+# the channel view
+# --------------------------------------------------------------------------- #
+
+
+def channel_view(window: MainWindow) -> ChannelView:
+    view = window.parameters().view()
+    assert isinstance(view, ChannelView)
+    return view
+
+
+def channels_selected(*lanes: int) -> tuple[MainWindow, ChannelView]:
+    window, _ = a_window(lanes=3)
+    channels = window.document().project.channels
+    window.document().selection.select(Kind.CHANNELS, [channels[n] for n in lanes])
+    return window, channel_view(window)
+
+
+def header(window: MainWindow, lane: int) -> ChannelHeader:
+    return window.timeline().headers.headers()[lane]
+
+
+def test_a_channel_shows_what_its_header_edits_and_what_comes_later() -> None:
+    window, view = channels_selected(1)
+    assert view.labels() == [
+        "Name",
+        "Colour",
+        "Gain",
+        "",
+        "",
+        "",
+        "Snap",
+        "Position X",
+        "Position Y",
+        "Position Z",
+        "Pan",
+    ]
+    channel = window.document().project.channels[1]
+    assert view.heading() == "Channel" and view.name.text() == channel.name
+    assert (view.gain.text(), view.snap.text()) == ("0.0 dB", "Follows the project")
+    assert [box.text() for box in (view.mute, view.solo, view.bypass)] == [
+        "Mute",
+        "Solo",
+        "HRTF bypass",
+    ]
+
+
+def test_each_channel_field_is_one_undo_and_the_header_follows() -> None:
+    window, view = channels_selected(0)
+    count = stacked(window)
+
+    type_into(view.gain, "-4.5")
+    view.mute.click()
+    view.name.setText("Kick")
+    view.name.editingFinished.emit()
+    [second] = [a for a in view.colour_menu().actions() if a.text() == "Colour 2"]
+    second.trigger()
+    [eighth] = [a for a in view.snap_menu().actions() if a.text() == "1/8"]
+    eighth.trigger()
+
+    assert stacked(window) == count + 5
+    shown = header(window, 0)
+    assert shown.gain.text() == "-4.5 dB" and shown.mute.isChecked()
+    assert shown.name.text() == "Kick"
+    assert shown.chip.colour() == theme.active().channels[1]
+    assert shown.snap.text() == "1/8" and view.snap.text() == "1/8"
+
+
+def test_an_edit_in_the_header_shows_in_the_pane() -> None:
+    window, view = channels_selected(0)
+    header(window, 0).solo.click()
+    header(window, 0).gain.committed.emit(3.0)
+    assert view.solo.isChecked() and view.gain.text() == "+3.0 dB"
+
+
+def test_several_channels_take_a_value_as_one_edit_and_not_a_name() -> None:
+    window, view = channels_selected(0, 2)
+    document = window.document()
+    channels = document.project.channels
+    document.push(SetAttribute(channels[2], "mute", True))
+    count = stacked(window)
+
+    assert view.heading() == "2 channels"
+    assert not view.name.isEnabled() and view.name.text() == MIXED
+    assert view.mute.mixed()
+
+    view.mute.click()
+    type_into(view.gain, "-2")
+
+    assert (channels[0].mute, channels[1].mute, channels[2].mute) == (True, False, True)
+    assert channels[0].gain_db == channels[2].gain_db == -2.0 != channels[1].gain_db
+    assert stacked(window) == count + 2
+
+
+def test_a_name_left_empty_is_put_back() -> None:
+    window, view = channels_selected(0)
+    before, count = view.name.text(), stacked(window)
+    view.name.setText("   ")
+    view.name.editingFinished.emit()
+    assert stacked(window) == count and view.name.text() == before
+
+
+def test_position_is_dead_until_m5_and_pan_shows_only_when_bypassed() -> None:
+    _window, view = channels_selected(0)
+    for field in view.position:
+        assert not field.isEnabled() and "M5" in field.toolTip()
+    assert view.pan.isHidden()
+
+    view.bypass.click()
+
+    assert not view.pan.isHidden() and not view.pan.isEnabled()
+    assert "M4" in view.pan.toolTip()
+
+
+# --------------------------------------------------------------------------- #
+# the sample view
+# --------------------------------------------------------------------------- #
+
+
+def a_pane(
+    media: list[MediaFile],
+    *,
+    heard: list[str] | None = None,
+    unavailable: str = "",
+) -> tuple[Document, ParametersPane]:
+    document = Document()
+    document.push(AddMedia(document.project, media))
+    audio = np.linspace(-1, 1, 4_800, dtype=np.float32).reshape(-1, 1)
+
+    def hear(media_id: str) -> bool:
+        assert heard is not None
+        heard.append(media_id)
+        return True
+
+    pane = ParametersPane(
+        document,
+        unit=lambda: Unit.BARS,
+        peaks=lambda _media_id: build(audio),
+        audition=None if heard is None else hear,
+        unavailable=unavailable,
+    )
+    pane.resize(250, 400)
+    pane.show()
+    return document, pane
+
+
+STEREO = MediaFile(
+    "m-00000002", "/samples/drums/Kick.wav", "Kick.wav", 44_100, 2, 3 * SECOND // 2
+)
+
+
+def test_a_sample_shows_its_file_its_facts_and_its_waveform() -> None:
+    document, pane = a_pane([STEREO], heard=[])
+    document.selection.select(Kind.MEDIA, [STEREO])
+    view = pane.view()
+    assert isinstance(view, MediaView)
+
+    assert view.heading() == "Kick.wav"
+    assert view.path.full() == STEREO.path and view.path.toolTip() == STEREO.path
+    assert (view.rate.text(), view.channels.text(), view.length.text()) == (
+        "44 100 Hz",
+        "Stereo",
+        "1.500 s",
+    )
+    assert view.waveform.isVisibleTo(view) and view.waveform._pyramid is not None
+
+
+def test_the_audition_button_plays_the_sample() -> None:
+    heard: list[str] = []
+    document, pane = a_pane([STEREO], heard=heard)
+    document.selection.select(Kind.MEDIA, [STEREO])
+    view = pane.view()
+    assert isinstance(view, MediaView)
+    assert view.hear.isEnabled()
+    view.hear.click()
+    assert heard == [STEREO.id]
+
+
+def test_the_audition_button_says_why_it_cannot_play() -> None:
+    gone = MediaFile("m-00000003", "/gone.wav", "gone.wav", SAMPLE_RATE, 1, SECOND)
+    gone.missing = True
+    document, pane = a_pane([STEREO, gone], unavailable="PortAudio is not installed")
+    for chosen, why in (
+        ([STEREO], "Cannot be heard: PortAudio is not installed"),
+        ([STEREO, gone], "Select one sample to hear it"),
+    ):
+        document.selection.select(Kind.MEDIA, chosen)
+        view = pane.view()
+        assert isinstance(view, MediaView)
+        assert not view.hear.isEnabled() and view.hear.toolTip() == why
+
+    document, pane = a_pane([gone], heard=[])
+    document.selection.select(Kind.MEDIA, [gone])
+    view = pane.view()
+    assert isinstance(view, MediaView)
+    assert view.hear.toolTip() == "Its file is missing" and not view.hear.isEnabled()
+
+
+def test_several_samples_show_what_they_share() -> None:
+    other = MediaFile("m-00000004", "/b.wav", "b.wav", 44_100, 1, 90 * SECOND)
+    document, pane = a_pane([STEREO, other])
+    document.selection.select(Kind.MEDIA, [STEREO, other])
+    view = pane.view()
+    assert isinstance(view, MediaView)
+    assert view.heading() == "2 samples"
+    assert (view.rate.text(), view.channels.text(), view.length.text()) == (
+        "44 100 Hz",
+        MIXED,
+        MIXED,
+    )
+    assert not view.waveform.isVisibleTo(view)
+
+
+def test_a_long_sample_reads_in_minutes() -> None:
+    assert duration_of(90 * SECOND + SECOND // 2) == "1:30.500"
+    assert duration_of(SECOND * 3 // 2) == "1.500 s"
+
+
+def test_a_rename_ended_after_a_second_channel_is_selected_renames_nothing() -> None:
+    """The field reads `—` once two are selected; ending the edit then must
+    not give both channels that name."""
+    window, view = channels_selected(0)
+    channels = window.document().project.channels
+    names = [channel.name for channel in channels]
+    view.name.setText("Kick")
+    window.document().selection.add(Kind.CHANNELS, [channels[1]])
+
+    view.name.editingFinished.emit()
+
+    assert [channel.name for channel in channels] == names
+
+
+def test_a_name_being_typed_survives_an_edit_elsewhere() -> None:
+    window, view = channels_selected(0)
+    window.activateWindow()
+    view.name.setFocus()
+    QApplication.processEvents()
+    assert view.name.hasFocus()
+    view.name.setText("Kic")
+
+    window.document().push(SetAttribute(window.document().project, "bpm", 99.0))
+
+    assert view.name.text() == "Kic"
+    view.name.clearFocus()  # ends the edit while the window is still here
+    assert window.document().project.channels[0].name == "Kic"
+
+
+def test_the_colour_menu_checks_only_a_colour_every_channel_has() -> None:
+    window, view = channels_selected(0, 1)
+    checked = [a.text() for a in view.colour_menu().actions() if a.isChecked()]
+    assert checked == [], "two channels, two colours"
+    channels = window.document().project.channels
+    window.document().push(SetAttribute(channels[1], "color", channels[0].color))
+    checked = [a.text() for a in view.colour_menu().actions() if a.isChecked()]
+    assert checked == ["Colour 1"]
+
+
+def test_the_snap_menu_shows_a_channels_own_setting() -> None:
+    window, view = channels_selected(0)
+    channel = window.document().project.channels[0]
+    window.document().push(
+        SetAttribute(channel, "snap_override", SnapSetting(division=Division.EIGHTH))
+    )
+    checked = [a.text() for a in view.snap_menu().actions() if a.isChecked()]
+    assert checked == ["1/8"]
+
+
+def test_a_sample_selected_while_its_file_loads_is_drawn_once_it_has(
+    tmp_path: Path,
+) -> None:
+    """Opening a project loads its samples on workers; the pane is told
+    when their peaks arrive, as the timeline is."""
+    wav = tmp_path / "tone.wav"
+    soundfile.write(wav, np.sin(np.linspace(0, 400, SECOND)).astype("float32"), SECOND)
+    window = MainWindow()
+    window.import_paths([wav])
+    finish(window)
+    window.document().save_as(tmp_path / "a.3dim")
+
+    window.open_project(tmp_path / "a.3dim")
+    window.document().selection.select(Kind.MEDIA, window.document().project.media_pool)
+    view = window.parameters().view()
+    assert isinstance(view, MediaView) and view.waveform._pyramid is None
+
+    finish(window)
+
+    assert view.waveform._pyramid is not None

@@ -523,7 +523,11 @@ class MainWindow(QMainWindow):
         )
         left.addWidget(self._pool)
         self._parameters = ParametersPane(
-            self._document, unit=lambda: self._timeline.unit()
+            self._document,
+            unit=lambda: self._timeline.unit(),
+            peaks=self._store.peaks,
+            audition=self.audition_media if self._audition is not None else None,
+            unavailable=self._unavailable,
         )
         left.addWidget(self._parameters)
         left.setSizes([_POOL_H, _PARAMS_H])
@@ -735,6 +739,7 @@ class MainWindow(QMainWindow):
             )
         self._pool.tree.viewport().update()
         self._timeline.media_changed()
+        self._parameters.refresh()
 
     def import_files(self) -> bool:
         """File > Import Audio. Several files, prepared on workers."""
