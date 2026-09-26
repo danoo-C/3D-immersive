@@ -96,6 +96,10 @@
       "selected.text": "text.primary",
       "separator": "border"
     },
+    "pane": {
+      "heading": "text.primary",
+      "label": "text.secondary"
+    },
     "panel": {
       "background": "surface.panel",
       "text": "text.primary"

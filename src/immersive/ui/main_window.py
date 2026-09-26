@@ -60,15 +60,22 @@ from immersive.ui.explorer.media_pool import MediaPool
 from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
+from immersive.ui.parameters.pane import ParametersPane
+from immersive.ui.parameters.views import TEMPO_CEILING, TEMPO_FLOOR
 from immersive.ui.theme_menu import ThemeMenu
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit, snap_text
 from immersive.ui.timeline.panel import TimelinePanel
 from immersive.ui.timeline.snap_menu import fill_snap_menu
+from immersive.ui.units import Plain
 from immersive.ui.widgets.notices import NoticeCount
+from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.placeholder import Placeholder
 
 WINDOW_TITLE = "3d immersive"
+
+#: What the signature chip offers. Anything else is typed in the pane.
+COMMON_SIGNATURES = ((2, 4), (3, 4), (4, 4), (5, 4), (6, 8), (7, 8), (12, 8))
 
 #: What the Open and Save As dialogs show.
 PROJECT_FILTER = f"3d immersive project (*{project_io.SUFFIX})"
@@ -298,7 +305,7 @@ class MainWindow(QMainWindow):
             action.setChecked(unit is Unit.BARS)
             self._ruler_units.addAction(action)
             action.triggered.connect(
-                lambda _checked=False, unit=unit: self._timeline.set_unit(unit)
+                lambda _checked=False, unit=unit: self.set_ruler_unit(unit)
             )
         view_menu.addSeparator()
         # M8 promotes this into Preferences; the menu is what M9 ships
@@ -413,11 +420,34 @@ class MainWindow(QMainWindow):
         bar.addWidget(self._position)
         bar.addSeparator()
         # The open project's tempo, signature and snap, read back after every
-        # change the document reports. The tempo and signature are readouts
-        # until phase 7 makes them controls; the snap is one already - a
-        # button, drawn as one, whose menu chooses the division (F-16).
-        self._bpm_chip = self._chip("")
-        self._signature_chip = self._chip("")
+        # change the document reports, and each a control: the tempo dragged
+        # or typed, the signature and the snap chosen from a menu (F-16). The
+        # pane edits the same two, and any signature the menu does not list.
+        self._tempo = NumericField(
+            120.0,
+            minimum=TEMPO_FLOOR,
+            maximum=TEMPO_CEILING,
+            step=0.1,
+            format=Plain("BPM", 1),
+        )
+        self._tempo.setObjectName("TempoField")
+        self._tempo.setFixedWidth(92)
+        # Out of the focus chain, like the snap chip, so the window does not
+        # open with a ring around it; a click still gives it the keyboard.
+        self._tempo.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._tempo.setToolTip(
+            "Tempo — drag, or click and type. The grid moves; clips do not."
+        )
+        self._tempo.committed.connect(self._set_tempo)
+        self._signature_chip = QToolButton()
+        self._signature_chip.setObjectName("SignatureChip")
+        self._signature_chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._signature_chip.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._signature_chip.setMenu(QMenu(self._signature_chip))
+        self._signature_chip.menu().aboutToShow.connect(self.signature_menu)
+        self._signature_chip.setToolTip(
+            "Time signature\nAny other in the parameters pane, with nothing selected."
+        )
         self._snap_chip = QToolButton()
         self._snap_chip.setObjectName("SnapChip")
         # Like the buttons the toolbar makes for its actions: out of the
@@ -430,7 +460,7 @@ class MainWindow(QMainWindow):
             "Snap — the grid a drag lands on, and whether it snaps at all\n"
             "Hold Alt while dragging to place exactly."
         )
-        bar.addWidget(self._bpm_chip)
+        bar.addWidget(self._tempo)
         bar.addWidget(self._signature_chip)
         bar.addSeparator()
         bar.addWidget(self._snap_chip)
@@ -492,7 +522,10 @@ class MainWindow(QMainWindow):
             else f"Cannot be heard: {self._unavailable or 'no audio output'}"
         )
         left.addWidget(self._pool)
-        left.addWidget(Placeholder("Parameters", "follows the current selection"))
+        self._parameters = ParametersPane(
+            self._document, unit=lambda: self._timeline.unit()
+        )
+        left.addWidget(self._parameters)
         left.setSizes([_POOL_H, _PARAMS_H])
 
         # Workspace: two tabs (D-49). The editable ortho views share the first
@@ -896,7 +929,7 @@ class MainWindow(QMainWindow):
         document = self._document
         self.setWindowTitle(f"{document.title}[*] — {WINDOW_TITLE}")
         project = document.project
-        self._bpm_chip.setText(f"{project.bpm:.1f} BPM")
+        self._tempo.set_value(project.bpm)
         self._signature_chip.setText("{}/{}".format(*project.time_signature))
         self._snap_chip.setText(snap_text(project.snap))
         self.setWindowModified(document.is_dirty)
@@ -1072,6 +1105,39 @@ class MainWindow(QMainWindow):
                 self._document.push(SetAttribute(project, "snap", chosen))
 
         return fill_snap_menu(self._snap_chip.menu(), project.snap, choose)
+
+    def _set_tempo(self, bpm: float) -> None:
+        # The field commits only a value that differs from the one it shows,
+        # which is the project's.
+        self._document.push(SetAttribute(self._document.project, "bpm", bpm))
+
+    def signature_menu(self) -> QMenu:
+        """The signature chip's menu: the common ones, the project's checked,
+        each one command. Any other is set in the pane."""
+        menu = self._signature_chip.menu()
+        menu.clear()
+        project = self._document.project
+        for signature in COMMON_SIGNATURES:
+            action = menu.addAction("{}/{}".format(*signature))
+            action.setCheckable(True)
+            action.setChecked(signature == project.time_signature)
+            action.triggered.connect(
+                lambda _checked=False, chosen=signature: self._set_signature(chosen)
+            )
+        return menu
+
+    def _set_signature(self, signature: tuple[int, int]) -> None:
+        project = self._document.project
+        if signature != project.time_signature:
+            self._document.push(SetAttribute(project, "time_signature", signature))
+
+    def set_ruler_unit(self, unit: Unit) -> None:
+        """What the ruler counts in, and so what the pane's positions read."""
+        self._timeline.set_unit(unit)
+        self._parameters.refresh()
+
+    def parameters(self) -> ParametersPane:
+        return self._parameters
 
     def split_clips(self) -> None:
         """S: every selected clip under the playhead in two, as one edit;

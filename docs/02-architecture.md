@@ -89,12 +89,16 @@ src/immersive/
                          editor, owned by neither - no Qt (D-94, M3)
     notices.py           the notice model - no Qt, so theme_io may use it (D-81)
     importer.py          preparing samples on workers (N-3, M2)
-    explorer/            media pool tree (top) + params pane (bottom)
+    explorer/            media pool tree (top)
+    parameters/          the params pane (bottom): a view per kind of
+                         selection, and the project's with none (M3)
     timeline/            ruler, channel headers, clip lanes, playhead
     spatial/             ortho_view.py (top & front), view3d.py (read-only)
     keyframes/           curve editor panel
     widgets/             shared small widgets
       notices.py         the status-bar line, count and list (F-56, M9)
+      numeric.py         a number dragged or typed, in any unit (M3)
+      check.py           the painted check box (M3)
       meter.py           the master output meter (F-54, M3)
   assets/
     app.qss              the stylesheet, substituted from a theme (M9)

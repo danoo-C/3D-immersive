@@ -43,6 +43,11 @@ class Panel(QFrame):
     def body(self) -> QVBoxLayout:
         return self._layout
 
+    def header(self) -> QLabel:
+        """The title bar, for a panel that does something when it is
+        clicked - the parameters pane collapses by it."""
+        return self._header
+
     def retheme(self) -> None:
         """Re-read every colour this panel paints itself with (D-82).
 

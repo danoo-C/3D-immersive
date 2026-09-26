@@ -166,6 +166,11 @@ QLineEdit#NumericField:focus, QLineEdit#ChannelRename:focus {
 }
 QLineEdit#NumericField:disabled { color: $input_disabled_text; }
 
+/* The parameters pane (M3): a view's heading, and its fields' labels, which
+   support the fields rather than compete with them. */
+QLabel#PaneHeading { color: $pane_heading; font-weight: 600; }
+QLabel#FieldLabel { color: $pane_label; }
+
 /* Combo boxes (M3): the parameters pane is the first to draw one. 04 listed
    them under M8, for whichever milestone drew one first. The arrow is the
    style's own. The check box paints itself, from the painted `check` group:

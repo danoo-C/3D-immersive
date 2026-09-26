@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
 from PySide6.QtGui import QAction, QImage, QMouseEvent, QWheelEvent
-from PySide6.QtWidgets import QApplication, QLabel, QToolButton
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QToolButton
 
 from immersive.app import build_application
 from immersive.core.document import Document
@@ -407,10 +407,12 @@ def test_an_opened_project_draws_its_own_tempo_and_new_goes_back(
 
 def chips(window: MainWindow) -> set[str]:
     """What the toolbar's readouts say - the snap's is a button since phase 5
-    made it a control."""
-    return {label.text() for label in window.findChildren(QLabel)} | {
-        button.text() for button in window.findChildren(QToolButton)
-    }
+    made it a control, and the tempo a field since phase 7."""
+    return (
+        {label.text() for label in window.findChildren(QLabel)}
+        | {button.text() for button in window.findChildren(QToolButton)}
+        | {field.text() for field in window.findChildren(QLineEdit)}
+    )
 
 
 def test_the_toolbar_reads_the_open_projects_tempo_and_follows_undo(
