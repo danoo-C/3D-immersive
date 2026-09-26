@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 8 — The engine, flat
 
-**Written:** 2026-09-26 · **Status:** in progress
+**Written:** 2026-09-26 · **Status:** ✅ complete
 
 ## Approach
 
@@ -205,4 +205,69 @@ tests/test_layering.py                      amended — audio/ stays Qt-free
 
 ## Outcome
 
-Filled in at the end.
+Five steps in the planned order, and all twelve acceptance boxes are
+ticked. Sixty-one mutations: nineteen of the twenty named in advance and
+forty-two found on the way, all killed. Four survived at first, each for a
+missing test. A sixty-second was malformed, equivalent by construction,
+and is not counted. The twentieth named, "mute folded in after the ramp",
+has no line to break: mute is a gain by D-105, and a test holds that it
+ramps. 2020 tests.
+
+### What the plan got right
+
+**Measuring before deciding.** The allocation experiment in the plan found
+the broadcasting trap before any engine code existed. Step 2 was written
+planar from the start, and step 4's test found nothing to change in it.
+
+**The feed as a class of its own.** Deciding snapshot or command, holding
+references and releasing them is UI-thread logic, tested with a
+`Document` and no window. Phase 9 only has to call `update`.
+
+**Generation tags.** The reorder test that needed them was written from
+the plan's risk table, and passed first time.
+
+### What the plan did not see
+
+**A carry that could count in a snapshot never played.** Two snapshots
+installed within one block, as the feed does when samples arrive just
+after an edit, would have indexed one snapshot's gains by another's
+places. `Snapshot.based_on` settles it.
+
+**A local that could free an array on the audio thread.** `_take_up` now
+lets go of the old levels before the swap. No single-threaded test can
+reach it.
+
+**That the measuring would allocate.** The test's harness kept 64 bytes of
+its own, and a list of results kept 20 KiB. The readings go into arrays
+made beforehand.
+
+**That the structure key needed a test per field.** Clip gain, fades and
+the channels' order all survived their mutations until each had a test,
+and the reorder needed two channels that play alike to be told apart
+only by their ids.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| A seek through the ring, drained after the swap | as planned; `seek()` also says when the ring is full, for phase 9 |
+| The same test with `-O` | not run: `process()` has no asserts to remove |
+| `tests/test_layering.py` amended | unchanged: its rule already covers `audio/`, and the new modules import no Qt |
+| Twenty mutations | sixty-one |
+
+### What phase 9 needs to know
+
+- **Wiring:** `Engine(block)` with `--block`'s size. `Feed(engine,
+  store.audio)` is called after every document change and when samples
+  arrive (`_loaded` and `_imported`). The stream's callback is
+  `engine.callback`.
+- **Transport:** `engine.playhead` is where the next block starts;
+  `engine.seek()` moves it and returns False when the ring is full. A
+  stopped stream drains nothing, so seeks while stopped need another way
+  in, or the ring to be drained when playback starts.
+- **Meter and xruns:** `engine.take_peaks()` for the meter, and
+  `engine.xruns` for the status bar.
+- **Garbage collection:** `gc.freeze()` after a project loads is phase 9's,
+  where a project is first played.
+- **Audition:** it still opens its own stream. One stream or two is
+  phase 9's question.

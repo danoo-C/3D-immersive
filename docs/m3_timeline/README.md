@@ -18,7 +18,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | ✅ |
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | ✅ |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | ✅ |
-| [8 — The engine, flat](phase_8_flat_engine.md) | in progress |
+| [8 — The engine, flat](phase_8_flat_engine.md) | ✅ |
 | [9 — Transport](phase_9_transport.md) | not started |
 | [10 — The master meter, and the arrangement heard](phase_10_meter_and_listening.md) | not started |
 
@@ -124,11 +124,11 @@ phase's first decision.
 - ~~**What does the clipboard hold, and how far does it reach?**~~ Copies
   of the clips, and no further than the open project: New and Open empty it
   (D-99, phase 6).
-- **What goes in an engine snapshot, and what is a parameter change?** `02`
-  sends structural changes as a whole new snapshot and parameter changes
-  through a command ring. Which side gain, mute and solo fall on, and how a
-  swap is made atomic in Python without a lock, are the phase's design.
-  Phase 8.
+- ~~**What goes in an engine snapshot, and what is a parameter change?**~~
+  Clips, samples, clip gain, fades and order are the snapshot's; gain, mute
+  and solo, folded into one gain, and seeks are the ring's. The swap is one
+  reference assigned, and the UI thread frees old snapshots (D-105,
+  phase 8).
 - **Audition and the transport — one stream or two?** M2's audition opens
   its own stream. Two streams on one device are not possible on every
   backend, and one stream means audition goes through the engine. Either
@@ -218,3 +218,14 @@ engine will play them, and a selected clip's handles set them by dragging.
 Two fades never overlap, which a trim could already break until now
 (D-101). A hundred and five mutations: a hundred and two killed, and three
 that found code with no effect, which is gone.
+
+**Phase 8.** The engine, flat: `process()` fills a stereo block from a
+snapshot of the arrangement - clips read exact to the sample at their
+offsets, clip gain, explicit and implicit fades from `FadeShape.gain`,
+channel gain, mute and solo - with no spatialisation. What plays arrives as
+a snapshot and how loud through a command ring, tagged by generation
+(D-105); the feed decides which after every document change and frees old
+snapshots on the UI thread. Gains ramp across one block. `process()` keeps
+nothing between blocks and makes no array in one (D-106), measured over 500
+blocks of every path. A block of 512 takes 0.06 ms. Sixty-one mutations,
+all killed.
