@@ -8,7 +8,9 @@ worth of float32 is 8 KiB at 2048 frames, and a ufunc that broadcasts makes
 17 KiB behind `out=`. So the line is 2 KiB, a quarter of one side of a
 2048-frame block, and the blocks run here go through every path `process()`
 has: fades implicit and explicit, clip gain, stereo and mono, a missing
-sample, gains ramping and steady, a mute, a seek and a snapshot swap.
+sample, gains ramping and steady, a mute, a seek and a snapshot swap, a
+loop wrapping inside blocks and one shorter than a block, an audition
+voice replaced by another, and the transport stopped and started.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
-from immersive.audio.engine import Engine
+from immersive.audio.engine import Engine, Voice
 from immersive.audio.scheduler import Snapshot, build
 from immersive.core.io.media import Decoded
 from immersive.core.model import Channel, Clip, Fade, FadeShape, MediaFile, Project
@@ -130,9 +132,11 @@ def test_process_makes_no_array_and_keeps_nothing(traced: None) -> None:
     engine = Engine(BLOCK)
     first = build(project, store.get)
     engine.install(first)
+    engine.set_playing(True)
     project.channels[0].gain_db = -1.0
     second = build(project, store.get, first)
     held: list[Snapshot] = [first, second]
+    voices = [Voice(store["m-00000001"].audio), Voice(store["m-00000002"].audio)]
 
     def ui(n: int) -> None:
         """What the UI thread does meanwhile: gains, a mute, a seek, a swap."""
@@ -147,6 +151,20 @@ def test_process_makes_no_array_and_keeps_nothing(traced: None) -> None:
             engine.seek(12_345)
         if n == 80:
             engine.install(second)
+        if n == 20:
+            engine.set_loop(40_000, 40_000 + 3_000, True)  # wraps inside blocks
+        if n == 30:
+            engine.audition(voices[0])
+        if n == 35:
+            engine.audition(voices[1])  # and one replacing it
+        if n == 50:
+            engine.set_loop(40_000, 40_100, True)  # shorter than a block
+        if n == 70:
+            engine.set_loop(0, 0, False)
+        if n == 90:
+            engine.set_playing(False)  # stopped, still auditioning
+        if n == 95:
+            engine.set_playing(True)
 
     # A turn of the UI thread's cycle before measuring: every path taken
     # once, and Python's freelists filled.
@@ -160,4 +178,4 @@ def test_process_makes_no_array_and_keeps_nothing(traced: None) -> None:
     assert kept <= 0, f"500 blocks left {kept} bytes allocated"
     worst = int(blocks[:, 0].max())
     assert worst < LINE, f"a block raised the peak by {worst} bytes"
-    assert held  # the UI thread's references, kept to the end
+    assert held and voices  # the UI thread's references, kept to the end

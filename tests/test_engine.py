@@ -16,7 +16,7 @@ import numpy.typing as npt
 import pytest
 
 from immersive.audio.dsp import db_to_gain
-from immersive.audio.engine import RING, Engine
+from immersive.audio.engine import RING, Engine, Voice
 from immersive.audio.scheduler import Snapshot, build
 from immersive.core.io.media import Decoded
 from immersive.core.model import Channel, Clip, MediaFile, Project
@@ -76,6 +76,7 @@ def playing(project: Project, store: dict[str, Decoded]) -> tuple[Engine, Snapsh
     engine = Engine(BLOCK)
     snap = snapshot(project, store)
     engine.install(snap)
+    engine.set_playing(True)
     return engine, snap
 
 
@@ -200,7 +201,7 @@ def test_a_command_for_a_channel_that_is_not_there_is_dropped() -> None:
 def test_a_full_ring_refuses_rather_than_overwriting() -> None:
     project, store = arrangement(0.25)
     engine, snap = playing(project, store)
-    for _ in range(RING):
+    for _ in range(RING - 1):  # the first slot is the play command
         assert engine.send_gain(snap.generation, 0, 0.5)
     assert not engine.send_gain(snap.generation, 0, 0.0)
     assert not engine.seek(0)
@@ -318,6 +319,7 @@ def test_blocks_follow_on_exactly_at_every_size() -> None:
     for size in (256, 512, 2048):
         engine = Engine(size)
         engine.install(snapshot(project, store))
+        engine.set_playing(True)
         heard = np.concatenate([block(engine)[:, 0] for _ in range(5)])
         assert np.array_equal(heard, numbered()[: 5 * size, 0])
 
@@ -363,3 +365,216 @@ def test_a_block_of_another_size_is_silence_and_counted() -> None:
     out = np.ones((BLOCK // 2, 2), dtype=np.float32)
     engine.callback(out, BLOCK // 2, None, Status())
     assert not out.any() and engine.xruns == 1 and engine.playhead == 0
+
+
+# --------------------------------------------------------------------------- #
+# the transport
+# --------------------------------------------------------------------------- #
+
+
+def numbered_arrangement() -> tuple[Project, dict[str, Decoded]]:
+    project, store = arrangement(0.0)
+    store["m-00000000"] = Decoded(numbered(), 48_000)
+    return project, store
+
+
+def test_a_stopped_engine_holds_its_playhead_and_plays_no_clip() -> None:
+    project, store = arrangement(0.5)
+    engine = Engine(BLOCK)
+    engine.install(snapshot(project, store))
+    assert not block(engine).any() and engine.playhead == 0
+    engine.seek(1_000)
+    block(engine)
+    assert engine.playhead == 1_000 and not engine.playing
+
+    engine.set_playing(True)
+    assert np.allclose(block(engine), 0.5) and engine.playhead == 1_000 + BLOCK
+    engine.set_playing(False)
+    assert not block(engine).any() and engine.playhead == 1_000 + BLOCK
+
+
+def test_a_gain_changed_while_stopped_is_in_place_when_playing_starts() -> None:
+    project, store = arrangement(1.0)
+    engine = Engine(BLOCK)
+    snap = snapshot(project, store)
+    engine.install(snap)
+    block(engine)
+    engine.send_gain(snap.generation, 0, 0.5)
+    block(engine)
+    engine.set_playing(True)
+    assert np.allclose(block(engine), 0.5), "not ramped from 1 on the first block"
+
+
+def looped(size: int, start: int, length: int, blocks: int) -> Audio:
+    project, store = numbered_arrangement()
+    engine = Engine(size)
+    engine.install(snapshot(project, store))
+    engine.set_loop(start, start + length, True)
+    engine.seek(start)
+    engine.set_playing(True)
+    out = np.zeros((size, 2), dtype=np.float32)
+    heard = []
+    for _ in range(blocks):
+        engine.process(out)
+        heard.append(out[:, 0].copy())
+    return np.concatenate(heard)
+
+
+@pytest.mark.parametrize("size", [256, 512, 2048])
+@pytest.mark.parametrize("length", [100, 3_000])
+def test_a_loop_runs_to_its_end_and_on_from_its_start(size: int, length: int) -> None:
+    """No gap and no repeated sample at the join, whatever the block, and
+    with a loop shorter than a block, which wraps inside it more than once."""
+    heard = looped(size, 5_000, length, 8)
+    passage = numbered()[5_000 : 5_000 + length, 0]
+    repeats = -(-heard.shape[0] // length)
+    assert np.array_equal(heard, np.tile(passage, repeats)[: heard.shape[0]])
+
+
+def test_a_playhead_before_the_loop_plays_into_it_and_then_loops() -> None:
+    project, store = numbered_arrangement()
+    engine = Engine(BLOCK)
+    engine.install(snapshot(project, store))
+    engine.set_loop(1_000, 1_300, True)
+    engine.set_playing(True)
+    heard = np.concatenate([block(engine)[:, 0] for _ in range(8)])
+    expected = np.concatenate(
+        [numbered()[:1_300, 0], np.tile(numbered()[1_000:1_300, 0], 3)]
+    )[: heard.shape[0]]
+    assert np.array_equal(heard, expected)
+
+
+def test_a_playhead_past_the_loop_plays_on() -> None:
+    project, store = numbered_arrangement()
+    engine = Engine(BLOCK)
+    engine.install(snapshot(project, store))
+    engine.set_loop(1_000, 2_000, True)
+    engine.seek(5_000)
+    engine.set_playing(True)
+    heard = np.concatenate([block(engine)[:, 0] for _ in range(4)])
+    assert np.array_equal(heard, numbered()[5_000 : 5_000 + 4 * BLOCK, 0])
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "on"), [(1_000, 1_063, True), (1_000, 2_000, False)]
+)
+def test_a_loop_too_short_or_switched_off_plays_through(
+    start: int, end: int, on: bool
+) -> None:
+    project, store = numbered_arrangement()
+    engine = Engine(BLOCK)
+    engine.install(snapshot(project, store))
+    engine.set_loop(start, end, on)
+    engine.seek(start)
+    engine.set_playing(True)
+    heard = np.concatenate([block(engine)[:, 0] for _ in range(8)])
+    assert np.array_equal(heard, numbered()[start : start + 8 * BLOCK, 0])
+
+
+def test_a_gain_ramps_smoothly_across_a_block_the_loop_wraps() -> None:
+    project, store = arrangement(1.0)
+    engine, snap = playing(project, store)
+    engine.set_loop(100, 300, True)
+    block(engine)
+    engine.send_gain(snap.generation, 0, 0.5)
+    ramped = block(engine)[:, 0]
+    assert ramped[-1] == pytest.approx(0.5)
+    assert steps(ramped) <= 0.5 / BLOCK + 1e-6
+
+
+# --------------------------------------------------------------------------- #
+# the audition voice
+# --------------------------------------------------------------------------- #
+
+
+def test_a_voice_plays_from_its_first_frame_to_both_ears_then_silence() -> None:
+    engine = Engine(BLOCK)
+    sample = numbered(BLOCK + 10)
+    engine.audition(Voice(sample))
+    first, second = block(engine), block(engine)
+    assert np.array_equal(first[:, 0], sample[:BLOCK, 0])
+    assert np.array_equal(first[:, 1], sample[:BLOCK, 0])
+    assert np.array_equal(second[:10, 0], sample[BLOCK:, 0])
+    assert not second[10:].any() and not block(engine).any()
+
+
+def test_a_stereo_voice_keeps_its_sides() -> None:
+    engine = Engine(BLOCK)
+    sample = np.ascontiguousarray(np.stack([numbered()[:, 0], -numbered()[:, 0]], 1))
+    engine.audition(Voice(sample))
+    out = block(engine)
+    assert np.array_equal(out, sample[:BLOCK])
+
+
+def test_the_next_voice_replaces_the_first_from_its_first_frame() -> None:
+    engine = Engine(BLOCK)
+    engine.audition(Voice(level(0.25)))
+    block(engine)
+    second = Voice(numbered())
+    engine.audition(second)
+    assert engine.holds_voice(second)
+    assert np.array_equal(block(engine)[:, 0], numbered()[:BLOCK, 0])
+
+
+def test_a_voice_is_heard_over_the_arrangement_and_under_no_channels_gain() -> None:
+    project, store = arrangement(0.25)
+    project.channels[0].mute = True
+    engine, _ = playing(project, store)
+    project.channels[0].mute = False
+    engine.audition(Voice(level(0.125)))
+    assert np.allclose(block(engine), 0.125), (
+        "the muted channel is silent, the voice not"
+    )
+
+    playing_too, _ = playing(project, store)
+    playing_too.audition(Voice(level(0.125)))
+    assert np.allclose(block(playing_too), 0.375)
+
+
+def test_the_engine_lets_go_of_a_voice_it_has_moved_past() -> None:
+    engine = Engine(BLOCK)
+    first = Voice(level(0.25))
+    engine.audition(first)
+    block(engine)
+    engine.audition(Voice(level(0.5)))
+    assert engine.holds_voice(first), "until the next block takes the new one up"
+    block(engine)
+    assert not engine.holds_voice(first)
+
+
+def test_drain_applies_commands_with_no_stream_running() -> None:
+    engine = Engine(BLOCK)
+    engine.seek(4_000)
+    engine.set_playing(True)
+    engine.set_loop(0, 1_000, True)
+    engine.drain()
+    assert (engine.playhead, engine.playing) == (4_000, True)
+
+
+def test_a_wrapped_block_is_silent_where_no_clip_plays() -> None:
+    """A loop of 1000 over a clip that ends at 500: the piece of a wrapped
+    block past the clip is silence, not what the rows held before."""
+    project, store = numbered_arrangement()
+    project.channels[0].clips[0].length = 500
+    engine = Engine(BLOCK)
+    engine.install(snapshot(project, store))
+    engine.set_loop(0, 1_000, True)
+    engine.set_playing(True)
+    heard = np.concatenate([block(engine)[:, 0] for _ in range(8)])
+    passage = np.concatenate([numbered()[:500, 0], np.zeros(500, np.float32)])
+    # The clip keeps its file's start, so only its cut end fades (D-42).
+    passage[500 - 32 : 500] = heard[500 - 32 : 500]
+    assert np.array_equal(heard, np.tile(passage, 3)[: heard.shape[0]])
+
+
+def test_a_gain_sent_before_the_stream_opens_reaches_the_snapshot_waiting() -> None:
+    """A mute made before the first Play: drained with no stream running, it
+    must land on the snapshot the engine has not taken up yet."""
+    project, store = arrangement(0.5)
+    engine = Engine(BLOCK)
+    waiting = snapshot(project, store)
+    engine.install(waiting)
+    engine.send_gain(waiting.generation, 0, 0.0)
+    engine.drain()
+    engine.set_playing(True)
+    assert not block(engine).any()

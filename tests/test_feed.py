@@ -63,6 +63,7 @@ def fed(*values: float) -> tuple[Document, Counting, Feed, dict[str, Decoded]]:
     document = Document()
     store: dict[str, Decoded] = {}
     engine = Counting()
+    engine.set_playing(True)
     feed = Feed(engine, store.get)
     document.observe(lambda: feed.update(document.project))
     for n, value in enumerate(values):

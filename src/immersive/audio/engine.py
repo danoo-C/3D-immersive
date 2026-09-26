@@ -24,6 +24,20 @@ channel's gain moves from where the last block left it to its target in
 equal steps, the last sample landing on the target. A mute is a gain of
 nothing, so it ramps too, and does not click.
 
+**The transport lives here too** (phase 9). Playing, the loop region and
+its switch arrive through the ring, ordered with seeks. Stopped, a block
+plays no clip and leaves the playhead where it is, but the ring is still
+drained and an audition still plays. A block that crosses the loop's end
+is rendered in pieces, the playhead wrapping to the loop's start between
+them, so the join has no gap and no repeated sample. A playhead already
+past the loop's end plays on.
+
+**An audition is a voice** (D-107): one decoded sample, summed into the bus
+after the channels - so no channel's gain, mute or solo reaches it - from
+its first frame to its last. It is handed over as a snapshot is, and taken
+up at the top of a block, so the engine never holds the only reference to
+one, and never frees its array.
+
 **Nothing on the audio thread allocates an array** (D-106). The bus and a
 channel's rows are made once, one contiguous row per ear, and every
 operation writes into them with `out=` - never broadcasting, which makes
@@ -39,15 +53,39 @@ import numpy.typing as npt
 
 from immersive.audio.device import DEFAULT_BLOCK
 from immersive.audio.dsp import ramp_steps
-from immersive.audio.scheduler import Snapshot, empty, fill
+from immersive.audio.scheduler import Lane, Snapshot, empty, fill
 
 #: How many commands can wait between two blocks. A gain is sent once per
-#: gesture, so this many only pile up while nothing is playing.
+#: gesture, so this many only pile up before the stream has first opened.
 RING: Final = 4096
 
-#: What a command is, as the ring's first number.
+#: What a command is, as the ring's first number. The other three are, for
+#: a gain, its snapshot's generation, the channel and the factor; for a
+#: seek, the sample, last; for playing, 1 or 0, last; for the loop, its
+#: start, its end, and 1 or 0 for whether it is on.
 GAIN: Final = 0.0
 SEEK: Final = 1.0
+PLAY: Final = 2.0
+LOOP: Final = 3.0
+
+#: The shortest loop the engine will wrap (D-108): so a block is at most
+#: `block // SHORTEST_LOOP + 2` pieces.
+SHORTEST_LOOP: Final = 64
+
+
+class Voice:
+    """One sample, auditioned: the decoded array and how far through it the
+    engine is. The position is written only by the audio thread."""
+
+    def __init__(self, audio: npt.NDArray[np.float32]) -> None:
+        self.audio = audio
+        self.frames = int(audio.shape[0])
+        self.last = int(audio.shape[1]) - 1
+        self.position = 0
+
+    @property
+    def finished(self) -> bool:
+        return self.position >= self.frames
 
 
 class Engine:
@@ -57,8 +95,14 @@ class Engine:
         self.block = block
         self._current = empty()
         self._next = self._current
+        self._voice: Voice | None = None
+        self._next_voice: Voice | None = None
         self._playhead = 0
-        #: kind, generation, channel, value - one command a row.
+        self._playing = False
+        self._loop_start = 0
+        self._loop_end = 0
+        self._looping = False
+        #: kind, then three numbers that mean what the kind says.
         self._ring = np.zeros((RING, 4), dtype=np.float64)
         self._written = 0  # the UI thread's counter
         self._read = 0  # the audio thread's counter
@@ -69,6 +113,9 @@ class Engine:
         self._steps = ramp_steps(block)
         self._ramp = np.zeros(block, dtype=np.float32)
         self._scratch = np.zeros(block, dtype=np.float32)
+        #: Where a block's pieces start on the timeline, where in the block,
+        #: and how long: more than one only where a loop wraps.
+        self._pieces = np.zeros((block // SHORTEST_LOOP + 2, 3), dtype=np.int64)
         #: The bus's highest level on each side since the peaks were taken.
         self._peaks = np.zeros(2, dtype=np.float64)
         self._xruns = np.zeros(1, dtype=np.int64)
@@ -85,6 +132,15 @@ class Engine:
         the one waiting to be taken up."""
         return snapshot is self._current or snapshot is self._next
 
+    def audition(self, voice: Voice | None) -> None:
+        """Play `voice` from its first frame, from the next block, in place
+        of any other; `None` for silence. Keep a reference until
+        `holds_voice()` says the engine has let it go."""
+        self._next_voice = voice
+
+    def holds_voice(self, voice: Voice) -> bool:
+        return voice is self._voice or voice is self._next_voice
+
     def send_gain(self, generation: int, channel: int, gain: float) -> bool:
         """Ramp channel `channel` of snapshot `generation` to `gain`, a
         factor. False when the ring is full."""
@@ -94,10 +150,28 @@ class Engine:
         """Play the next block from `sample`. False when the ring is full."""
         return self._send(SEEK, 0, 0, sample)
 
+    def set_playing(self, playing: bool) -> bool:
+        """Play from the playhead, or stop where it is. False when full."""
+        return self._send(PLAY, 0, 0, 1.0 if playing else 0.0)
+
+    def set_loop(self, start: int, end: int, on: bool) -> bool:
+        """Loop `[start, end)` while `on`. A region shorter than
+        `SHORTEST_LOOP` never loops. False when the ring is full."""
+        return self._send(LOOP, start, end, 1.0 if on else 0.0)
+
+    def drain(self) -> None:
+        """Apply what is in the ring now. Only for when no stream is running:
+        with no audio thread, nothing else can be reading it."""
+        self._drain(self._next)
+
     @property
     def playhead(self) -> int:
         """Where the next block starts."""
         return self._playhead
+
+    @property
+    def playing(self) -> bool:
+        return self._playing
 
     @property
     def xruns(self) -> int:
@@ -112,11 +186,11 @@ class Engine:
         self._peaks.fill(0)
         return left, right
 
-    def _send(self, kind: float, generation: int, channel: int, value: float) -> bool:
+    def _send(self, kind: float, a: float, b: float, c: float) -> bool:
         if self._written - self._read >= RING:
             return False
         slot = self._ring[self._written % RING]
-        slot[0], slot[1], slot[2], slot[3] = kind, generation, channel, value
+        slot[0], slot[1], slot[2], slot[3] = kind, a, b, c
         # Published last: the audio thread reads nothing past this count.
         self._written += 1
         return True
@@ -140,21 +214,69 @@ class Engine:
         snapshot = self._next
         if snapshot is not self._current:
             self._take_up(snapshot)
+        if self._next_voice is not self._voice:
+            self._voice = self._next_voice
         self._drain(snapshot)
 
-        t = self._playhead
         bus_l, bus_r = self._bus_l, self._bus_r
-        lane_l, lane_r = self._lane_l, self._lane_r
         bus_l.fill(0)
         bus_r.fill(0)
+        if self._playing:
+            self._mix(snapshot, self._plan())
+        else:
+            # Stopped: nothing ramps, so a gain changed meanwhile is in place
+            # when playing starts.
+            np.copyto(snapshot.levels, snapshot.targets)
+        self._audition()
+
+        self._peak(bus_l, 0)
+        self._peak(bus_r, 1)
+        np.copyto(out[:, 0], bus_l)
+        np.copyto(out[:, 1], bus_r)
+
+    def _plan(self) -> int:
+        """Cut the block into the pieces of the timeline it plays - one, or
+        more where the loop wraps - and move the playhead past them. How
+        many pieces there are."""
+        pieces = self._pieces
+        t = self._playhead
+        end = self._loop_end
+        looping = self._looping and t < end and end - self._loop_start >= SHORTEST_LOOP
+        size = self.block
+        at = 0
+        count = 0
+        while at < size:
+            length = size - at
+            if looping and t + length > end:
+                length = end - t
+            pieces[count, 0] = t
+            pieces[count, 1] = at
+            pieces[count, 2] = length
+            count += 1
+            at += length
+            t += length
+            if looping and t >= end:
+                t = self._loop_start
+        self._playhead = t
+        return count
+
+    def _mix(self, snapshot: Snapshot, pieces: int) -> None:
+        """Every channel's share of the block, at its gain, into the bus."""
+        bus_l, bus_r = self._bus_l, self._bus_r
+        lane_l, lane_r = self._lane_l, self._lane_r
         targets, levels = snapshot.targets, snapshot.levels
         lanes = snapshot.lanes
+        start = int(self._pieces[0, 0])
         for index in range(len(lanes)):
             target = float(targets[index])
             level = float(levels[index])
             if target == 0.0 and level == 0.0:
                 continue
-            if not fill(lanes[index], t, lane_l, lane_r):
+            if pieces == 1:
+                wrote = fill(lanes[index], start, lane_l, lane_r)
+            else:
+                wrote = self._fill_pieces(lanes[index], pieces)
+            if not wrote:
                 levels[index] = target
                 continue
             if level != target:
@@ -170,19 +292,45 @@ class Engine:
             np.add(bus_l, lane_l, out=bus_l)
             np.add(bus_r, lane_r, out=bus_r)
 
-        self._peak(bus_l, 0)
-        self._peak(bus_r, 1)
-        np.copyto(out[:, 0], bus_l)
-        np.copyto(out[:, 1], bus_r)
-        self._playhead = t + self.block
+    def _fill_pieces(self, lane: Lane, pieces: int) -> bool:
+        """`fill`, a piece at a time, silence in any piece no clip plays."""
+        wrote = False
+        for piece in range(pieces):
+            t, at, length = (int(value) for value in self._pieces[piece])
+            rows_l = self._lane_l[at : at + length]
+            rows_r = self._lane_r[at : at + length]
+            if fill(lane, t, rows_l, rows_r):
+                wrote = True
+            else:
+                rows_l.fill(0)
+                rows_r.fill(0)
+        return wrote
+
+    def _audition(self) -> None:
+        """The voice's next block, summed into the bus over the channels."""
+        voice = self._voice
+        if voice is None or voice.position >= voice.frames:
+            return
+        read = voice.position
+        count = min(self.block, voice.frames - read)
+        sample = voice.audio
+        into_l = self._bus_l[:count]
+        into_r = self._bus_r[:count]
+        np.add(into_l, sample[read : read + count, 0], out=into_l)
+        np.add(into_r, sample[read : read + count, voice.last], out=into_r)
+        voice.position = read + count
 
     def _take_up(self, snapshot: Snapshot) -> None:
         """Start playing `snapshot`, each channel ramping from the gain it
         had in the one before - if the one before is the one it was built
         against. Two installed within one block skip a snapshot, and its
         channels' places mean nothing to this one, so it starts at its
-        targets. The one before is not freed here: whoever installed it
-        still holds it."""
+        targets. So does a channel that is new, and so does every channel's
+        gain sent after the snapshot was built but before it was taken up:
+        its level is its target from the start, not what it was built with.
+        The one before is not freed here: whoever installed it still holds
+        it."""
+        np.copyto(snapshot.levels, snapshot.targets)
         if self._current.generation == snapshot.based_on:
             before = self._current.levels
             levels = snapshot.levels
@@ -202,10 +350,18 @@ class Engine:
         targets = snapshot.targets
         while self._read < written:
             command = ring[self._read % RING]
-            if command[0] == SEEK:
+            kind = command[0]
+            if kind == GAIN:
+                if command[1] == snapshot.generation and 0 <= command[2] < len(targets):
+                    targets[int(command[2])] = command[3]
+            elif kind == SEEK:
                 self._playhead = int(command[3])
-            elif command[1] == snapshot.generation and 0 <= command[2] < len(targets):
-                targets[int(command[2])] = command[3]
+            elif kind == PLAY:
+                self._playing = bool(command[3])
+            elif kind == LOOP:
+                self._loop_start = int(command[1])
+                self._loop_end = int(command[2])
+                self._looping = bool(command[3])
             self._read += 1
 
     def _peak(self, side: npt.NDArray[np.float32], which: int) -> None:
