@@ -3,6 +3,7 @@ the clip's, the channel's and the sample's fields. Marked gui."""
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterator
 
 import pytest
@@ -14,18 +15,21 @@ from PySide6.QtWidgets import QApplication, QSplitter
 from immersive.app import build_application
 from immersive.core.document import Document
 from immersive.core.edits import AddChannel, AddMedia, DropClips, SetAttribute
-from immersive.core.model import Clip, MediaFile, new_channel
+from immersive.core.model import Clip, Fade, FadeShape, MediaFile, new_channel
 from immersive.core.selection import Kind
 from immersive.core.time import SAMPLE_RATE, to_bar_beat
 from immersive.ui import theme
 from immersive.ui.main_window import COMMON_SIGNATURES, MainWindow
-from immersive.ui.parameters.views import ProjectView
-from immersive.ui.widgets.numeric import NumericField
+from immersive.ui.parameters.views import ClipView, ProjectView
+from immersive.ui.timeline.grid import Unit
+from immersive.ui.widgets.numeric import MIXED, NumericField
 
 pytestmark = pytest.mark.gui
 
 SECOND = SAMPLE_RATE
 MEDIA = MediaFile("m-00000001", "/a.wav", "a.wav", SAMPLE_RATE, 1, 10 * SECOND)
+#: A bar at 120 BPM in 4/4: four half-second beats.
+BAR = 2 * SECOND
 
 
 @pytest.fixture(autouse=True)
@@ -303,3 +307,202 @@ def test_collapsing_gives_the_room_to_the_pool_and_opening_takes_it_back() -> No
 
     assert not pane.collapsed()
     assert splitter.sizes()[1] == open_height
+
+
+# --------------------------------------------------------------------------- #
+# the clip view
+# --------------------------------------------------------------------------- #
+
+
+def clip_view(window: MainWindow) -> ClipView:
+    view = window.parameters().view()
+    assert isinstance(view, ClipView)
+    return view
+
+
+def a_clip_selected(
+    *clips_of: tuple[int, int],
+) -> tuple[MainWindow, list[list[Clip]], ClipView]:
+    window, grid = a_window()
+    chosen = [grid[lane][n] for lane, n in clips_of or ((0, 0),)]
+    window.document().selection.select(Kind.CLIPS, chosen)
+    return window, grid, clip_view(window)
+
+
+def test_a_clip_shows_its_source_start_length_offset_gain_and_fades() -> None:
+    window, grid = a_window()
+    clip = grid[0][1]
+    clip.offset, clip.gain_db = SECOND // 4, -3.0
+    clip.fade_in = Fade(4_800)
+    clip.fade_out = Fade(9_600, FadeShape.EQUAL_POWER)
+    window.document().selection.select(Kind.CLIPS, [clip])
+    view = clip_view(window)
+
+    assert view.labels() == [
+        "Source",
+        "Start",
+        "Length",
+        "Crop offset",
+        "Gain",
+        "Fade in",
+        "Fade out",
+    ]
+    assert view.heading() == "Clip" and view.source.text() == "a.wav"
+    assert [
+        f.text()
+        for f in (view.start, view.length, view.offset, view.gain, view.fade_in)
+    ] == ["2.1.000", "1.000 s", "0.250 s", "-3.0 dB", "100 ms"]
+    assert (view.fade_out.text(), view.fade_out_shape.currentText()) == (
+        "200 ms",
+        "Equal power",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "typed", "expected"),
+    [
+        ("start", "3.1.000", ("start", 2 * BAR)),
+        ("length", "0.5 s", ("length", SECOND // 2)),
+        ("offset", "250 ms", ("offset", SECOND // 4)),
+        ("gain", "-6 dB", ("gain_db", -6.0)),
+    ],
+)
+def test_each_clip_field_is_one_undo(
+    field: str, typed: str, expected: tuple[str, object]
+) -> None:
+    window, grid, view = a_clip_selected((0, 0))
+    document, clip = window.document(), grid[0][0]
+    before, count = copy.deepcopy(document.project), stacked(window)
+
+    type_into(getattr(view, field), typed)
+
+    name, value = expected
+    assert getattr(clip, name) == value
+    assert stacked(window) == count + 1
+    document.undo()
+    assert document.project == before
+
+
+def test_the_clip_in_the_timeline_follows_the_pane() -> None:
+    window, grid, view = a_clip_selected((0, 0))
+    clip = grid[0][0]
+    type_into(view.start, "0:06")
+    [item] = [i for i in window.timeline().view.clip_items() if i.clip is clip]
+    assert item.pos().x() == 6 * SECOND / window.timeline().axis.scale
+
+
+@pytest.mark.parametrize("edge", ["in", "out"])
+def test_a_fades_length_and_shape_are_each_one_undo(edge: str) -> None:
+    window, grid, view = a_clip_selected((0, 0))
+    clip, count = grid[0][0], stacked(window)
+    length = view.fade_in if edge == "in" else view.fade_out
+    shape = view.fade_in_shape if edge == "in" else view.fade_out_shape
+
+    type_into(length, "100 ms")
+    shape.activated.emit(1)
+
+    fade = clip.fade_in if edge == "in" else clip.fade_out
+    assert fade == Fade(4_800, FadeShape.EQUAL_POWER)
+    assert stacked(window) == count + 2
+
+
+def test_several_clips_show_a_dash_where_they_differ() -> None:
+    window, grid = a_window()
+    grid[1][1].gain_db = -6.0
+    grid[1][1].fade_out = Fade(480, FadeShape.EQUAL_POWER)
+    window.document().selection.select(Kind.CLIPS, [grid[0][2], grid[1][1]])
+    view = clip_view(window)
+
+    assert view.heading() == "2 clips"
+    assert view.start.text() == "2.1.000", "the selection's start, the earliest"
+    assert view.length.text() == "1.000 s", "the same for both"
+    assert view.gain.text() == view.fade_out.text() == MIXED
+    assert view.fade_out_shape.currentIndex() == -1
+    assert view.fade_out_shape.currentText() == ""
+    assert view.fade_out_shape.placeholderText() == MIXED
+
+
+def test_a_value_set_over_a_dash_goes_to_every_clip_in_one_edit() -> None:
+    window, grid = a_window()
+    grid[1][1].gain_db = -6.0
+    chosen = [grid[0][2], grid[1][1], grid[1][2]]
+    window.document().selection.select(Kind.CLIPS, chosen)
+    count = stacked(window)
+
+    type_into(clip_view(window).gain, "-3")
+    clip_view(window).fade_out_shape.activated.emit(1)
+
+    assert [clip.gain_db for clip in chosen] == [-3.0] * 3
+    assert {clip.fade_out.shape for clip in chosen} == {FadeShape.EQUAL_POWER}
+    assert stacked(window) == count + 2
+    window.document().undo()
+    window.document().undo()
+    assert [clip.gain_db for clip in chosen] == [0.0, -6.0, 0.0]
+
+
+def test_the_start_moves_the_selection_and_keeps_its_shape() -> None:
+    """D-102: not every clip to one start, which on one lane would leave one."""
+    window, grid, view = a_clip_selected((0, 0), (0, 1), (1, 2))
+    count = stacked(window)
+
+    type_into(view.start, "0:10")
+
+    assert [grid[0][0].start, grid[0][1].start, grid[1][2].start] == [
+        10 * SECOND,
+        12 * SECOND,
+        14 * SECOND,
+    ]
+    assert stacked(window) == count + 1
+    assert view.start.text() == "6.1.000"
+
+
+def test_a_length_past_the_neighbour_lands_at_the_neighbour_and_says_so() -> None:
+    _window, grid, view = a_clip_selected((0, 0))
+    type_into(view.length, "5 s")
+    assert grid[0][0].length == 2 * SECOND, "the next clip starts at 2 s"
+    assert view.length.text() == "2.000 s"
+
+
+def test_a_length_that_cannot_change_is_no_edit_and_is_put_back() -> None:
+    window, _grid, view = a_clip_selected((0, 0))
+    type_into(view.length, "5 s")
+    count = stacked(window)
+
+    type_into(view.length, "9 s")
+
+    assert stacked(window) == count
+    assert view.length.text() == "2.000 s"
+
+
+def test_a_crop_offset_stops_at_the_samples_end() -> None:
+    _window, grid, view = a_clip_selected((0, 0))
+    type_into(view.offset, "20 s")
+    assert grid[0][0].offset == 9 * SECOND, "a ten-second sample, a one-second clip"
+    assert grid[0][0].start == 0 and view.offset.text() == "9.000 s"
+
+
+def test_a_fade_stops_where_the_other_begins() -> None:
+    """D-101."""
+    _window, grid, view = a_clip_selected((0, 0))
+    type_into(view.fade_out, "600 ms")
+    type_into(view.fade_in, "800 ms")
+    assert (grid[0][0].fade_in.length, grid[0][0].fade_out.length) == (
+        SECOND * 4 // 10,
+        SECOND * 6 // 10,
+    )
+    assert view.fade_in.text() == "400 ms"
+
+
+def test_the_start_reads_as_the_ruler_counts() -> None:
+    window, _, view = a_clip_selected((0, 1))
+    assert view.start.text() == "2.1.000"
+    window.set_ruler_unit(Unit.TIME)
+    assert view.start.text() == "0:02.000"
+    type_into(view.start, "3.5")
+    assert view.start.text() == "0:03.500"
+
+
+def test_the_start_reads_the_new_bars_after_a_tempo_change() -> None:
+    window, _, view = a_clip_selected((0, 1))
+    window.document().push(SetAttribute(window.document().project, "bpm", 60.0))
+    assert view.start.text() == "1.3.000"

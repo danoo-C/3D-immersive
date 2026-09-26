@@ -24,7 +24,7 @@ from PySide6.QtWidgets import QFrame, QScrollArea, QWidget
 
 from immersive.core.document import Document
 from immersive.core.selection import Kind
-from immersive.ui.parameters.views import ProjectView, Summary, View
+from immersive.ui.parameters.views import ClipView, ProjectView, Summary, View
 from immersive.ui.timeline.grid import Unit
 from immersive.ui.widgets.placeholder import Panel
 
@@ -131,6 +131,8 @@ class ParametersPane(Panel):
         document = self._document
         if kind is None:
             return ProjectView(document)
+        if kind is Kind.CLIPS:
+            return ClipView(document, self._unit)
         count = len(document.selection)
         noun = {Kind.CLIPS: "clip", Kind.CHANNELS: "channel", Kind.MEDIA: "sample"}[
             kind

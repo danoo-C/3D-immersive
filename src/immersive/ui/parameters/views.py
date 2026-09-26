@@ -18,6 +18,7 @@ milestone in their tooltip, as every unbuilt action in the window is.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from typing import Any, TypeVar
 
 from PySide6.QtCore import Qt
@@ -32,10 +33,19 @@ from PySide6.QtWidgets import (
 
 from immersive.core.commands import Command, Compound
 from immersive.core.document import Document
-from immersive.core.edits import SetAttribute
-from immersive.ui.units import Plain
+from immersive.core.edits import (
+    Edge,
+    MoveClips,
+    SetAttribute,
+    SetLengths,
+    SlipClips,
+    fade_room,
+)
+from immersive.core.model import MIN_CLIP_LENGTH, Clip, Fade, FadeShape
+from immersive.ui.timeline.grid import Unit
+from immersive.ui.units import Duration, Plain, Position
 from immersive.ui.widgets.check import CheckBox
-from immersive.ui.widgets.numeric import NumericField
+from immersive.ui.widgets.numeric import MIXED, NumericField
 
 #: Why a field is drawn but dead, by the milestone that brings it.
 M4 = "the binaural engine arrives at M4"
@@ -47,6 +57,19 @@ TEMPO_FLOOR, TEMPO_CEILING = 20.0, 999.0
 #: How many beats a bar may have, and which note a beat may be (D-104).
 BEATS_FLOOR, BEATS_CEILING = 1, 32
 NOTES = (1, 2, 4, 8, 16)
+
+#: A clip's gain, as a channel's: below the floor is what mute is for.
+GAIN_FLOOR, GAIN_CEILING = -60.0, 12.0
+
+#: The longest time a field on the timeline takes: a day, far past any
+#: project, so it is the clip's own limits that stop a value, not the field.
+LONGEST = 24 * 60 * 60 * 48_000
+
+#: How far one pixel of drag moves a time: ten milliseconds.
+TIME_STEP = 480
+
+#: The fade shapes a clip may have, as the combo box lists them.
+SHAPES = {FadeShape.LINEAR: "Linear", FadeShape.EQUAL_POWER: "Equal power"}
 
 _T = TypeVar("_T")
 
@@ -105,7 +128,7 @@ class View(QWidget):
         self._heading.setObjectName("PaneHeading")
         self._form = QFormLayout()
         self._form.setContentsMargins(0, 0, 0, 0)
-        self._form.setHorizontalSpacing(10)
+        self._form.setHorizontalSpacing(8)
         self._form.setVerticalSpacing(6)
         self._form.setLabelAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -114,7 +137,7 @@ class View(QWidget):
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
         column = QVBoxLayout(self)
-        column.setContentsMargins(10, 8, 10, 10)
+        column.setContentsMargins(8, 8, 8, 8)
         column.setSpacing(8)
         column.addWidget(self._heading)
         column.addLayout(self._form)
@@ -274,6 +297,171 @@ class ProjectView(View):
             note if note is not None else was_note,
         )
         self._push(set_on_all([project], "time_signature", signature))
+
+
+class ClipView(View):
+    """One clip or several: where each starts, how long it is, where in its
+    sample it plays from, its gain, and its fades.
+
+    The start is the selection's - the earliest - and a typed one moves them
+    all by the same amount, as a drag does (D-97, D-102). Every other field
+    is each clip's own, `—` where they differ, and a value set there goes to
+    each as far as that clip can take it: a length stops at the neighbour
+    and the sample (D-98), a crop offset at the sample's ends, and a fade at
+    the other fade (D-101). The field then shows where the edit landed.
+    """
+
+    def __init__(self, document: Document, unit: Callable[[], Unit]) -> None:
+        super().__init__(document, "Clip")
+        self.source = QLabel()
+        self.row("Source", self.source)
+
+        def tempo() -> tuple[float, tuple[int, int]]:
+            project = self._document.project
+            return project.bpm, project.time_signature
+
+        self.start = self._time(Position(tempo, unit), 0, "Where it starts")
+        self.start.committed.connect(self._set_start)
+        self.row("Start", self.start)
+        self.length = self._time(Duration("s"), MIN_CLIP_LENGTH, "How long it plays")
+        self.length.committed.connect(self._set_length)
+        self.row("Length", self.length)
+        self.offset = self._time(Duration("s"), 0, "Where in its sample it plays from")
+        self.offset.committed.connect(self._set_offset)
+        self.row("Crop offset", self.offset)
+        self.gain = numeric(
+            0,
+            minimum=GAIN_FLOOR,
+            maximum=GAIN_CEILING,
+            step=0.1,
+            unit="dB",
+            signed=True,
+            tip="Clip gain — drag, or click and type",
+            committed=lambda value: self._push(
+                set_on_all(self._clips(), "gain_db", value)
+            ),
+        )
+        self.row("Gain", self.gain)
+
+        self.fade_in, self.fade_in_shape = self._fade(Edge.START)
+        self.fade_out, self.fade_out_shape = self._fade(Edge.END)
+
+    # ----------------------------------------------------------- building
+
+    def _time(
+        self, format: Duration | Position, minimum: int, tip: str
+    ) -> NumericField:
+        field = NumericField(
+            0,
+            minimum=minimum,
+            maximum=LONGEST,
+            step=TIME_STEP,
+            decimals=0,
+            format=format,
+        )
+        field.setToolTip(f"{tip} — drag, or click and type")
+        return field
+
+    def _fade(self, edge: Edge) -> tuple[NumericField, QComboBox]:
+        name = "Fade in" if edge is Edge.START else "Fade out"
+        length = self._time(Duration("ms", decimals=0), 0, f"{name}: how long it lasts")
+        length.committed.connect(
+            lambda samples: self._set_fade(edge, length=int(samples))
+        )
+        length.setMinimumWidth(58)
+        shape = QComboBox()
+        shape.addItems(list(SHAPES.values()))
+        shape.setPlaceholderText(MIXED)
+        # The pane is narrow: the shape's name may be cut before the length is.
+        shape.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        shape.setMinimumContentsLength(3)
+        shape.setToolTip(f"{name}: its shape")
+        shape.activated.connect(
+            lambda index: self._set_fade(edge, shape=list(SHAPES)[index])
+        )
+        line = QWidget()
+        both = QHBoxLayout(line)
+        both.setContentsMargins(0, 0, 0, 0)
+        both.setSpacing(6)
+        both.addWidget(length, 1)
+        both.addWidget(shape, 1)
+        self.row(name, line)
+        return length, shape
+
+    # ------------------------------------------------------------ reading
+
+    def _clips(self) -> list[Clip]:
+        return self._document.selection.clips()
+
+    def show_values(self) -> None:
+        clips = self._clips()
+        if not clips:
+            return
+        count = len(clips)
+        self.set_heading("Clip" if count == 1 else f"{count} clips")
+        names = {media.id: media.name for media in self._document.project.media_pool}
+        same, media_id = common([clip.media_id for clip in clips])
+        self.source.setText(
+            names.get(media_id, media_id) if same and media_id is not None else MIXED
+        )
+        self.start.set_value(min(clip.start for clip in clips))
+        show_number(self.length, [clip.length for clip in clips])
+        show_number(self.offset, [clip.offset for clip in clips])
+        show_number(self.gain, [clip.gain_db for clip in clips])
+        for fades, length, shape in (
+            ([clip.fade_in for clip in clips], self.fade_in, self.fade_in_shape),
+            ([clip.fade_out for clip in clips], self.fade_out, self.fade_out_shape),
+        ):
+            show_number(length, [fade.length for fade in fades])
+            same, chosen = common([fade.shape for fade in fades])
+            shape.setCurrentIndex(
+                list(SHAPES).index(chosen) if same and chosen is not None else -1
+            )
+
+    # ------------------------------------------------------------ editing
+
+    def _set_start(self, start: float) -> None:
+        clips = self._clips()
+        delta = round(start) - min(clip.start for clip in clips)
+        move = MoveClips(self._document.project, clips, delta)
+        self._push(move if move.changes else None)
+
+    def _set_length(self, length: float) -> None:
+        edit = SetLengths(self._document.project, self._clips(), round(length))
+        self._push(edit if edit.changes else None)
+
+    def _set_offset(self, offset: float) -> None:
+        edit = SlipClips(self._document.project, self._clips(), round(offset))
+        self._push(edit if edit.changes else None)
+
+    def _set_fade(
+        self, edge: Edge, *, length: int | None = None, shape: FadeShape | None = None
+    ) -> None:
+        """The same fade of every clip: a length each as long as its room
+        allows (D-101), or a shape. New `Fade`s, since they are mutable and a
+        clip's is its own."""
+        name = "fade_in" if edge is Edge.START else "fade_out"
+        changes: list[Command] = []
+        for clip in self._clips():
+            fade: Fade = getattr(clip, name)
+            wanted = replace(
+                fade,
+                length=fade.length
+                if length is None
+                else min(length, fade_room(clip, edge)),
+                shape=fade.shape if shape is None else shape,
+            )
+            if wanted != fade:
+                changes.append(SetAttribute(clip, name, wanted))
+        self._push(
+            None
+            if not changes
+            else changes[0]
+            if len(changes) == 1
+            else Compound(changes)
+        )
 
 
 class Summary(View):
