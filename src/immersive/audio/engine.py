@@ -189,6 +189,10 @@ class Engine:
             for index, was in enumerate(snapshot.carry):
                 if was >= 0:
                     levels[index] = before[was]
+            # Let go before the swap: once `_current` moves on, the UI thread
+            # may drop the old snapshot, and a local still holding its array
+            # would free it here, when this returns.
+            del before
         self._current = snapshot
 
     def _drain(self, snapshot: Snapshot) -> None:
