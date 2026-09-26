@@ -1,6 +1,7 @@
 # M3 · Phase 8 — The engine, flat
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_8_flat_engine.md](plans/phase_8_flat_engine.md)
 
 ## Goal
 
