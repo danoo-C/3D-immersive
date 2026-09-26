@@ -66,9 +66,9 @@ Four schemes, all monotonic, all permanent.
 
 | Prefix | Meaning | Lives in | Current high-water |
 |---|---|---|---|
-| `F-n` | Functional requirement | `01-requirements` §Functional | F-58 |
+| `F-n` | Functional requirement | `01-requirements` §Functional | F-59 |
 | `N-n` | Non-functional requirement | `01-requirements` §Non-functional | N-6 |
-| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-112 |
+| `D-n` | Decision, with its rationale | `01-requirements` §Decision log | D-114 |
 | `QA-n` | A question asked during spec review, and its answer | `07-qa-archive` | QA-38 |
 
 These four numbers are themselves the kind of fact §2 is about, so they are

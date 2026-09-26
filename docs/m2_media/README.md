@@ -15,6 +15,7 @@ in [05-audio-engine.md](../05-audio-engine.md) · Workflow:
 | [5 — The waveform widget](phase_5_waveform_widget.md) | ✅ |
 | [6 — The media pool](phase_6_media_pool.md) | ✅ |
 | [7 — Audition](phase_7_audition.md) | built — **waiting to be heard** |
+| [8 — Import progress](phase_8_import_progress.md) | planned |
 
 The order is dependency order. Everything after phase 1 edits a project the
 window has to be holding; peaks need decoded audio and a hash to be keyed by;
@@ -46,6 +47,13 @@ and [05](../05-audio-engine.md) both say the flags exist "from M2", because
 M2's audition is the first sound — and the roadmap's M3 bullet gives the same
 reason while sitting one milestone too late. The decision log wins; the
 roadmap is corrected.
+
+**Import progress is added, as phase 8 (2026-09-26).** Added after the
+other phases were built, while M2 still waits on phase 7's listening test.
+Phase 6 put decoding on workers so the window never froze, and deliberately
+showed nothing until the end ("nothing asks for a progress bar"). Then 22
+stems from a real project took long enough that nothing on screen looked
+like a hang, and a bar was asked for (F-59).
 
 ## What this milestone does not deliver
 
