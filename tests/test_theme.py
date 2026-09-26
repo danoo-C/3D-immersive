@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from immersive.audio.hrtf import sofa
 from immersive.ui import theme, theme_io
 
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -601,10 +602,10 @@ def test_no_hex_appears_in_the_theme_module_at_all() -> None:
     )
 
 
-#: Every module that reaches a bundled resource. `theme.py` reads `app.qss`
-#: and `theme_io.py` reads the built-in `.3dimtheme`; both are inside the
-#: package and both are subject to D-30.
-RESOURCE_READERS = (theme, theme_io)
+#: Every module that reaches a bundled resource. `theme.py` reads `app.qss`,
+#: `theme_io.py` the built-in `.3dimtheme`, and `sofa.py` the built-in HRTF
+#: set (M4); all are inside the package and all are subject to D-30.
+RESOURCE_READERS = (theme, theme_io, sofa)
 
 
 @pytest.mark.parametrize("module", RESOURCE_READERS, ids=lambda m: m.__name__)
