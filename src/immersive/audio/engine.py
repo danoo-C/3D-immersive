@@ -220,6 +220,19 @@ class Engine:
         self._peaks.fill(0)
         return left, right
 
+    def take_channel_peaks(self) -> list[tuple[str, float, float]]:
+        """Each channel's highest level on each side since the last time, by
+        channel id, and start again (D-117). Read from the snapshot playing,
+        so a reorder cannot hand one channel another's level; a block that
+        lands between the read and the reset is one frame of a meter."""
+        snapshot = self._current
+        read = snapshot.peaks.copy()
+        snapshot.peaks.fill(0)
+        return [
+            (lane.channel_id, float(left), float(right))
+            for lane, (left, right) in zip(snapshot.lanes, read, strict=True)
+        ]
+
     def _send(self, kind: float, a: float, b: float, c: float) -> bool:
         if self._written - self._read >= RING:
             return False
@@ -316,7 +329,7 @@ class Engine:
         """Every channel's share of the block, at its gain, into the bus."""
         bus_l, bus_r = self._bus_l, self._bus_r
         lane_l, lane_r = self._lane_l, self._lane_r
-        targets, levels = snapshot.targets, snapshot.levels
+        targets, levels, peaks = snapshot.targets, snapshot.levels, snapshot.peaks
         lanes = snapshot.lanes
         start = int(self._pieces[0, 0])
         for index in range(len(lanes)):
@@ -341,6 +354,9 @@ class Engine:
             elif target != 1.0:
                 np.multiply(lane_l, target, out=lane_l)
                 np.multiply(lane_r, target, out=lane_r)
+            # What this channel adds to the bus, for its meter (D-117).
+            self._raise(peaks, index, 0, lane_l)
+            self._raise(peaks, index, 1, lane_r)
             np.add(bus_l, lane_l, out=bus_l)
             np.add(bus_r, lane_r, out=bus_r)
 
@@ -443,3 +459,16 @@ class Engine:
         loudest = self._scratch.max()
         if loudest > self._peaks[which]:
             self._peaks[which] = loudest
+
+    def _raise(
+        self,
+        peaks: npt.NDArray[np.float64],
+        channel: int,
+        which: int,
+        side: npt.NDArray[np.float32],
+    ) -> None:
+        """A channel's peak on one side, raised to this block's loudest."""
+        np.abs(side, out=self._scratch)
+        loudest = self._scratch.max()
+        if loudest > peaks[channel, which]:
+            peaks[channel, which] = loudest

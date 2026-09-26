@@ -712,3 +712,64 @@ def test_nothing_shorter_than_a_shortest_loop_repeats() -> None:
     engine = repeating(BLOCK, 63, 0)
     block(engine)
     assert engine.playhead == BLOCK
+
+
+# --------------------------------------------------------------------------- #
+# each channel's peak, for its meter (D-117)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_channels_peak_is_what_it_adds_to_the_bus() -> None:
+    project, store = arrangement(0.25, 0.5)
+    project.channels[0].gain_db = -6.0
+    project.channels[1].mute = True
+    engine, _ = playing(project, store)
+
+    block(engine)
+
+    [(first, left, right), (second, *silent)] = engine.take_channel_peaks()
+    gained = float(np.float32(0.25) * np.float32(db_to_gain(-6.0)))
+    assert first == "c-00000000" and left == right == pytest.approx(gained)
+    assert second == "c-00000001" and silent == [0.0, 0.0], "muted: nothing added"
+
+
+def test_taking_the_channel_peaks_starts_them_again() -> None:
+    project, store = arrangement(0.25)
+    engine, _ = playing(project, store)
+    block(engine)
+    engine.take_channel_peaks()
+    assert engine.take_channel_peaks() == [("c-00000000", 0.0, 0.0)]
+
+
+def test_channel_peaks_are_by_id_and_survive_a_reorder() -> None:
+    project, store = arrangement(0.25, 0.5)
+    engine, first = playing(project, store)
+    block(engine)
+    before = {channel: left for channel, left, _ in engine.take_channel_peaks()}
+
+    project.channels.reverse()
+    engine.install(snapshot(project, store, first))
+    block(engine)
+    after = {channel: left for channel, left, _ in engine.take_channel_peaks()}
+
+    assert before == after == {"c-00000000": 0.25, "c-00000001": 0.5}
+
+
+def test_stopped_no_channel_peak_rises() -> None:
+    project, store = arrangement(0.25)
+    engine = Engine(BLOCK)
+    engine.install(snapshot(project, store))
+    block(engine)
+    assert engine.take_channel_peaks() == [("c-00000000", 0.0, 0.0)]
+
+
+def test_a_stereo_channel_has_a_peak_per_side() -> None:
+    project, store = arrangement(0.0)
+    media = project.media_pool[0]
+    sides = np.ascontiguousarray(
+        np.stack([level(0.5)[:, 0], level(-0.125)[:, 0]], 1), dtype=np.float32
+    )
+    store[media.id] = Decoded(sides, 48_000)
+    engine, _ = playing(project, store)
+    block(engine)
+    assert engine.take_channel_peaks() == [("c-00000000", 0.5, 0.125)]

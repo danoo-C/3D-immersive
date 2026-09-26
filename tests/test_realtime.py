@@ -140,6 +140,8 @@ def run() -> tuple[int, int]:
         """What the UI thread does meanwhile: gains, a mute, a seek, a swap,
         loops, auditions, a repeat."""
         generation = second.generation if engine.holds(second) else first.generation
+        engine.take_peaks()
+        engine.take_channel_peaks()  # the meters' frame, outside what is measured
         if n % 7 == 0:
             engine.send_gain(generation, 1, 0.25 + (n % 5) / 10)
         if n == 40:

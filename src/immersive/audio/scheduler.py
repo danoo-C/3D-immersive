@@ -70,6 +70,10 @@ class Snapshot:
     #: Each channel's gain at the end of the last block played. Filled from
     #: the snapshot before, by `carry`, when this one is taken up.
     levels: npt.NDArray[np.float64] = field(repr=False)
+    #: Each channel's highest sample per side since the UI thread last took
+    #: them, `(channels, 2)`: what it adds to the bus, for its meter (D-117).
+    #: Raised by the engine, read and zeroed by `Engine.take_channel_peaks`.
+    peaks: npt.NDArray[np.float64] = field(repr=False)
     #: For each channel, its index in the snapshot before, or -1.
     carry: tuple[int, ...] = ()
     #: The generation `carry` counts in: the snapshot this was built from.
@@ -150,6 +154,7 @@ def build(
         lanes=tuple(lanes),
         targets=targets,
         levels=targets.copy(),
+        peaks=np.zeros((len(lanes), 2), dtype=np.float64),
         carry=tuple(before.get(channel.id, -1) for channel in project.channels),
         based_on=previous.generation if previous is not None else 0,
     )
@@ -158,7 +163,13 @@ def build(
 def empty() -> Snapshot:
     """Nothing to play: what an engine starts with."""
     none = np.zeros(0, dtype=np.float64)
-    return Snapshot(generation=0, lanes=(), targets=none, levels=none.copy())
+    return Snapshot(
+        generation=0,
+        lanes=(),
+        targets=none,
+        levels=none.copy(),
+        peaks=np.zeros((0, 2), dtype=np.float64),
+    )
 
 
 def fill(lane: Lane, t: int, left: Samples, right: Samples) -> bool:
