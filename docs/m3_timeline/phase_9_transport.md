@@ -1,6 +1,7 @@
 # M3 · Phase 9 — Transport
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_9_transport.md](plans/phase_9_transport.md)
 
 ## Goal
 

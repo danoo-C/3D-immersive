@@ -19,7 +19,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | ✅ |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | ✅ |
 | [8 — The engine, flat](phase_8_flat_engine.md) | ✅ |
-| [9 — Transport](phase_9_transport.md) | not started |
+| [9 — Transport](phase_9_transport.md) | in progress |
 | [10 — The master meter, and the arrangement heard](phase_10_meter_and_listening.md) | not started |
 
 The order is dependency order. Channels need a view and a time axis to be
@@ -129,17 +129,13 @@ phase's first decision.
   and solo, folded into one gain, and seeks are the ring's. The swap is one
   reference assigned, and the UI thread frees old snapshots (D-105,
   phase 8).
-- **Audition and the transport — one stream or two?** M2's audition opens
-  its own stream. Two streams on one device are not possible on every
-  backend, and one stream means audition goes through the engine. Either
-  way, a double-click during playback has to do something defined.
-  Phase 9.
-- **Which drag in the ruler moves the playhead, and which draws the loop
-  region?** Both are phase 9's, and "drag in the ruler" cannot mean both.
-  Two common answers: grab the playhead's head to move it and drag anywhere
-  else for a loop (REAPER), or give each its own strip (Logic). Whether the
-  dragged playhead snaps goes with it. Added before phase 9 started.
-  Phase 9.
+- ~~**Audition and the transport — one stream or two?**~~ One, the
+  transport's: audition is summed into the engine's bus, over the
+  arrangement (D-107, phase 9).
+- ~~**Which drag in the ruler moves the playhead, and which draws the loop
+  region?**~~ A press on the playhead drags it; a press elsewhere that
+  moves draws a loop, and one that does not seeks. All snap (D-109,
+  phase 9).
 
 ## Notes
 
