@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 10 — The master meter, and the arrangement heard
 
-**Written:** 2026-09-26 · **Status:** planned
+**Written:** 2026-09-26 · **Status:** built — waiting to be heard
 
 ## Approach
 
@@ -171,4 +171,24 @@ the HRTF. No clip light on a channel; the master is the one.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, all five steps, with no step reverted and no decision
+reopened. The plan's approach held: the engine had most of the master's
+peaks already, and adding the channels' took one array on the snapshot and
+four lines in `_mix`. The zero-allocation test stayed clean with the peaks
+taken every block.
+
+The risks did not arrive. The header had room for a 9 px strip, since its
+name was already elided. The 23 channels repainting at thirty frames a
+second showed nothing a person would notice, offscreen, because a silent
+channel's meter never repaints. That is a claim for native hardware too,
+and the listening test is where to watch it.
+
+What the plan got wrong was only in its tests. Every channel in them was
+mono until a mutation showed it. And one spy, bound in a loop, watched the
+wrong header, which only the linter saw.
+
+What M4 needs: the channel peaks are raised after a lane's gain. When
+distance attenuation joins the gain there, the meters follow it for
+nothing. The HRTF comes after that point and must stay after it (D-117).
+The master meter will show the limiter's work once D-54's limiter sits on
+the bus.

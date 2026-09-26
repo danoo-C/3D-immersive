@@ -20,7 +20,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | ✅ |
 | [8 — The engine, flat](phase_8_flat_engine.md) | ✅ |
 | [9 — Transport](phase_9_transport.md) | ✅ |
-| [10 — The master meter, and the arrangement heard](phase_10_meter_and_listening.md) | not started |
+| [10 — The master meter, and the arrangement heard](phase_10_meter_and_listening.md) | built — **waiting to be heard** |
 
 The order is dependency order. Channels need a view and a time axis to be
 drawn against; clips need a lane to land on; the edit verbs act on a
@@ -236,3 +236,13 @@ transport's (D-108); the ruler drags the playhead, draws a loop, or seeks
 stops the transport and says so once. Enter and Esc are kept by the fields
 and the drag that use them. Sixty-six mutations: sixty-two killed, and four
 that found code with no effect.
+
+**Phase 10 — built, waiting to be heard.** The master meter is in the
+status bar, and each channel has one in its header, asked for as the plan
+was written (F-60, D-117, superseding D-55). Both are fed thirty times a
+second from peaks the engine publishes without allocating, and both move
+by D-118: an instant rise, a fall of 24 dB/s and a 1.5 s hold. Only the
+master has a clip light. Looked at with the person's 23 stems, which at
+0 dB each clip the master. **M3 is complete when a person has heard an
+arrangement on native Windows or Linux.** The phase's Notes say exactly
+what to do, and the same session ticks M2 phase 7's box.

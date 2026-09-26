@@ -94,6 +94,7 @@ src/immersive/
                          (N-3, F-59, M2)
     activity.py          anything slow, begun, updated, finished - no Qt,
                          the info box's model (D-116, M2)
+    metering.py          how a meter moves - no Qt (D-118, M3)
     explorer/            media pool tree (top)
     parameters/          the params pane (bottom): a view per kind of
                          selection, and the project's with none (M3)
@@ -102,6 +103,7 @@ src/immersive/
     keyframes/           curve editor panel
     widgets/             shared small widgets
       info_box.py        the toolbar's info box: what is under way (D-116, M2)
+      meter.py           a peak meter: the master's and each channel's (F-54, F-60, M3)
       notices.py         the status-bar line, count and list (F-56, M9)
       numeric.py         a number dragged or typed, in any unit (M3)
       check.py           the painted check box (M3)

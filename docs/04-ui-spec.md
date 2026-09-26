@@ -378,7 +378,8 @@ who owns what. M9 is built *third*, before all of them:
 | ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file*; the channel header at phase 2 as `channel`, styled by object name, with the line between lanes as `timeline.separator`; the clip body at phase 3 as the painted `clip` group, the first with keys painted per channel; the clip's selected border and the rubber
 band at phase 4 as `clip.selected.border` and `timeline.band`, and a
 selected header as `channel.selected.background` and
-`channel.selected.marker` |
+`channel.selected.marker`; the meters, the master's and each channel's,
+at phase 10 as the painted `meter` group |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
 | input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one. Phase 7 gave it `disabled.text`, for the pane's fields a later milestone brings |
@@ -658,6 +659,11 @@ however far the lanes are scrolled.
   takes (*Selection*). A selected header wears a bar down its left edge as
   well as a lighter background, and the bar's room is always there, so
   selecting a header does not shift what is in it.
+- **The meter** at the header's right edge is what the channel adds to the
+  mix, left and right: after its gain, mute and solo, and from M4 its
+  distance, before the HRTF (F-60, D-117). It moves as the master's does
+  (D-118) and has no clip light, since only the output can clip. A silent
+  channel's meter is empty.
 
 The grid thins as the view zooms out rather than crowding: no two lines are
 drawn closer than a few pixels, the snap division goes first, then beats, and
@@ -958,10 +964,28 @@ summing in the frequency domain, each scaled by a distance attenuation that
 *moves while it plays*, do not have a predictable sum. A channel's fader
 position tells you nothing about what reaches the bus.
 
-Per-channel meters are deliberately not provided (D-55) — that is a mixing
-console, which [00-overview.md](00-overview.md) puts out of scope, and solo
-plus the parameters pane answers the same question at the rate this
-application needs it answered.
+**How it moves (D-118).** Both sides are read thirty times a second, as the
+highest sample since the last frame, on a scale of −60 to 0 dBFS drawn in
+dB. A bar rises at once and falls at 24 dB a second. The hold marks the
+highest level for 1.5 s, then falls at the same rate, never below its bar.
+Above −6 dBFS the bar is `meter.hot`. The clip light at its end latches
+when a sample passes full scale, shows `!` as well as its colour, and is
+cleared by clicking it.
+
+**Each channel has one too** (F-60, D-117), in its header: what it adds to
+the mix, so a source whose fader says little about what reaches the bus can
+be seen doing it. They supersede D-55, which left them out as a mixing
+console. A console is faders, sends and inserts; a level strip in a track's
+header is not one. The master meter stays the only clip light.
+
+| `meter` key | Default | For |
+|---|---|---|
+| `background` | `surface.hover` | the bars' track, and the clip light while it is not lit |
+| `level` | `accent` | a bar up to −6 dBFS |
+| `hot` | `warn` | a bar above −6 dBFS |
+| `hold` | `text.primary` | the peak hold's mark |
+| `clip` | `warn` | the master's clip light, latched |
+| `clip.text` | `surface.window` | the `!` on it |
 
 ## Selection
 

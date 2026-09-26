@@ -284,10 +284,21 @@ allocation, no lock: a block that lands between the read and the reset is one
 frame of a meter, which nobody can see. The hold and decay a meter shows are
 the meter's own, drawn on the UI thread.
 
-Per-channel meters are deliberately absent (D-55). What the master meter is
-*for* is the thing that is genuinely hard to predict here: 32 sources summing
-in the frequency domain, each already scaled by a distance attenuation that
-moves while it plays. A fader position does not tell you what reaches the bus.
+What the master meter is *for* is the thing that is genuinely hard to
+predict here: 32 sources summing in the frequency domain, each already
+scaled by a distance attenuation that moves while it plays. A fader
+position does not tell you what reaches the bus.
+
+**Each channel publishes its peaks too** (D-117, superseding D-55's "no
+per-channel meters"). The snapshot carries a `(channels, 2)` array, made on
+the UI thread. Once a channel's lane has had its gain, mute and solo applied,
+the engine raises that channel's pair with the same `abs` and `max` it uses
+for the bus. `Engine.take_channel_peaks` reads them, zeroes them and pairs
+each with its channel's id, so a reorder cannot hand one channel another's
+level. From M4 the tap stays before the HRTF. The sources are summed in the
+frequency domain, so a channel's own post-HRTF signal never exists, and
+making one would cost an inverse FFT per source per block. Before the HRTF
+it is within the few dB a direction's filter adds or takes away.
 
 ## Parameter smoothing
 
