@@ -17,7 +17,9 @@ at zero. This is the phase where the window first plays an arrangement.
 `L` (`04`, *Keyboard*); the engine on the stream `--device` and `--block`
 chose (D-63); the playhead position published by the engine and read by the
 window at frame rate; the view following a playhead that leaves it, as the
-plan decides; seeking by clicking the ruler during playback; the loop region,
+plan decides; seeking by clicking the ruler during playback; the playhead dragged
+along the ruler, stopped or playing, as the plan decides for its snapping
+and for sharing the ruler with the loop drag; the loop region,
 dragged in the ruler and drawn in the `loop region` group, looping exact to
 the sample; the playhead readout, in bars.beats.ticks or minutes:seconds,
 drag-scrubbable and typeable with phase 2's numeric field; the xrun counter
@@ -27,7 +29,16 @@ audition's place beside the transport, as the plan decides; `Esc` clearing
 the selection only while stopped.
 
 **Out:** the meter → phase 10. What a real device sounds like → phase 10.
-Render ranges built on the loop region (F-53) → M7.
+Render ranges built on the loop region (F-53) → M7. Hearing the audio under
+a dragged playhead (scrubbing) → not planned.
+
+**Amended before the phase started (2026-09-26).** The playhead dragged
+along the ruler is added to *Scope*, with an acceptance line. No document
+had it; until now only a click in the ruler moved the playhead. It belongs
+here rather than in an earlier phase because this phase also makes a drag
+in the ruler draw the loop region, and the two gestures have to be designed
+together. It also needs seeking the engine to mean anything during
+playback.
 
 ## Acceptance
 
@@ -42,6 +53,9 @@ Render ranges built on the loop region (F-53) → M7.
 - [ ] The readout shows the playhead in the ruler's unit, and a position
       typed in either unit moves it (F-52).
 - [ ] Clicking the ruler during playback seeks there.
+- [ ] Dragging the playhead along the ruler moves it with the pointer,
+      stopped or playing, and never starts a loop region; drawing a loop
+      region never moves the playhead.
 - [ ] The xrun counter is quiet at zero and drawn in `error` once there is
       one.
 - [ ] A device lost during playback stops the transport, leaves the playhead

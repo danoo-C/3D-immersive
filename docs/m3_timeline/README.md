@@ -134,6 +134,12 @@ phase's first decision.
   backend, and one stream means audition goes through the engine. Either
   way, a double-click during playback has to do something defined.
   Phase 9.
+- **Which drag in the ruler moves the playhead, and which draws the loop
+  region?** Both are phase 9's, and "drag in the ruler" cannot mean both.
+  Two common answers: grab the playhead's head to move it and drag anywhere
+  else for a loop (REAPER), or give each its own strip (Logic). Whether the
+  dragged playhead snaps goes with it. Added before phase 9 started.
+  Phase 9.
 
 ## Notes
 
