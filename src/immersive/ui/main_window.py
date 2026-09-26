@@ -44,6 +44,7 @@ from immersive.core.document import Document
 from immersive.core.edits import (
     AddMedia,
     DuplicateClips,
+    PasteClips,
     RemoveClips,
     SetAttribute,
     SplitClips,
@@ -265,8 +266,15 @@ class MainWindow(QMainWindow):
         self._add(edit_menu, "Select &All", "Ctrl+A").triggered.connect(
             lambda: self._timeline.view.select_all()
         )
-        self._add(edit_menu, "&Copy", "Ctrl+C", arrives=_M3)
-        self._add(edit_menu, "&Paste", "Ctrl+V", arrives=_M3)
+        # Spelled out, as Redo is: the keyboard table is the specification
+        # (D-68). A line edit claims all three for its text before any action
+        # here does.
+        self._cut = self._add(edit_menu, "Cu&t", "Ctrl+X")
+        self._cut.triggered.connect(self.cut_clips)
+        self._copy = self._add(edit_menu, "&Copy", "Ctrl+C")
+        self._copy.triggered.connect(self.copy_clips)
+        self._paste = self._add(edit_menu, "&Paste", "Ctrl+V")
+        self._paste.triggered.connect(self.paste_clips)
         self._duplicate = self._add(edit_menu, "&Duplicate", "Ctrl+D")
         self._duplicate.triggered.connect(self.duplicate_clips)
         self._delete = self._add(edit_menu, "De&lete", QKeySequence.StandardKey.Delete)
@@ -901,6 +909,7 @@ class MainWindow(QMainWindow):
             # reason; having nothing to undo is the other.
             summary = action.toolTip().partition("\n")[0]
             action.setToolTip(summary if able else f"{summary}\n{nothing}")
+        self._clipboard_changed()
 
     # ----------------------------------------------------------- theming
 
@@ -1090,11 +1099,65 @@ class MainWindow(QMainWindow):
         if remove.changes:
             self._document.push(remove)
 
+    def copy_clips(self) -> None:
+        """Ctrl+C: copies of the selected clips onto the clipboard (D-99).
+        Not an edit - the project is as it was, and nothing is unsaved."""
+        clips = self._document.selection.clips()
+        if not clips:
+            return
+        self._document.clipboard.hold(self._document.project, clips)
+        self._clipboard_changed()
+
+    def cut_clips(self) -> None:
+        """Ctrl+X: Copy, and then Delete as one edit. Undo puts the clips
+        back and leaves the clipboard as it is."""
+        clips = self._document.selection.clips()
+        if not clips:
+            return
+        self._document.clipboard.hold(self._document.project, clips)
+        self._document.push(RemoveClips(self._document.project, clips))
+
+    def paste_clips(self) -> None:
+        """Ctrl+V: the clipboard at the playhead on the focused channel, as
+        one edit (D-100); what was pasted becomes the selection, so it can
+        be moved at once."""
+        document = self._document
+        clipboard = document.clipboard
+        if not clipboard.pastable(document.project):
+            return
+        paste = PasteClips(
+            document.project,
+            clipboard.held(),
+            clipboard.lane(document.project, self._timeline.view.focused()),
+            self._timeline.playhead(),
+            theme.active().channels,
+        )
+        document.push(paste)
+        document.selection.select(Kind.CLIPS, paste.copies)
+
+    def _clipboard_changed(self) -> None:
+        """Paste is enabled exactly when the clipboard can be pasted - after
+        a Copy, and after any edit, since an Undo can take a copied clip's
+        sample out of the pool (D-99)."""
+        document = self._document
+        able = document.clipboard.pastable(document.project)
+        if able:
+            why = ""
+        elif document.clipboard:
+            why = "\nA copied clip's sample is no longer in the pool."
+        else:
+            why = "\nCut or copy a clip first."
+        summary = self._paste.toolTip().partition("\n")[0]
+        self._paste.setEnabled(able)
+        self._paste.setToolTip(summary + why)
+
     def _selection_changed(self) -> None:
         """What acts on the selection is enabled exactly when it can act."""
         kind = self._document.selection.kind
         for action, able, wanted in (
             (self._bypass, kind is Kind.CHANNELS, "a channel"),
+            (self._cut, kind is Kind.CLIPS, "a clip"),
+            (self._copy, kind is Kind.CLIPS, "a clip"),
             (self._split, kind is Kind.CLIPS, "a clip"),
             (self._duplicate, kind is Kind.CLIPS, "a clip"),
             (self._delete, kind is Kind.CLIPS, "a clip"),

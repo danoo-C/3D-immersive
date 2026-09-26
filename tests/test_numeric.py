@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 import pytest
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QFocusEvent, QMouseEvent
+from PySide6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -204,3 +204,39 @@ def test_setting_the_value_from_outside_commits_nothing() -> None:
     field.set_value(-12.0)
     assert field.text() == "-12.0 dB"
     assert commits == []
+
+
+# --------------------------------------------------------------------------- #
+# shortcuts
+# --------------------------------------------------------------------------- #
+
+CTRL = Qt.KeyboardModifier.ControlModifier
+KEYS = [Qt.Key.Key_C, Qt.Key.Key_X, Qt.Key.Key_V, Qt.Key.Key_A, Qt.Key.Key_Z]
+
+
+def claims(field: NumericField, key: Qt.Key) -> bool:
+    """Whether `field` keeps Ctrl+`key` from the window's shortcuts."""
+    override = QKeyEvent(QEvent.Type.ShortcutOverride, key, CTRL, "")
+    override.ignore()
+    QApplication.sendEvent(field, override)
+    return override.isAccepted()
+
+
+@pytest.mark.parametrize("key", KEYS)
+def test_at_rest_it_claims_no_shortcut(key: Qt.Key) -> None:
+    """Not even after Enter, which leaves it at rest and still focused - so
+    Ctrl+C there copies the selected clips, not "-6.0 dB"."""
+    field, _ = a_field()
+    typed(field, "-6")
+    assert field.isReadOnly()
+
+    assert not claims(field, key)
+
+
+@pytest.mark.parametrize("key", KEYS)
+def test_while_typing_it_claims_what_any_text_field_does(key: Qt.Key) -> None:
+    field, _ = a_field()
+    drag(field, [40, 40])
+    assert not field.isReadOnly()
+
+    assert claims(field, key)

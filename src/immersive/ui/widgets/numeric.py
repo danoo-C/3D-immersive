@@ -19,7 +19,7 @@ which is how it says so. Text that is not a number puts the old value back.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, Qt, Signal
 from PySide6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QLineEdit, QWidget
 
@@ -135,6 +135,17 @@ class NumericField(QLineEdit):
         if not self.isReadOnly():
             self._commit(parse(self.text(), self._unit))
         super().focusOutEvent(event)
+
+    def event(self, event: QEvent) -> bool:
+        """At rest the field claims no shortcut: it is a value to drag, not
+        text being typed. A read-only line edit still takes `Ctrl+C` for its
+        text, and this field keeps its focus after Enter, so without this a
+        Copy pressed next would copy "-3.0 dB" rather than the selected clips.
+        While it is being typed into it takes what any text field takes."""
+        if event.type() == QEvent.Type.ShortcutOverride and self.isReadOnly():
+            event.ignore()
+            return False
+        return super().event(event)
 
     # ------------------------------------------------------------ internal
 
