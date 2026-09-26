@@ -625,6 +625,17 @@ where a drag will land.
   the copies, so pressing it again carries the run on. `Delete` removes the
   selection. Each is one Undo, and each is enabled only while clips are
   selected.
+- **`Ctrl+C` copies the selected clips, `Ctrl+X` cuts them and `Ctrl+V`
+  pastes them** (F-50). Copy is not an edit; Cut is one Undo, and so is a
+  paste. A paste lands at the playhead on the focused channel, the one
+  `Ctrl+A` reads, or with none on the lane it was copied from. Its clips keep
+  their spacing in time and across lanes, overwrite what they land on as a
+  drop does, and become the selection. Lanes it needs past the last become
+  new channels (D-100). The clipboard is the open project's: New and Open
+  empty it, and Paste is disabled while a copied clip's sample is not in the
+  pool (D-99). Cut and Copy are enabled only while clips are selected; Paste
+  is enabled whatever is selected. The playhead stays put, so a second paste
+  lands on the first.
 - **Shift+drag** moves the clip *and* its channel's automation (D-7).
 - **A drag snaps** to the grid and to other clips' edges, nearest wins
   (F-17). A trim snaps the edge it moves. A move snaps the grabbed clip's
@@ -704,7 +715,7 @@ do to you.
 | `L` | toggle loop |
 | `S` | split the selected clips at the playhead |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
-| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | cut / copy / paste clips |
+| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | cut / copy / paste clips — a paste at the playhead, on the focused channel |
 | `Ctrl+D` | duplicate the selection, just after itself |
 | `Ctrl+A` | select all clips on the focused channel |
 | `Delete` | delete selection |
@@ -856,10 +867,13 @@ manager and every DAW behaves this way; a click that changed its meaning when
 dragging arrived would be learnt twice.
 
 **The focused channel** that `Ctrl+A` reads is the one last clicked, by its
-header or by one of its clips. With none, the first `Ctrl+A` already selects
-every clip in the project. A line edit keeps `Ctrl+A` and `Esc` for itself:
-with a channel's name being edited they select its text and cancel the
-rename, and the selection is untouched.
+header or by one of its clips. It is also where a paste lands (D-100): F-50's
+"selected channel", since while clips are selected no channel is. A rubber
+band focuses nothing. With none, the first `Ctrl+A` already selects every
+clip in the project, and a paste lands on the lane it was copied from. A
+line edit keeps `Ctrl+A`, `Esc`, `Ctrl+X`, `Ctrl+C` and `Ctrl+V` for itself:
+with a channel's name being edited they act on its text, and the selection
+is untouched. A numeric field keeps them only while it is being typed into.
 
 **`Esc`** is *Stop*, and clears the selection when the transport is already
 stopped. Until the transport exists (M3 phase 9) it always is: Stop is

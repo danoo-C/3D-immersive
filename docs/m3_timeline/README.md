@@ -121,10 +121,9 @@ phase's first decision.
   a *move*. `04` says "drag body to move" without saying whether a vertical
   drag crosses lanes, and no command moves a clip between channels today.
   Phase 5.
-- **What does the clipboard hold, and how far does it reach?** A clip names
-  its sample by id (D-58). Pasting into another project would name a sample
-  that project does not have. Refuse the paste, carry the sample along with
-  the clips, or keep the clipboard to one project. Phase 6.
+- ~~**What does the clipboard hold, and how far does it reach?**~~ Copies
+  of the clips, and no further than the open project: New and Open empty it
+  (D-99, phase 6).
 - **What goes in an engine snapshot, and what is a parameter change?** `02`
   sends structural changes as a whole new snapshot and parameter changes
   through a command ring. Which side gain, mute and solo fall on, and how a
