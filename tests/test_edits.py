@@ -21,6 +21,7 @@ from immersive.core.edits import (
     DropClips,
     DuplicateClips,
     Edge,
+    FadeClips,
     MoveChannel,
     MoveClip,
     MoveClips,
@@ -137,6 +138,7 @@ EDITS: dict[str, Build] = {
     "remove clips": lambda p: RemoveClips(p, p.channels[0].clips),
     "set clips' length": lambda p: SetLengths(p, p.channels[0].clips, 30_000),
     "slip clips": lambda p: SlipClips(p, p.channels[0].clips, 5_000),
+    "lengthen clips' fades": lambda p: FadeClips(p.channels[0].clips, Edge.START, 900),
     "paste clips onto an empty lane": lambda p: pasting(
         p, p.channels[0].clips, 1, 10_000
     ),
@@ -1034,3 +1036,28 @@ def test_any_run_of_edits_stays_valid_and_undoes_to_where_it_began(seed: int) ->
     while stack.undo():
         pass
     assert project == before
+
+
+# --------------------------------------------------------------------------- #
+# fades dragged (D-101)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_fade_is_dragged_as_far_as_its_room_and_no_shorter_than_nothing() -> None:
+    a = faded(4_000, 6_000)
+    b = Clip("k-00000002", LONG, 0, 0, 10_000, fade_out=Fade(1_000))
+    project = lanes([a], [b])
+    before = copy.deepcopy(project)
+
+    command = FadeClips([a, b], Edge.START, 3_000)
+    command.do()
+
+    assert fades(a) == (4_000, 6_000), "no room left beside a 6 000 fade-out"
+    assert fades(b) == (3_000, 1_000)
+    assert a.fade_in.shape is FadeShape.EQUAL_POWER
+    assert validate(project) == []
+    command.undo()
+    assert project == before
+
+    FadeClips([a, b], Edge.END, -9_000).do()
+    assert fades(a) == (4_000, 0) and fades(b) == (0, 0)

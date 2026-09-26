@@ -322,3 +322,23 @@ def test_refresh_reads_the_format_again() -> None:
     shown[0] = "two"
     field.refresh()
     assert field.text() == "two"
+
+
+def test_a_narrow_field_shows_the_start_of_its_value() -> None:
+    """A line edit keeps its cursor at the end of what it holds, which in a
+    field narrower than its text shows the end: `000 ms` for `1000 ms`."""
+    field = NumericField(
+        48_000,
+        minimum=0,
+        maximum=10**9,
+        step=480,
+        decimals=0,
+        format=Duration("ms", decimals=0),
+    )
+    field.setFixedWidth(30)
+    field.show()
+    field.set_value(96_000)
+    assert field.text() == "2000 ms" and field.cursorPosition() == 0
+    field.set_mixed()
+    field.set_value(144_000)
+    assert field.cursorPosition() == 0

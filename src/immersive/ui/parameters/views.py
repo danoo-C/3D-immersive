@@ -395,7 +395,7 @@ class ClipView(View):
         length.committed.connect(
             lambda samples: self._set_fade(edge, length=int(samples))
         )
-        length.setMinimumWidth(58)
+        length.setMinimumWidth(68)
         shape = QComboBox()
         shape.addItems(list(SHAPES.values()))
         shape.setPlaceholderText(MIXED)

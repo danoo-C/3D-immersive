@@ -46,15 +46,16 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QWidget
 
 from immersive.core.document import Document
-from immersive.core.edits import MoveClips, TrimClips
-from immersive.core.model import Channel, Clip
+from immersive.core.edits import Edge, FadeClips, MoveClips, TrimClips
+from immersive.core.model import Channel, Clip, Fade
 from immersive.core.selection import Kind, between, lane_of
 from immersive.ui import theme
 from immersive.ui.explorer.media_pool import MIME
 from immersive.ui.time_axis import TimeAxis
-from immersive.ui.timeline.clips import ClipItem, Peaks
+from immersive.ui.timeline.clips import NAME_HEIGHT, ClipItem, Peaks
 from immersive.ui.timeline.dragging import (
     Part,
+    handle_at,
     lanes_moved,
     part_at,
     snapped_move,
@@ -93,7 +94,7 @@ class _Drag:
     home: int
     clips: list[Clip] = field(default_factory=list)
     edges: list[int] = field(default_factory=list)
-    edit: MoveClips | TrimClips | None = None
+    edit: MoveClips | TrimClips | FadeClips | None = None
 
 
 class TimelineView(QGraphicsView):
@@ -135,8 +136,8 @@ class TimelineView(QGraphicsView):
         #: A press on a selected clip, and the drag it becomes; see `_Drag`.
         self._drag: _Drag | None = None
         #: Where each dragged clip is drawn while the drag lasts, by the
-        #: clip's identity: its lane, start, offset and length.
-        self._preview: dict[int, tuple[int, int, int, int]] = {}
+        #: clip's identity: its lane, start, offset, length and fades.
+        self._preview: dict[int, tuple[int, int, int, int, Fade, Fade]] = {}
         # The pointer says which edge a press would take before it presses.
         self.viewport().setMouseTracking(True)
         self.setAcceptDrops(True)
@@ -353,7 +354,8 @@ class TimelineView(QGraphicsView):
                     missing=sample is None or sample.missing,
                     lane=at,
                     scale=scale,
-                    placing=shown[1:] if shown is not None else None,
+                    placing=shown[1:4] if shown is not None else None,
+                    fades=shown[4:6] if shown is not None else None,
                 )
                 seen.add(id(clip))
         for key in [key for key in self._items if key not in seen]:
@@ -402,21 +404,39 @@ class TimelineView(QGraphicsView):
             self._drag = None
             item = self._clip_at(event.position())
             if item is not None:
+                # Handles are on selected clips; a press that is what selects
+                # one takes its body or an edge, as the pointer promised.
+                handles = (
+                    item.clip is not None and item.clip in self._document.selection
+                )
                 self._click(item, event.modifiers())
-                self._grab(item, event.position())
+                self._grab(item, event.position(), handles=handles)
             event.accept()
             return
         self._pan_press(event)
 
-    def _grab(self, item: ClipItem, position: QPointF) -> None:
+    def _grab(self, item: ClipItem, position: QPointF, *, handles: bool) -> None:
         """Take the part of `item` under `position` - if its clip is
         selected once the press is done, so a Ctrl+press that toggled it out
-        drags nothing."""
+        drags nothing. With `handles`, a fade handle is a part it may take."""
         clip = item.clip
         if clip is None or clip not in self._document.selection:
             return
-        x = item.mapFromScene(self.mapToScene(position.toPoint())).x()
-        self._drag = _Drag(clip, part_at(x, item.boundingRect().width()), item.lane)
+        self._drag = _Drag(clip, self._part_of(item, position, handles), item.lane)
+
+    def _part_of(self, item: ClipItem, position: QPointF, handles: bool) -> Part:
+        """Which part of `item` a press at `position` would take: a fade
+        handle in the name strip of a selected clip, else an edge or the body."""
+        local = item.mapFromScene(self.mapToScene(position.toPoint()))
+        width = item.boundingRect().width()
+        if handles:
+            fade_in, fade_out = item.fade_widths()
+            found = handle_at(
+                local.x(), local.y(), width, fade_in, fade_out, NAME_HEIGHT
+            )
+            if found is not None:
+                return found
+        return part_at(local.x(), width)
 
     def dragging(self) -> bool:
         """Whether a drag on clips is under way - past the threshold."""
@@ -431,12 +451,26 @@ class TimelineView(QGraphicsView):
             if abs(moved.x()) + abs(moved.y()) < DRAG_THRESHOLD:
                 return
             drag.clips = self._document.selection.clips()
-            drag.edges = targets(self._document.project, drag.clips, drag.part.edge)
+            if drag.part.fade is None:
+                drag.edges = targets(self._document.project, drag.clips, drag.part.edge)
         project = self._document.project
         offset = round(moved.x() * self._axis.scale)
         exact = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
         edge = drag.part.edge
-        if edge is None:
+        lanes_of = {id(item.clip): item.lane for item in self._items.values()}
+        if drag.part.fade is not None:
+            # Right lengthens a fade-in and shortens a fade-out.
+            fades = FadeClips(
+                drag.clips,
+                drag.part.fade,
+                offset if drag.part.fade is Edge.START else -offset,
+            )
+            drag.edit = fades
+            self._preview = {
+                id(clip): (lanes_of[id(clip)], *placing)
+                for clip, placing in fades.fades()
+            }
+        elif edge is None:
             lanes = lanes_moved(
                 self.mapToScene(press.toPoint()).y(),
                 self.mapToScene(event.position().toPoint()).y(),
@@ -447,7 +481,14 @@ class TimelineView(QGraphicsView):
             move = MoveClips(project, drag.clips, delta, lanes)
             drag.edit = move
             self._preview = {
-                id(clip): (lane, start, clip.offset, clip.length)
+                id(clip): (
+                    lane,
+                    start,
+                    clip.offset,
+                    clip.length,
+                    clip.fade_in,
+                    clip.fade_out,
+                )
                 for clip, lane, start in move.placed()
             }
         else:
@@ -457,14 +498,13 @@ class TimelineView(QGraphicsView):
             )
             trim = TrimClips(project, drag.clips, edge, delta)
             drag.edit = trim
-            lanes_of = {id(item.clip): item.lane for item in self._items.values()}
             self._preview = {
-                id(clip): (lanes_of[id(clip)], start, offset_, length)
-                for clip, start, offset_, length in trim.trims()
+                id(clip): (lanes_of[id(clip)], *placing)
+                for clip, placing in trim.trims()
             }
         self._lay_out()
 
-    def _end_drag(self) -> MoveClips | TrimClips | None:
+    def _end_drag(self) -> MoveClips | TrimClips | FadeClips | None:
         """Stop drawing a drag, and hand back the edit it would make."""
         edit = self._drag.edit if self._drag is not None else None
         self._drag = None
@@ -489,8 +529,8 @@ class TimelineView(QGraphicsView):
         item = self._clip_at(position)
         part = Part.BODY
         if item is not None:
-            x = item.mapFromScene(self.mapToScene(position.toPoint())).x()
-            part = part_at(x, item.boundingRect().width())
+            selected = item.clip is not None and item.clip in self._document.selection
+            part = self._part_of(item, position, selected)
         if part is Part.BODY:
             self.viewport().unsetCursor()
         else:

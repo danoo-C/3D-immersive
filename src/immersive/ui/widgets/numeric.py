@@ -94,20 +94,20 @@ class NumericField(QLineEdit):
         self._value = self._clamped(value)
         self._mixed = False
         if self.isReadOnly():
-            self.setText(self._shown(self._value))
+            self._show(self._shown(self._value))
 
     def set_mixed(self) -> None:
         """Read `—`: it stands for several values that differ. Like
         `set_value`, it leaves what is being typed alone."""
         self._mixed = True
         if self.isReadOnly():
-            self.setText(MIXED)
+            self._show(MIXED)
 
     def refresh(self) -> None:
         """Show the value again in its format, which may read something that
         has changed since - the tempo, or the ruler's unit."""
         if self.isReadOnly():
-            self.setText(MIXED if self._mixed else self._shown(self._value))
+            self._show(MIXED if self._mixed else self._shown(self._value))
 
     # ------------------------------------------------------------ the mouse
 
@@ -195,7 +195,7 @@ class NumericField(QLineEdit):
         """Back to showing the value, read-only and ready to be dragged."""
         self.setReadOnly(True)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
-        self.setText(MIXED if self._mixed else self._shown(self._value))
+        self._show(MIXED if self._mixed else self._shown(self._value))
         self.deselect()
 
     def _commit(self, typed: float | None) -> None:
@@ -216,3 +216,9 @@ class NumericField(QLineEdit):
 
     def _shown(self, value: float) -> str:
         return self._format.show(value)
+
+    def _show(self, text: str) -> None:
+        """Show `text` from its start. A line edit keeps its cursor at the
+        end, so in a narrow field `1000 ms` would read `000 ms`."""
+        self.setText(text)
+        self.setCursorPosition(0)

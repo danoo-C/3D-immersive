@@ -415,11 +415,36 @@ class TrimClips(_Rearrangement):
         for clip in clips:
             self._placing(clip, trimmed(project, clip, edge, delta))
 
-    def trims(self) -> list[tuple[Clip, int, int, int]]:
-        """Each clip, and the start, offset and length it will have."""
-        return [
-            (clip, after[0], after[1], after[2]) for clip, _, after in self._placings
-        ]
+    def trims(self) -> list[tuple[Clip, _Placing]]:
+        """Each clip, and the start, offset, length and fades it will have."""
+        return [(clip, after) for clip, _, after in self._placings]
+
+
+class FadeClips(_Rearrangement):
+    """The same fade of every one of `clips` made `delta` samples longer,
+    each as far as it can: no shorter than nothing, and no longer than the
+    room its other fade leaves (D-101). What a fade handle's drag makes, as
+    a trim is what an edge's drag makes. One edit."""
+
+    def __init__(self, clips: Sequence[Clip], edge: Edge, delta: int) -> None:
+        super().__init__()
+        for clip in clips:
+            fade = clip.fade_in if edge is Edge.START else clip.fade_out
+            fitted = replace(
+                fade, length=min(max(fade.length + delta, 0), fade_room(clip, edge))
+            )
+            fade_in, fade_out = (
+                (fitted, clip.fade_out)
+                if edge is Edge.START
+                else (clip.fade_in, fitted)
+            )
+            self._placing(
+                clip, (clip.start, clip.offset, clip.length, fade_in, fade_out)
+            )
+
+    def fades(self) -> list[tuple[Clip, _Placing]]:
+        """Each clip, and its placing with the fade it will have."""
+        return [(clip, after) for clip, _, after in self._placings]
 
 
 class SetLengths(_Rearrangement):

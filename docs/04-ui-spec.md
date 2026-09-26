@@ -381,8 +381,9 @@ selected header as `channel.selected.background` and
 `channel.selected.marker` |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
-| input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one |
-| dialog, progress bar, spin box, check box, slider, combo box | M8 — the first milestone with dialogs and a preferences form |
+| input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one. Phase 7 gave it `disabled.text`, for the pane's fields a later milestone brings |
+| check box, combo box, parameters pane | M3 — built at phase 7, the first to draw either input: the combo box as `combo`, and the check box as the painted `check` group, since a sheet that styles a check box's indicator loses its tick. The pane's heading and labels are `pane` |
+| dialog, progress bar, spin box, slider | M8 — the first milestone with dialogs and a preferences form. Phase 7 drew no spin box: the style's arrows came out black on the dark panel and the sheet's border triangles render as bars, so a count is a numeric field like every other number |
 
 **Painted groups.** Some widgets draw with a painter rather than a
 stylesheet — the waveform is the first, and clips, the spatial views and the
@@ -427,6 +428,21 @@ the built-in paints each in its channel's:
 | `text` | `text.primary` | the clip's name |
 | `missing` | `text.disabled` | the body of a clip whose sample has gone, which also says so in text |
 | `selected.border` | `accent` | a 2 px border inside a selected clip — a shape as well as a colour |
+| `fade` | `text.primary` | a fade's gain curve, over the whole height of the clip |
+| `fade.handle` | `text.secondary` | the square at a fade's end, on a selected clip, as the worked example under *The file* named it |
+
+The check box's, built at M3 phase 7. It paints itself, so its state is a
+tick or a dash as well as a fill:
+
+| `check` key | Default | For |
+|---|---|---|
+| `background` | `surface.window` | inside an unticked box |
+| `box` | `text.disabled` | an unticked box's outline |
+| `checked` | `accent` | a ticked box, or one holding a dash |
+| `tick` | `text.primary` | the tick, or the dash of a box standing for several that differ |
+| `text` | `text.primary` | the label |
+| `disabled` | `text.disabled` | the box, its mark and its label, while it is disabled |
+| `focus` | `accent` | the ring around the box while it has the keyboard |
 
 | `ruler` key | Default | For |
 |---|---|---|
@@ -434,7 +450,7 @@ the built-in paints each in its channel's:
 | `tick` | `text.disabled` | tick marks |
 | `text` | `text.secondary` | labels |
 
-The QSS today styles none of the input widgets in that last row, which is
+The QSS today styles none of the widgets in the last row, which is
 correct — nothing renders one yet. It is listed so that the milestone which
 first does knows the groups are its to add, rather than discovering a
 `QLineEdit` drawn in the toolkit's default light grey on a dark panel and
@@ -473,16 +489,55 @@ contract the timeline accepts at M3.
 
 ## Parameters pane (left, bottom)
 
-Context-sensitive on the current selection. Resizable; collapsible to a strip.
+Context-sensitive on the current selection. Resizable, and collapsible to
+its header: clicking the header hides the fields and gives the room to the
+pool above, and the header's arrow (▾ open, ▸ collapsed) says which way a
+click will go.
 
 | Selection | Shows |
 |---|---|
 | **Media file** | path, source rate, channels, duration, full waveform, audition button |
-| **Channel** | name, colour swatch, gain, mute/solo, **HRTF bypass**, snap override, position X/Y/Z spinboxes (greyed when bypassed), pan (only when bypassed) |
+| **Channel** | name, colour swatch, gain, mute/solo, **HRTF bypass**, snap override, position X/Y/Z fields (greyed when bypassed), pan (only when bypassed) |
 | **Clip** | source, start, length, crop offset, gain, fade-in/out length and shape |
 | **Nothing** | project settings: BPM, time signature, HRTF set, distance rolloff, master gain, limiter |
 
 Numeric fields are drag-scrubbable and accept typed values with units.
+
+**What the fields read.** A clip's start reads as the ruler counts,
+`2.1.000` or `0:02.000`, and takes either typed, or `s` and `ms`. Lengths
+and crop offsets read `1.500 s` and fade lengths `250 ms`, and each takes
+either unit (D-103). The tempo runs 20 to 999 BPM; the signature is 1 to 32
+beats over a 1, 2, 4, 8 or 16 note (D-104). A value past a limit lands at
+the limit, and the field shows where it landed: a length at the neighbour
+or the sample's end, a crop offset at the sample's ends, a fade where the
+other begins (D-101). A value that changes nothing is put back.
+
+**Several things at once.** A field shows the value they share, or `—`
+where it differs, and a value set there goes to all of them in one edit. A
+field reading `—` is typed into rather than dragged, since a drag has no
+value to start from, and a check box reading `—` holds a dash that a click
+turns on for all. Three exceptions:
+
+- **A clip's start is the selection's**, the earliest, and a typed one moves
+  every selected clip by the same amount, as a drag does (D-102).
+- **Length, crop offset and fades go to each clip as far as it can take
+  them**, so the selection may end up with different values.
+- **A channel's name** reads `—` and is disabled with several selected:
+  one name for several channels is never wanted.
+
+A clip's source is shown, not edited.
+
+**The toolbar's tempo and signature** are the project view's two live
+fields, in reach whatever is selected: the tempo a numeric field, and the
+signature a button whose menu offers 2/4, 3/4, 4/4, 5/4, 6/8, 7/8 and 12/8.
+Any other signature is set in the pane. Changing the tempo moves the grid
+and no clip (D-52).
+
+**Fields a later milestone brings** — position, pan, the HRTF set,
+distance rolloff, master gain and the limiter — are drawn with the
+project's values, disabled, and name that milestone in their tooltips. The
+sample view's Audition button is disabled, saying why, with several
+selected, with the file missing, or with no audio output.
 
 ## Workspace (centre)
 
@@ -602,6 +657,16 @@ bars are thinned to every second, fourth or eighth bar but never removed. The
 division is drawn only while snapping is on, because it is there to show
 where a drag will land.
 
+- **A clip's fades** are drawn as the curves the engine plays
+  (`FadeShape.gain`): a fade-in rising from silence at its start, a
+  fade-out falling to it at its end, linear or equal power. A selected clip
+  shows a handle at the end of each fade, in its name strip. A press there
+  takes the handle, and below the strip a press near an edge still trims. A
+  handle's drag changes the same fade of every selected clip by the same
+  amount, each as far as it can: no shorter than nothing and no longer than
+  the other fade leaves room for (D-101). It is drawn as it goes, pushed as
+  one edit on release, and put back by `Esc`. It does not snap. Where two
+  fades meet, the fade-in's handle is the one taken.
 - Clips render name + waveform; waveform detail drops out as you zoom out.
   A clip is its channel's colour, translucent over the lane, with its part
   of its sample drawn solid over that — a trimmed clip shows its own frames,

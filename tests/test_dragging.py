@@ -10,6 +10,7 @@ from immersive.core.time import SAMPLE_RATE, Division
 from immersive.ui.timeline.dragging import (
     EDGE,
     Part,
+    handle_at,
     lanes_moved,
     part_at,
     snapped_move,
@@ -217,3 +218,43 @@ def test_a_trimmed_start_snaps_by_its_channel() -> None:
 def test_alt_trims_exactly() -> None:
     trimmed = clip(0, 10_000, "k-00000001")
     assert trim(project([trimmed]), trimmed, Edge.END, 3_000, exact=True) == 3_000
+
+
+# --------------------------------------------------------------------------- #
+# fade handles
+# --------------------------------------------------------------------------- #
+
+STRIP = 16
+
+
+@pytest.mark.parametrize(
+    ("x", "y", "expected"),
+    [
+        (30, 5, Part.FADE_IN),  # at the fade-in's end, 30 px in
+        (34, 5, Part.FADE_IN),
+        (37, 5, None),  # past the reach
+        (180, 5, Part.FADE_OUT),  # at the fade-out's end, 20 px from 200
+        (30, 16, None),  # below the strip: an edge or the body
+        (30, -1, None),
+    ],
+)
+def test_a_press_in_the_strip_near_a_fades_end_takes_its_handle(
+    x: float, y: float, expected: Part | None
+) -> None:
+    assert handle_at(x, y, 200, 30, 20, STRIP) is expected
+
+
+def test_a_fade_of_nothing_has_its_handle_at_the_clips_corner() -> None:
+    assert handle_at(2, 5, 200, 0, 0, STRIP) is Part.FADE_IN
+    assert handle_at(198, 5, 200, 0, 0, STRIP) is Part.FADE_OUT
+
+
+def test_the_nearer_handle_wins_on_a_narrow_clip() -> None:
+    assert handle_at(4, 5, 10, 3, 3, STRIP) is Part.FADE_IN
+    assert handle_at(6, 5, 10, 3, 3, STRIP) is Part.FADE_OUT
+
+
+def test_a_handles_part_moves_a_fade_and_no_edge() -> None:
+    assert (Part.FADE_IN.fade, Part.FADE_IN.edge) == (Edge.START, None)
+    assert (Part.FADE_OUT.fade, Part.FADE_OUT.edge) == (Edge.END, None)
+    assert Part.START.fade is None and Part.BODY.fade is None

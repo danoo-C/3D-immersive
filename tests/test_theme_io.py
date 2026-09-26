@@ -639,7 +639,6 @@ def test_the_example_only_reports_groups_no_milestone_has_built_yet() -> None:
 
     assert [problem.where for problem in problems] == [
         "groups.timeline.loop.region",
-        "groups.clip.fade.handle",
     ]
     assert all(p.severity is theme_io.Severity.WARN for p in problems)
 

@@ -515,3 +515,30 @@ def test_a_new_channel_has_an_id_the_project_does_not() -> None:
 def test_an_empty_palette_is_refused() -> None:
     with pytest.raises(ValueError, match="at least one colour"):
         new_channel(Project(), [])
+
+
+# --------------------------------------------------------------------------- #
+# fade shapes
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("shape", list(FadeShape))
+def test_a_fade_runs_from_silence_to_full(shape: FadeShape) -> None:
+    assert (shape.gain(0), shape.gain(1)) == (0.0, 1.0)
+    assert shape.gain(-1) == 0.0 and shape.gain(2) == 1.0
+    points = [shape.gain(n / 20) for n in range(21)]
+    assert points == sorted(points), "never falls on the way up"
+
+
+def test_linear_is_the_straight_line() -> None:
+    assert FadeShape.LINEAR.gain(0.25) == 0.25
+
+
+def test_equal_power_crossed_with_itself_keeps_the_power() -> None:
+    """Why it exists: a fade-out and a fade-in of this shape crossed over the
+    same samples sum to constant power, with no dip in the middle."""
+    for n in range(11):
+        t = n / 10
+        out, in_ = FadeShape.EQUAL_POWER.gain(1 - t), FadeShape.EQUAL_POWER.gain(t)
+        assert out**2 + in_**2 == pytest.approx(1.0)
+    assert FadeShape.LINEAR.gain(0.5) ** 2 * 2 == pytest.approx(0.5), "linear dips"

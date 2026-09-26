@@ -217,6 +217,11 @@ another's time is a collision to resolve, not a reordering.
   made in the same edit.
 - A fade stays on its edge through a trim or a split, cut to fit what is
   left, and an edge a split or a drop made has none of its own.
+- **A fade's shape is its gain curve**, `t` of the way through it: linear
+  is `t`, and equal power `sin(t·π/2)`, so two equal-power fades crossed
+  keep the power constant. A fade-out is the same curve read backwards.
+  `FadeShape.gain` is the one definition, which the clip draws and the
+  engine plays.
 - **Two fades never overlap** (D-101): a clip's fade-in and fade-out
   together are no longer than the clip, and may meet. A trim that leaves
   too little room shortens the fade on the edge it moves first, and the

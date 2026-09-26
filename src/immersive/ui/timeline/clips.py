@@ -21,6 +21,10 @@ hour-long clip to draw eight hundred of them.
 **Colours are read when it paints** (D-92), from the `clip` group. `body`
 and `waveform` are `channel` in the built-in theme, resolved against the
 channel's own colour, which is what keeps 04's colour thread whole.
+
+**Fades are drawn as the curve the engine plays** - `FadeShape.gain`, the
+one function both read - over the whole height of the clip. A selected
+clip also shows a handle at the end of each fade, in its name strip.
 """
 
 from __future__ import annotations
@@ -28,12 +32,12 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
-from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
 from immersive.core.io.peaks import Pyramid
-from immersive.core.model import Clip
+from immersive.core.model import Clip, Fade
 from immersive.ui import theme
 from immersive.ui.timeline.metrics import LANE_HEIGHT
 from immersive.ui.widgets.waveform import MISSING_TEXT, paint_envelope
@@ -63,6 +67,12 @@ SELECTED_BORDER = 2
 #: Where a sample's peaks come from: the session's store, by media id.
 Peaks = Callable[[str], Pyramid | None]
 
+#: A fade handle's side, in pixels.
+HANDLE_SIZE = 7
+
+#: How many straight pieces a fade's curve is drawn in, at most.
+FADE_STEPS = 24
+
 
 class ClipItem(QGraphicsItem):
     """One clip, as its lane shows it."""
@@ -75,6 +85,9 @@ class ClipItem(QGraphicsItem):
         self.clip: Clip | None = None
         self._width = 1.0
         self._look: tuple[object, ...] = ()
+        self._scale = 1.0
+        #: The fades it draws: the clip's own, or a drag's.
+        self._fades: tuple[Fade, Fade] = (Fade(), Fade())
         #: The part of its sample it draws: the clip's own, or a drag's.
         self._span = (0, 0)
         #: The lane it was last shown in: its channel's index.
@@ -93,15 +106,19 @@ class ClipItem(QGraphicsItem):
         scale: float,
         selected: bool = False,
         placing: tuple[int, int, int] | None = None,
+        fades: tuple[Fade, Fade] | None = None,
     ) -> None:
         """Place and size it for `scale`, and repaint only if its look changed.
 
-        `placing` - a start, an offset and a length - draws it somewhere
-        other than where the clip is: where a drag would leave it. The item
-        still holds the clip itself, so it is still found by the clip.
+        `placing` - a start, an offset and a length - and `fades` draw it
+        other than as the clip is: as a drag would leave it. The item still
+        holds the clip itself, so it is still found by the clip.
         """
         self.clip = clip
+        self._scale = scale
         start, offset, length = placing or (clip.start, clip.offset, clip.length)
+        fade_in, fade_out = fades or (clip.fade_in, clip.fade_out)
+        self._fades = (fade_in, fade_out)
         width = max(length / scale, 1.0)
         if width != self._width:
             self.prepareGeometryChange()
@@ -117,6 +134,8 @@ class ClipItem(QGraphicsItem):
             name,
             missing,
             selected,
+            (fade_in.length, fade_in.shape),
+            (fade_out.length, fade_out.shape),
         )
         if look != self._look:
             self._look = look
@@ -137,6 +156,15 @@ class ClipItem(QGraphicsItem):
     @property
     def selected(self) -> bool:
         return bool(self._look[6]) if self._look else False
+
+    def fades(self) -> tuple[Fade, Fade]:
+        """The fades it draws: lengths in samples, and shapes."""
+        return self._fades
+
+    def fade_widths(self) -> tuple[float, float]:
+        """How many pixels each fade covers, at the scale it was shown at."""
+        fade_in, fade_out = self.fades()
+        return fade_in.length / self._scale, fade_out.length / self._scale
 
     @property
     def shows_waveform(self) -> bool:
@@ -205,6 +233,8 @@ class ClipItem(QGraphicsItem):
                 columns=range(first, last),
             )
 
+        self._paint_fades(painter)
+
         if self.selected:
             pen = QPen(QColor(theme.group_color("clip", "selected.border")))
             pen.setWidth(SELECTED_BORDER)
@@ -234,3 +264,34 @@ class ClipItem(QGraphicsItem):
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     text,
                 )
+
+    def _paint_fades(self, painter: QPainter) -> None:
+        """Each fade as its gain curve, rising from silence at the clip's
+        start and falling to it at its end; and, selected, a handle where
+        each fade ends."""
+        (fade_in, fade_out), (in_px, out_px) = self.fades(), self.fade_widths()
+        top, bottom = 1.0, HEIGHT - 2.0
+        pen = QPen(QColor(theme.group_color("clip", "fade")))
+        pen.setWidthF(1.2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        for fade, width, rising in ((fade_in, in_px, True), (fade_out, out_px, False)):
+            if fade.length <= 0 or width < 1:
+                continue
+            steps = max(2, min(FADE_STEPS, int(width)))
+            left = 0.0 if rising else self._width - width
+            points = []
+            for step in range(steps + 1):
+                t = step / steps
+                gain = fade.shape.gain(t if rising else 1 - t)
+                points.append(QPointF(left + t * width, bottom - gain * (bottom - top)))
+            painter.drawPolyline(QPolygonF(points))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        if not self.selected:
+            return
+        handle = QColor(theme.group_color("clip", "fade.handle"))
+        for at in (in_px, self._width - out_px):
+            x = min(max(at - HANDLE_SIZE / 2, 0.0), self._width - HANDLE_SIZE)
+            painter.fillRect(QRectF(x, 2, HANDLE_SIZE, HANDLE_SIZE), handle)

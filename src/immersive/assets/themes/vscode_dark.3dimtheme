@@ -47,6 +47,8 @@
     },
     "clip": {
       "body": "channel",
+      "fade": "text.primary",
+      "fade.handle": "text.secondary",
       "missing": "text.disabled",
       "selected.border": "accent",
       "text": "text.primary",

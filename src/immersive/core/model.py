@@ -23,6 +23,7 @@ file and the undo stack needs to refuse an edit before applying it.
 
 from __future__ import annotations
 
+import math
 import random
 import re
 from collections.abc import Collection, Sequence
@@ -66,6 +67,20 @@ class Interpolatable(StrEnum):
 class FadeShape(StrEnum):
     LINEAR = "linear"
     EQUAL_POWER = "equal_power"
+
+    def gain(self, t: float) -> float:
+        """The gain a fade-in of this shape has `t` of the way through it,
+        0 to 1; a fade-out is the same curve read backwards, `gain(1 - t)`.
+
+        One function for what the clip draws and what the engine plays, so
+        the two cannot disagree. Equal power is a quarter sine: two of them
+        crossed have powers summing to one, which is what keeps a crossfade
+        from dipping in the middle.
+        """
+        t = min(max(t, 0.0), 1.0)
+        if self is FadeShape.EQUAL_POWER:
+            return math.sin(t * math.pi / 2)
+        return t
 
 
 # --------------------------------------------------------------------------- #

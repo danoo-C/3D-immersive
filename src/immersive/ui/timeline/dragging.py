@@ -18,6 +18,10 @@ it may go, what it overwrites - is the command's (D-97, D-98).
   another lane, that lane's - or none while `Alt` is held.
 - **The dragged edges are not targets.** Their own positions would pin
   every small drag to where it began.
+- **A fade handle** is taken by a press in the strip along the top of a
+  selected clip, within `HANDLE` pixels of where a fade ends. Below the
+  strip, an edge still trims. A handle's drag does not snap: where a fade
+  ends is not an edge anything lines up with.
 """
 
 from __future__ import annotations
@@ -34,6 +38,9 @@ from immersive.ui.timeline.metrics import LANE_HEIGHT
 #: How near a clip's end, in pixels, a press takes that end.
 EDGE = 6
 
+#: How near a fade handle, in pixels, a press in the name strip takes it.
+HANDLE = 6
+
 
 class Part(StrEnum):
     """What a press on a clip takes."""
@@ -41,11 +48,20 @@ class Part(StrEnum):
     BODY = "body"
     START = "start"
     END = "end"
+    FADE_IN = "fade in"
+    FADE_OUT = "fade out"
 
     @property
     def edge(self) -> Edge | None:
-        """The end a trim from this part moves; `None` for the body."""
+        """The end a trim from this part moves; `None` for the body and
+        the fades."""
         return {Part.START: Edge.START, Part.END: Edge.END}.get(self)
+
+    @property
+    def fade(self) -> Edge | None:
+        """The end whose fade a drag from this part changes; `None` for a
+        part that is not a fade handle."""
+        return {Part.FADE_IN: Edge.START, Part.FADE_OUT: Edge.END}.get(self)
 
 
 def part_at(x: float, width: float) -> Part:
@@ -57,6 +73,19 @@ def part_at(x: float, width: float) -> Part:
     if x >= width - zone:
         return Part.END
     return Part.BODY
+
+
+def handle_at(
+    x: float, y: float, width: float, fade_in: float, fade_out: float, strip: float
+) -> Part | None:
+    """The fade handle a press `x`, `y` pixels into a clip takes, if any: a
+    press in the top `strip`, within `HANDLE` of where a fade ends - `fade_in`
+    pixels from its start or `fade_out` from its end. The nearer wins."""
+    if not 0 <= y < strip:
+        return None
+    ends = {Part.FADE_IN: fade_in, Part.FADE_OUT: width - fade_out}
+    part, at = min(ends.items(), key=lambda pair: abs(pair[1] - x))
+    return part if abs(at - x) <= HANDLE else None
 
 
 def lanes_moved(pressed_y: float, y: float) -> int:
