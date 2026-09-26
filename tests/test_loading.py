@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication
 from immersive.app import build_application
 from immersive.core.io.media import Refused
 from immersive.core.media_store import Prepared
+from immersive.core.progress import Cancelled, Progress
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import importer, theme
 from immersive.ui.main_window import MainWindow
@@ -79,13 +80,17 @@ def counting(
     `gate` until the test opens it - so a load is still running for exactly
     as long as the test needs."""
     calls: list[Path] = []
-    real: Callable[[Path], Prepared | Refused] = importer.prepare
+    real = importer.prepare
 
-    def prepare(path: Path) -> Prepared | Refused:
+    def prepare(
+        path: Path, cache: Path | None = None, progress: Progress | None = None
+    ) -> Prepared | Refused | Cancelled:
         calls.append(path)
         if gate is not None:
             gate.wait(GATE_TIMEOUT)
-        return real(path)
+        if progress is None:
+            return real(path, cache)
+        return real(path, cache, progress)
 
     monkeypatch.setattr(importer, "prepare", prepare)
     return calls
@@ -198,3 +203,48 @@ def test_a_load_does_not_land_in_a_project_opened_meanwhile(
     finish(window)
 
     assert not any(media_id in window.store() for media_id in ids)
+
+
+# --------------------------------------------------------------------------- #
+# the load as an activity, and a newer open (F-59, D-114)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_load_is_an_activity_with_no_cancel(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project's samples are what it needs to be heard: not offered."""
+    project = saved_with_samples(window, tmp_path, count=2)
+    gate = threading.Event()
+    counting(monkeypatch, gate)
+
+    window.open_project(project)
+
+    [work] = window.activities().running()
+    assert work.label == "Loading 0 of 2 samples"
+    assert work.cancel is None
+    gate.set()
+    finish(window)
+    assert window.activities().running() == []
+
+
+def test_opening_another_project_during_a_load_loads_its_samples(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The load under way was the first project's: stopped, and the second's
+    started - where it used to return early and load nothing."""
+    first = saved_with_samples(window, tmp_path / "first", count=2)
+    second = saved_with_samples(window, tmp_path / "second", count=2)
+    gate = threading.Event()
+    counting(monkeypatch, gate)
+
+    window.open_project(first)
+    window.open_project(second)
+    ids = [media.id for media in window.document().project.media_pool]
+    [work] = window.activities().running()
+    assert work.label == "Loading 0 of 2 samples", "the first's has finished"
+    gate.set()
+    finish(window)
+    assert window._loader._pool.waitForDone(int(GATE_TIMEOUT * 1000))
+
+    assert ids and all(media_id in window.store() for media_id in ids)

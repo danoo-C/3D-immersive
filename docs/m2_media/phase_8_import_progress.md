@@ -170,3 +170,17 @@ tightened (which label was drawn, where the box sits, the ✕'s size). A
 note for later sweeps: with `-x` under xdist, tests cut short by the stop
 are listed as failures, so the first FAILED line can name the wrong
 catcher. Attribution is read from runs without `-x`.
+
+**Step 4 — the importer and the window.** An import is an activity with a
+✕, and a load one without. Both are updated from the importer's own
+fifteen-a-second report, which counts each file by its bytes. The ✕ drops
+the batch: its queue is cleared, and each running file stops at its next
+chunk. A file that finishes anyway carries its batch's number and is
+ignored. While an import runs, the Import actions are disabled and say why.
+Opening a project cancels the load under way, and loads its own samples.
+The test for that fails against the old early return, as the sweep showed.
+
+One addition the plan did not name: **closing the window asks running
+work to stop**. The importer's pool is its own now, and a pool being
+destroyed waits for its threads, so a close would otherwise have waited
+for a folder to finish decoding. Fourteen mutations, all caught.

@@ -58,7 +58,7 @@ from immersive.core.model import MediaFile, Project, SnapSetting
 from immersive.core.relink import relink
 from immersive.core.selection import Kind
 from immersive.ui import icons, theme, theme_io, theme_menu
-from immersive.ui.activity import Activities
+from immersive.ui.activity import Activities, Activity
 from immersive.ui.explorer.media_pool import MediaPool
 from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
@@ -195,10 +195,17 @@ class MainWindow(QMainWindow):
         self._store = MediaStore()
         self._importer = Importer(self)
         self._importer.finished.connect(self._imported)
+        self._importer.cancelled.connect(self._import_cancelled)
+        self._importer.progressed.connect(self._import_progressed)
         #: Fills the store for a project opened from disk, which imports
         #: never touched: the same workers, and no edit.
         self._loader = Importer(self)
         self._loader.finished.connect(self._loaded)
+        self._loader.cancelled.connect(self._load_superseded)
+        self._loader.progressed.connect(self._load_progressed)
+        #: What the info box shows of each, while it runs (D-116).
+        self._import_activity: Activity | None = None
+        self._load_activity: Activity | None = None
         self._loading: list[MediaFile] = []
         self._loading_into: Project | None = None
         #: The project an import in flight is for. A different one by the
@@ -275,12 +282,15 @@ class MainWindow(QMainWindow):
             self.save_project_as
         )
         file_menu.addSeparator()
-        self._add(file_menu, "&Import Audio…", "Ctrl+I").triggered.connect(
-            self.import_files
-        )
-        self._add(file_menu, "Import &Folder…", "Ctrl+Shift+I").triggered.connect(
-            self.import_folder
-        )
+        self._import_audio = self._add(file_menu, "&Import Audio…", "Ctrl+I")
+        self._import_audio.triggered.connect(self.import_files)
+        self._import_folder = self._add(file_menu, "Import &Folder…", "Ctrl+Shift+I")
+        self._import_folder.triggered.connect(self.import_folder)
+        #: Their tooltips as `_add` made them, for when an import has ended.
+        self._import_tips = {
+            action: action.toolTip()
+            for action in (self._import_audio, self._import_folder)
+        }
         file_menu.addSeparator()
         quit_action = self._add(file_menu, "&Quit", _quit_shortcut())
         quit_action.triggered.connect(self.close)
@@ -805,16 +815,39 @@ class MainWindow(QMainWindow):
         unsaved and no hash is written into an old project (D-89). Samples
         whose files have gone are not tried - they are already reported.
         """
+        # A load still running is the project being replaced's: dropped, so
+        # this project's own samples load rather than wait on it (D-114).
+        self._loader.cancel()
         present = [
             media for media in self._document.project.media_pool if not media.missing
         ]
-        if not present or self._loader.busy:
+        if not present:
             return
         self._loading = present
         self._loading_into = self._document.project
         self._loader.start([Path(media.path) for media in present])
+        *_, total = self._loader.progress()
+        self._load_activity = self._activities.begin(
+            _counted("Loading", 0, len(present), "sample"), maximum=total
+        )
+
+    def _load_progressed(self, done: int, files: int, read: int, total: int) -> None:
+        if self._load_activity is not None:
+            self._load_activity.update(
+                read, maximum=total, label=_counted("Loading", done, files, "sample")
+            )
+
+    def _load_superseded(self) -> None:
+        self._loading, self._loading_into = [], None
+        self._end_load_activity()
+
+    def _end_load_activity(self) -> None:
+        if self._load_activity is not None:
+            self._load_activity.finish()
+            self._load_activity = None
 
     def _loaded(self, results: list[Prepared | Refused]) -> None:
+        self._end_load_activity()
         loading, self._loading = self._loading, []
         into, self._loading_into = self._loading_into, None
         if into is not self._document.project:
@@ -857,12 +890,44 @@ class MainWindow(QMainWindow):
         return self.import_paths(found)
 
     def import_paths(self, paths: list[Path]) -> bool:
-        """Prepare `paths` on workers; the pool fills when all are in (N-3)."""
+        """Prepare `paths` on workers; the pool fills when all are in (N-3).
+
+        While they are prepared the info box shows how far, with a ✕ that
+        drops the import (D-113, D-114), and the Import actions are disabled.
+        """
         if not paths or self._importer.busy:
             return False
         self._importing_into = self._document.project
         self._importer.start(list(paths))
+        *_, total = self._importer.progress()
+        self._import_activity = self._activities.begin(
+            _counted("Importing", 0, len(paths), "file"),
+            maximum=total,
+            cancel=self._importer.cancel,
+        )
+        for action in self._import_tips:
+            action.setEnabled(False)
+            action.setToolTip(f"{self._import_tips[action]}\nAn import is running.")
         return True
+
+    def _import_progressed(self, done: int, files: int, read: int, total: int) -> None:
+        if self._import_activity is not None:
+            self._import_activity.update(
+                read, maximum=total, label=_counted("Importing", done, files, "file")
+            )
+
+    def _import_ended(self) -> None:
+        if self._import_activity is not None:
+            self._import_activity.finish()
+            self._import_activity = None
+        for action, tip in self._import_tips.items():
+            action.setEnabled(True)
+            action.setToolTip(tip)
+
+    def _import_cancelled(self) -> None:
+        """The ✕: nothing was added, and nothing is said - the person did it."""
+        self._importing_into = None
+        self._import_ended()
 
     def _imported(self, results: list[Prepared | Refused]) -> None:
         """On the UI thread, the only place the model is edited from.
@@ -871,6 +936,7 @@ class MainWindow(QMainWindow):
         Everything that did not come in is one notice with a line each -
         success on its own is quiet, since the pool itself shows it.
         """
+        self._import_ended()
         into, self._importing_into = self._importing_into, None
         if into is not self._document.project:
             self._notices.add(
@@ -926,8 +992,14 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Quit asks, like New and Open, and Cancel keeps the window."""
+        """Quit asks, like New and Open, and Cancel keeps the window.
+
+        Work still on the workers is asked to stop at its next chunk, so
+        closing does not wait for a folder to finish decoding.
+        """
         if self._may_discard():
+            self._importer.cancel()
+            self._loader.cancel()
             if self._player is not None:
                 self._player.close()
             event.accept()
@@ -1492,6 +1564,11 @@ class MainWindow(QMainWindow):
         if (latest := self._notices.latest()) is not None:
             self.statusBar().showMessage(latest.message)
         self._notice_count.refresh()
+
+
+def _counted(doing: str, done: int, of: int, thing: str) -> str:
+    """*Importing 7 of 22 files*: what the info box says of a batch."""
+    return f"{doing} {done} of {of} {thing}{'s' if of != 1 else ''}"
 
 
 def _reason(error: OSError) -> str:

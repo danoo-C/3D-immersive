@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication
 from immersive.app import build_application
 from immersive.core.io.media import Refused
 from immersive.core.media_store import Prepared
+from immersive.core.progress import Cancelled, Progress
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import importer, main_window
 from immersive.ui.main_window import MainWindow
@@ -76,13 +77,17 @@ def counting_prepare(
     test needs it to, which a sleep can only guess at and a loaded machine
     can outlast. Waiting releases the GIL, as decoding does."""
     calls: list[Path] = []
-    real: Callable[[Path], Prepared | Refused] = importer.prepare
+    real = importer.prepare
 
-    def prepare(path: Path) -> Prepared | Refused:
+    def prepare(
+        path: Path, cache: Path | None = None, progress: Progress | None = None
+    ) -> Prepared | Refused | Cancelled:
         calls.append(path)
         if gate is not None:
             gate.wait(GATE_TIMEOUT)
-        return real(path)
+        if progress is None:
+            return real(path, cache)
+        return real(path, cache, progress)
 
     monkeypatch.setattr(importer, "prepare", prepare)
     return calls
@@ -293,3 +298,212 @@ def test_an_import_does_not_land_in_a_project_opened_meanwhile(
     assert pool_names(window) == []
     [notice] = window.notices().newest_first()
     assert notice.message.startswith("Import set aside")
+
+
+# --------------------------------------------------------------------------- #
+# progress in the info box, and the ✕ (F-59, D-113, D-114)
+# --------------------------------------------------------------------------- #
+
+
+def settled(window: MainWindow) -> None:
+    """Every worker done, a dropped batch's included, and its deliveries in."""
+    assert window._importer._pool.waitForDone(int(GATE_TIMEOUT * 1000))
+    QApplication.processEvents()
+
+
+def gated_by_name(
+    monkeypatch: pytest.MonkeyPatch, gates: dict[str, threading.Event]
+) -> list[str]:
+    """Hold each file named in `gates` until its gate opens; the rest pass."""
+    calls: list[str] = []
+    real = importer.prepare
+
+    def prepare(
+        path: Path, cache: Path | None = None, progress: Progress | None = None
+    ) -> Prepared | Refused | Cancelled:
+        calls.append(path.name)
+        if path.name in gates:
+            gates[path.name].wait(GATE_TIMEOUT)
+        if progress is None:
+            return real(path, cache)
+        return real(path, cache, progress)
+
+    monkeypatch.setattr(importer, "prepare", prepare)
+    return calls
+
+
+def test_a_running_import_is_an_activity_with_a_cancel(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
+    files = [sample(tmp_path / f"{n}.wav", n) for n in range(3)]
+    total = sum(path.stat().st_size for path in files)
+
+    window.import_paths(files)
+
+    [work] = window.activities().running()
+    assert work.label == "Importing 0 of 3 files"
+    assert work.maximum == total and work.cancel is not None
+    gate.set()
+    finish(window)
+    assert window.activities().running() == [], "finished when it landed"
+
+
+def test_the_count_and_the_bytes_move_as_files_finish(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A small file done and a large one held: the bar stands at the small
+    one's share of the bytes, not at half (D-113)."""
+    held = threading.Event()
+    gated_by_name(monkeypatch, {"large.wav": held})
+    small = sample(tmp_path / "small.wav", 1)
+    large = tmp_path / "large.wav"
+    soundfile.write(large, np.zeros(SAMPLE_RATE * 4, np.float32), SAMPLE_RATE)
+
+    window.import_paths([small, large])
+    deadline = time.monotonic() + GATE_TIMEOUT
+    while window._importer.progress()[0] < 1:
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
+        assert time.monotonic() < deadline
+    window._importer.report()
+
+    [work] = window.activities().running()
+    assert work.label == "Importing 1 of 2 files"
+    assert work.value == small.stat().st_size
+    assert work.maximum == small.stat().st_size + large.stat().st_size
+    held.set()
+    finish(window)
+
+
+def test_the_cancel_adds_nothing_says_nothing_and_leaves_the_stack(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
+    undoable = window.document().can_undo
+    window.import_paths([sample(tmp_path / f"{n}.wav", n) for n in range(3)])
+
+    [work] = window.activities().running()
+    assert work.cancel is not None
+    work.cancel()
+
+    assert not window.importing()
+    assert window.activities().running() == []
+    gate.set()
+    settled(window)
+    assert pool_names(window) == []
+    assert window.notices().newest_first() == []
+    assert window.document().can_undo == undoable
+
+
+def test_a_file_queued_when_cancelled_never_runs(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window._importer._pool.setMaxThreadCount(1)
+    gate = threading.Event()
+    calls = counting_prepare(monkeypatch, gate)
+    files = [sample(tmp_path / f"{n}.wav", n) for n in range(3)]
+    window.import_paths(files)
+    deadline = time.monotonic() + GATE_TIMEOUT
+    while not calls:
+        time.sleep(0.005)
+        assert time.monotonic() < deadline
+
+    window._importer.cancel()
+    gate.set()
+    settled(window)
+
+    assert calls == [files[0]], "the one running; the two queued never started"
+
+
+def test_a_file_from_a_cancelled_batch_is_not_counted_in_the_next(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker that finishes after its batch was dropped - here one that
+    never looks at the cancel - delivers into a batch that is not its own."""
+    window._importer._pool.setMaxThreadCount(1)
+    held = threading.Event()
+    real = importer.prepare
+    calls: list[str] = []
+
+    def unheeding(
+        path: Path, cache: Path | None = None, progress: Progress | None = None
+    ) -> Prepared | Refused:
+        calls.append(path.name)
+        if path.name == "old.wav":
+            held.wait(GATE_TIMEOUT)
+        return real(path, cache)
+
+    monkeypatch.setattr(importer, "prepare", unheeding)
+    window.import_paths([sample(tmp_path / "old.wav", 1)])
+    deadline = time.monotonic() + GATE_TIMEOUT
+    while not calls:
+        time.sleep(0.005)
+        assert time.monotonic() < deadline
+    window._importer.cancel()
+
+    window.import_paths([sample(tmp_path / "new.wav", 2)])
+    held.set()
+    finish(window)
+    settled(window)
+
+    assert pool_names(window) == ["new.wav"]
+
+
+def test_the_import_actions_wait_while_one_runs_and_say_why(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
+    actions = [window._import_audio, window._import_folder]
+    tips = [action.toolTip() for action in actions]
+
+    window.import_paths([sample(tmp_path / "a.wav", 1)])
+    assert not any(action.isEnabled() for action in actions)
+    assert all(action.toolTip().endswith("An import is running.") for action in actions)
+    gate.set()
+    finish(window)
+    assert all(action.isEnabled() for action in actions)
+    assert [action.toolTip() for action in actions] == tips
+
+    gate.clear()
+    window.import_paths([sample(tmp_path / "b.wav", 2)])
+    window._importer.cancel()
+    assert all(action.isEnabled() for action in actions), "after a cancel too"
+    assert [action.toolTip() for action in actions] == tips
+    gate.set()
+    settled(window)
+
+
+def test_a_busy_importer_says_how_far_by_itself(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
+    heard: list[tuple[int, int, int, int]] = []
+    window._importer.progressed.connect(lambda *four: heard.append(four))
+
+    window.import_paths([sample(tmp_path / "a.wav", 1)])
+    deadline = time.monotonic() + GATE_TIMEOUT
+    while len(heard) < 2:
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
+        assert time.monotonic() < deadline, "no report while it ran"
+    gate.set()
+    finish(window)
+    assert heard[-1][0] == 1, "and a last one when it lands"
+
+
+def test_closing_the_window_asks_running_work_to_stop(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = threading.Event()
+    counting_prepare(monkeypatch, gate)
+    window.import_paths([sample(tmp_path / "a.wav", 1)])
+    running = list(window._importer._progress)
+
+    window.close()
+
+    assert running and all(progress.cancelled for progress in running)
+    gate.set()
+    settled(window)
