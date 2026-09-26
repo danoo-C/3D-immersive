@@ -1,6 +1,7 @@
 # M3 · Phase 6 — Cut, copy and paste
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:**
+[plans/phase_6_cut_copy_paste.md](plans/phase_6_cut_copy_paste.md)
 
 ## Goal
 
