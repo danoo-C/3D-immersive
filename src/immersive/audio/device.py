@@ -35,6 +35,14 @@ CHANNELS: Final = 2
 #: the Windows and macOS wheels of `sounddevice` bundle their own.
 INSTALL_HINT: Final = "on Linux, install PortAudio: sudo apt install libportaudio2"
 
+#: What to say when PortAudio lists no output device at all. On Linux it
+#: reaches the sound server through ALSA, and where nothing routes ALSA
+#: there - WSL, most often - it sees no device and has no default.
+NO_DEVICE: Final = (
+    "No audio output device was found, so samples cannot be heard - on Linux, "
+    "ALSA has to reach the sound server (docs/08-environment.md says how)"
+)
+
 
 def load_backend() -> Any:
     """`sounddevice`, or a string saying why it cannot be had. Never raises."""
@@ -99,6 +107,12 @@ def settle(backend: Any, device: str | None, block: str | None) -> Settled:
         else:
             chosen_device = wanted
 
+    if chosen_device is None:
+        missing = _no_default_output(backend)
+        if missing:
+            problems.append(missing)
+            return Settled(Output(None, chosen_block), False, problems)
+
     try:
         backend.check_output_settings(
             device=chosen_device,
@@ -114,3 +128,34 @@ def settle(backend: Any, device: str | None, block: str | None) -> Settled:
         return Settled(Output(chosen_device, chosen_block), False, problems)
 
     return Settled(Output(chosen_device, chosen_block), True, problems)
+
+
+def _no_default_output(backend: Any) -> str:
+    """Why there is no default output device, or "" when there is one.
+
+    Asked first, because PortAudio's own words for it are "Error querying
+    device -1", and asking a device that is not there for 48 kHz made that a
+    sentence about the rate. Devices without a default are named, not one
+    chosen among them: which is right is the user's to say, and `--device`
+    is how.
+    """
+    try:
+        backend.query_devices(kind="output")
+    except Exception:  # the backend's own error types
+        pass
+    else:
+        return ""
+    try:
+        names = [
+            str(found["name"])
+            for found in backend.query_devices()
+            if found["max_output_channels"] > 0
+        ]
+    except Exception:  # the backend's own error types
+        names = []
+    if not names:
+        return NO_DEVICE
+    return (
+        "There is no default audio output device, so samples cannot be heard "
+        f"- choose one with --device: {', '.join(names)}"
+    )

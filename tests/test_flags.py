@@ -9,7 +9,7 @@ import pytest
 
 from immersive import app
 from immersive.__main__ import parse
-from immersive.audio.device import DEFAULT_BLOCK, settle
+from immersive.audio.device import DEFAULT_BLOCK, NO_DEVICE, settle
 
 
 class Backend:
@@ -19,12 +19,26 @@ class Backend:
         self,
         devices: tuple[str, ...] = ("Speakers", "Headphones"),
         rate_ok: bool = True,
+        default: int | None = 0,
+        inputs: tuple[str, ...] = (),
     ) -> None:
         self.devices = devices
+        self.inputs = inputs
         self.rate_ok = rate_ok
+        self.default = default
         self.checked: list[dict[str, Any]] = []
 
-    def query_devices(self, device: str | int, kind: str) -> dict[str, Any]:
+    def query_devices(
+        self, device: str | int | None = None, kind: str | None = None
+    ) -> Any:
+        if device is None and kind is None:
+            return [
+                {"name": name, "max_output_channels": 2} for name in self.devices
+            ] + [{"name": name, "max_output_channels": 0} for name in self.inputs]
+        if device is None:
+            if self.default is None:
+                raise RuntimeError("Error querying device -1")
+            device = self.default
         if isinstance(device, int):
             if device >= len(self.devices):
                 raise ValueError(f"no device {device}")
@@ -139,6 +153,57 @@ def test_a_device_that_refuses_48k_is_said_and_not_worked_around() -> None:
 
     assert not settled.usable
     assert "will not open at 48000 Hz" in settled.problems[-1]
+
+
+def test_no_output_device_at_all_is_said_as_that() -> None:
+    """Not as a refusal of 48 kHz: PortAudio's "Error querying device -1",
+    on a WSL with nothing routing ALSA to the sound server, read as one."""
+    backend = Backend(devices=(), default=None)
+    settled = settle(backend, None, None)
+
+    assert not settled.usable
+    assert settled.problems == [NO_DEVICE]
+    assert backend.checked == [], "nothing to ask for 48 kHz"
+
+
+def test_devices_without_a_default_are_named_and_none_is_chosen() -> None:
+    settled = settle(Backend(default=None, inputs=("Microphone",)), None, None)
+
+    assert not settled.usable
+    assert settled.output.device is None
+    [problem] = settled.problems
+    assert "no default audio output device" in problem
+    assert problem.endswith("choose one with --device: Speakers, Headphones")
+
+
+def test_a_machine_with_only_a_microphone_has_no_output_device() -> None:
+    backend = Backend(devices=(), default=None, inputs=("Microphone",))
+    assert settle(backend, None, None).problems == [NO_DEVICE]
+
+
+def test_a_device_named_needs_no_default() -> None:
+    settled = settle(Backend(default=None), "Headphones", None)
+
+    assert settled.usable and settled.problems == []
+    assert settled.output.device == "Headphones"
+
+
+def test_a_device_named_that_is_not_there_says_so_and_then_why_nothing_plays() -> None:
+    settled = settle(Backend(devices=(), default=None), "Headphones", None)
+
+    assert not settled.usable
+    assert settled.problems[0].startswith("--device 'Headphones'")
+    assert settled.problems[1:] == [NO_DEVICE]
+
+
+def test_a_backend_that_cannot_list_its_devices_is_no_device() -> None:
+    class Silent(Backend):
+        def query_devices(
+            self, device: str | int | None = None, kind: str | None = None
+        ) -> Any:
+            raise RuntimeError("PortAudio not initialized")
+
+    assert settle(Silent(), None, None).problems == [NO_DEVICE]
 
 
 # --------------------------------------------------------------------------- #

@@ -51,6 +51,21 @@ raises. The application still starts without it — audio output is simply
 unavailable, and the window says so and names this package (M2 phase 7) —
 but nothing can be heard. WSL counts as Linux here.
 
+**No output device found - on WSL, route ALSA to WSLg's sound server.**
+PortAudio reaches the sound server through ALSA. A desktop distribution
+routes ALSA's default there already (through `pipewire-alsa` or the
+PulseAudio packages); WSL does not, so PortAudio lists no device at all and
+the window says *No audio output device was found*. WSLg runs a PulseAudio
+server (`$PULSE_SERVER`), and two steps reach it:
+
+```bash
+sudo apt install libasound2-plugins
+printf 'pcm.!default { type pulse }\nctl.!default { type pulse }\n' > ~/.asoundrc
+```
+
+Then start the application again. `.venv/bin/python -m sounddevice` lists
+what PortAudio sees: `pulse` and `default` among the outputs mean it worked.
+
 ### Checks
 
 ```bash

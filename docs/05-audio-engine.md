@@ -437,6 +437,13 @@ the shared-mode backends — WASAPI, CoreAudio, PipeWire — accept 48 kHz and
 convert behind their own mixer, so this bites mainly on exclusive-mode and
 fixed-rate hardware, which is exactly where the user wants to know.
 
+**No output device is asked first**, before the rate: PortAudio's word for
+a missing default is "Error querying device -1", and asked for 48 kHz from
+nothing it read as a refusal of the rate. With no device at all the window
+says so and where the fix is (on WSL, ALSA reaching WSLg's sound server,
+[08](08-environment.md)); with devices but no default it names them and
+`--device`, rather than choosing one - which is right is the user's to say.
+
 Device and block size are selectable (F-55). The preferences UI for them is
 M8, and the first audio is M2, so in between they are command-line flags —
 `--device` and `--block` — rather than five milestones in which a wrong
