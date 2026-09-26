@@ -16,7 +16,7 @@ Roadmap entry: [06-roadmap.md](../06-roadmap.md) · Specification:
 | [3 — Clips on the lanes](phase_3_clips_on_the_lanes.md) | ✅ |
 | [4 — Selection](phase_4_selection.md) | ✅ |
 | [5 — Editing clips, and snapping](phase_5_editing_and_snapping.md) | ✅ |
-| [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | in progress |
+| [6 — Cut, copy and paste](phase_6_cut_copy_paste.md) | ✅ |
 | [7 — The parameters pane, clip gain and fades](phase_7_parameters_pane.md) | not started |
 | [8 — The engine, flat](phase_8_flat_engine.md) | not started |
 | [9 — Transport](phase_9_transport.md) | not started |
@@ -190,3 +190,13 @@ push, so `Esc` has nothing to undo. Every edge snaps to the grid and to
 other clips' edges by the channel it lands in, or not at all with `Alt`.
 The snap chip and each header's indicator choose the setting from a menu.
 No sample file is written. Sixty mutations, all killed.
+
+**Phase 6.** Cut, copy and paste: `Ctrl+C` copies the selected clips, which
+is not an edit; `Ctrl+X` is Copy then Delete as one Undo; `Ctrl+V` lands
+them at the playhead on the focused channel, keeping their spacing in time
+and across lanes, overwriting what they cover, and selected. The clipboard
+holds copies and belongs to the open project, emptied by New and Open, and
+Paste is disabled while a copied clip's sample is out of the pool (D-99).
+Lanes a paste needs past the last become channels in the same edit
+(D-100). A numeric field at rest no longer claims `Ctrl+C`. Forty-five
+mutations, all killed but one, which is equivalent and pinned by a test.

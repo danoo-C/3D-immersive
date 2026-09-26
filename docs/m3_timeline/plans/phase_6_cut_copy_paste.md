@@ -1,6 +1,6 @@
 # Plan — M3 · Phase 6 — Cut, copy and paste
 
-**Written:** 2026-09-26 · **Status:** in progress
+**Written:** 2026-09-26 · **Status:** ✅ complete
 
 ## Approach
 
@@ -172,4 +172,59 @@ tests/test_numeric.py                       amended — keys at rest
 
 ## Outcome
 
-Filled in at the end.
+Three steps in the planned order, and all seven acceptance boxes are
+ticked. Forty-five mutations: all nineteen named in advance, and
+twenty-six found on the way. Forty-four are killed. One is equivalent and
+pinned by a test. 1776 tests.
+
+### What the plan got right
+
+**Settling the clipboard before any code.** Every test was written
+against D-99 and D-100, and nothing was reworked when the window arrived.
+
+**The rules in `core`.** Where a paste lands, what it overwrites, the
+channels it makes and the ids it mints are 28 headless tests. The
+window's 19 only check that the actions reach them with the right
+selection, channel and playhead.
+
+**Measuring the numeric field while planning.** The risk table's first
+row was found by trying it, not by guessing. A read-only line edit claims
+`Ctrl+C` and passes `Ctrl+V` and `Ctrl+X`. The fix and its test were
+scoped before the window step began.
+
+### What the plan did not see
+
+**That the id test could not fail.** A test counting distinct ids after a
+paste passes whatever the code does, because 32-bit random ids do not
+collide in a test run. Two mutations to the shared `taken` set would have
+survived it. A random source that repeats itself makes a collision certain
+if the code allows one.
+
+**Two missing tests in `core`.** Clips given out of lane order found that
+every test had passed them topmost first. A cleared clipboard still aimed
+at its source was invisible until a test asked where an empty paste would
+go. Both survived the first run and are killed now.
+
+**That `setShortcut` takes only a standard key's first binding.** The
+comment beside the three actions said `StandardKey.Cut` would add
+`Shift+Del`. It would not, so swapping the spelled-out key for the standard
+one is an equivalent mutation. The comment is corrected, and a test pins
+why.
+
+### Deviations
+
+| Planned | Actual |
+|---|---|
+| `test_numeric.py` amended for the keys at rest | and for the keys while typing, which the first test alone could not tell from never claiming |
+| Nineteen mutations | forty-five |
+
+### What phase 7 needs to know
+
+`Document.clipboard` is the second thing the document owns beside the
+project, after the selection. It is not observed: the window works Paste
+out again on every document change and after Copy. A pane that shows the
+selection can read `selection.clips()` as before. Pasted clips are
+selected, so the pane will follow a paste without anything further.
+`PasteClips.copies` is the clips a paste made, in lane order and then time
+order. A numeric field at rest claims no shortcut, so the pane's fields
+will not swallow `Ctrl+C` either.
