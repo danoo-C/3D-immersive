@@ -413,6 +413,7 @@ their values:
 | `grid.division` | `surface.raised` | the snap division — the faintest, and only while snapping is on |
 | `playhead` | `accent` | the playhead, over everything, in the lanes and across the ruler |
 | `separator` | `border` | the line under each lane |
+| `loop.region` | `accent.pressed` | the loop region: filled in the ruler while looping, an outline while not, faint behind the lanes while looping |
 | `drop` | `accent` | the dashed outline of where a drop from the pool will land |
 | `band` | `accent` | the rubber band's outline, over a faint fill of the same |
 
@@ -712,7 +713,17 @@ where a drag will land.
   divisions from 1/1 to 1/32, and *Triplet*. *Off* keeps the division, so
   turning snapping back on returns to it. Each choice is one Undo.
 - Playhead in `accent`, always drawn over everything.
-- Loop region set by dragging in the ruler.
+- **The ruler takes three gestures** (D-109). A press within 5 px of the
+  playhead takes it, and a drag moves it, seeking as it goes; the pointer
+  shows when a press would take it. A press anywhere else that moves draws
+  a loop region, dashed until the release. A press that does not move is a
+  click, which seeks. All three snap to the grid and to the clips' edges by
+  the project's setting, and `Alt` places exactly.
+- **The loop region** (D-108) is the project's, saved with it, and drawing
+  one is one Undo; drawing the same one again is none, and one shorter than
+  64 samples is not drawn. In the ruler it is a band in `loop.region`,
+  filled while looping and an outline while not; behind the lanes it is a
+  faint band while looping. Drawing a region turns looping on.
 - Scroll = vertical, Shift+scroll = horizontal, Ctrl+scroll = zoom about cursor.
   A trackpad's or a tilt wheel's sideways movement scrolls along time with no
   key held, and a **middle-button drag pans both ways**, the lanes following
@@ -763,6 +774,34 @@ own.
 
 ## Transport and the ARM toggle
 
+The toolbar's first four buttons are the Transport menu's own actions, so a
+button and its key are one thing (F-20, D-110):
+
+- **Play / Pause** (`Space`) plays from the playhead and pauses where it is.
+  Its icon is the other one while playing.
+- **Stop** (`Esc`) stops and puts the playhead back where playback last
+  started, so play, listen and stop can be repeated over one passage. With
+  the transport already stopped it clears the selection instead.
+- **Return to Start** (`Enter`) puts the playhead at 0, playing or not;
+  playing, 0 is then where Stop goes back to.
+- **Toggle Loop** (`L`) loops over the loop region, and is enabled only while
+  there is one. A project opens with it off.
+
+Without an audio output all four are disabled and say why. The playhead
+readout beside them is a numeric field: it reads as the ruler counts,
+dragging it moves the playhead, and it takes a position typed in
+bars.beats.ticks, minutes:seconds, `s` or `ms`. While playing, the window
+reads the engine's playhead thirty times a second and draws it there, and a
+playhead that leaves the view turns the page, bringing it a tenth of the way
+in (D-110). A seek is drawn at once, and the engine's playhead is not read
+again until the engine has taken the seek.
+
+**A field that commits on `Enter` or cancels on `Esc`** - a channel's name
+being typed, a numeric field being typed into - keeps both keys while it
+has the keyboard, and a clip drag keeps `Esc` to cancel itself. Otherwise
+they are the transport's: `Enter` would send the playhead to 0 instead of
+committing a gain.
+
 `● ARM` in the toolbar is automation write-arm (F-32). Off, dragging a source
 icon edits the channel's static position. On, the icon turns red-ringed in all
 views and dragging during playback writes keyframes at the playhead. It is a
@@ -775,8 +814,8 @@ do to you.
 | Key | Action |
 |---|---|
 | `Space` | play / pause |
-| `Esc` | stop |
-| `Enter` | return playhead to start |
+| `Esc` | stop, back to where playback started; stopped, clear the selection |
+| `Enter` | return playhead to 0 |
 | `L` | toggle loop |
 | `S` | split the selected clips at the playhead |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
@@ -941,9 +980,9 @@ with a channel's name being edited they act on its text, and the selection
 is untouched. A numeric field keeps them only while it is being typed into.
 
 **`Esc`** is *Stop*, and clears the selection when the transport is already
-stopped. Until the transport exists (M3 phase 9) it always is: Stop is
-disabled, a disabled action's shortcut does not fire, and `Esc` reaches the
-window, which clears the selection. Phase 9's Stop keeps that rule.
+stopped (D-110). Without an audio output Stop is disabled, a disabled
+action's shortcut does not fire, and `Esc` reaches the window, which clears
+the selection all the same.
 
 **`B`** toggles HRTF bypass on every selected channel as one edit: if any is
 off they all go on, and if all are on they all go off, so a mixed selection

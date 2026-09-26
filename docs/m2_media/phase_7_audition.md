@@ -57,6 +57,15 @@ F-8, F-55, F-56, D-11, D-63 — *The output stream* in
 
 ## Notes
 
+**Superseded in part by M3 phase 9 (D-107).** Audition no longer opens a
+stream of its own: `audio/audition.py` became `audio/player.py`, and a sample
+double-clicked is a voice in the engine, summed into the bus over whatever is
+playing. It still plays from its first frame, mono to both ears, and a second
+replaces the first; the stream now stays open after the sample ends. This
+phase's tests moved with it, to `tests/test_player.py`. The listening test
+this phase waits for is now of the player, and can happen in the same sitting
+as M3 phase 10's.
+
 Appended while building.
 
 **Built, tested against a stand-in, and not yet heard.** Six of the seven

@@ -419,6 +419,13 @@ flat engine has neither.
 
 ## The output stream
 
+**There is one stream, the transport's** (D-107), and everything heard goes
+through it: the arrangement, and an audition summed into the same bus over
+it. It opens the first time anything is to be heard and stays open until the
+window closes, so the command ring is drained while the transport is stopped.
+Before it has ever opened there is no audio thread, and the player applies
+the ring's commands itself. `audio/player.py` owns it.
+
 The stream is always opened at **48 kHz** (D-11, D-63). There is no output
 resampler: putting a second rate converter inside the callback to paper over a
 device mismatch costs latency and quality to hide something that is better
@@ -436,8 +443,10 @@ M8, and the first audio is M2, so in between they are command-line flags —
 default device makes the application look broken with no way out.
 
 A device that disappears mid-session (headphones unplugged, an interface
-powered off) stops the stream. The playhead holds position, the failure is
-reported, and reopening is a user action — silently migrating a mix to the
+powered off) stops the stream. PortAudio says so on its own thread, where
+only a flag is set; the UI thread's next look, thirty times a second, closes
+what is left, stops the transport, and reports it once. The playhead holds
+position, and reopening is a user action - the next Play or double-click — silently migrating a mix to the
 laptop speakers mid-audition is a worse outcome than stopping.
 
 ## Offline render

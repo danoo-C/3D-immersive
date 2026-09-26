@@ -231,6 +231,9 @@ another's time is a collision to resolve, not a reordering.
   offset moves within its sample and stops at the sample's ends, while its
   start, length and fades stay (D-102).
 - `offset + length` must not exceed `MediaFile.frames`.
+- **A loop region** starts at 0 or later and is at least 64 samples long
+  (D-108). `null` means there is none, and so does the key's absence, which
+  is how a file from before loop regions reads.
 - A channel with no keyframes for an axis uses its static `position` component.
   With one keyframe, that value holds for the whole timeline.
 - Before the first keyframe and after the last, the curve holds flat.

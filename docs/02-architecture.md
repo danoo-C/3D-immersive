@@ -71,6 +71,7 @@ src/immersive/
   audio/
     engine.py            the realtime graph. THE SEAM.
     feed.py              the UI thread's side: snapshots and commands (D-105, M3)
+    player.py            the one stream, and audition through it (D-107, M3)
     device.py            sounddevice stream lifecycle, device enumeration
     scheduler.py         timeline → which clips are active this block
     dsp.py               gain, fades, resampling, limiter
