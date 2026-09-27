@@ -1,6 +1,6 @@
 # M4 · Phase 8 — Level as mixed
 
-**Status:** not started · **Plan:** not written yet
+**Status:** planned · **Plan:** [plans/phase_8_level_as_mixed.md](plans/phase_8_level_as_mixed.md)
 
 ## Goal
 
@@ -62,7 +62,7 @@ benchmark → phase 9.
 ## Implements
 
 The design in [level as mixed](../user-issues/3d-sensitivity/level-as-mixed.md);
-D-21 and D-16 as its decisions amend them. *Per-block processing* and *The
+D-128 to D-131, which amend D-21 and D-16. *Per-block processing* and *The
 HRTF pipeline* in [05-audio-engine.md](../05-audio-engine.md); `Distance` in
 [03-data-model.md](../03-data-model.md).
 

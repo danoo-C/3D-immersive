@@ -20,7 +20,7 @@ channel and project views of the *Parameters pane* in
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | ✅ |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | ✅ |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
-| [8 — Level as mixed](phase_8_level_as_mixed.md) | not started |
+| [8 — Level as mixed](phase_8_level_as_mixed.md) | planned |
 | [9 — The benchmark, and the switch interval](phase_9_benchmark.md) | not started |
 | [10 — Heard](phase_10_heard.md) | not started |
 
