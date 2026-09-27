@@ -1,6 +1,6 @@
 # Why a centimetre can swing a sound from one ear to the other
 
-**Status:** explained; nothing changed · **Written:** 2026-09-27 ·
+**Status:** explained, and fixed by [M4 phase 8](../../m4_binaural_engine/phase_8_level_as_mixed.md) · **Written:** 2026-09-27 ·
 **Measured at:** `ade00a9` on `m3-timeline`, through SADIE II D1
 
 **Reported:** Position X at −0.01 sounds hard left and at +0.01 hard right.

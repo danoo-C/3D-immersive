@@ -20,7 +20,7 @@ channel and project views of the *Parameters pane* in
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | ✅ |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | ✅ |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
-| [8 — Level as mixed](phase_8_level_as_mixed.md) | planned |
+| [8 — Level as mixed](phase_8_level_as_mixed.md) | ✅ |
 | [9 — The benchmark, and the switch interval](phase_9_benchmark.md) | not started |
 | [10 — Heard](phase_10_heard.md) | not started |
 
@@ -164,3 +164,12 @@ live, one edit each, and heard at the next block. The tests type into the
 pane of a window playing through a synthetic head, and listen. With several
 channels, position is live while any is placed and goes to all of them on
 the axis typed (D-127). Only the HRTF set is still drawn dead, naming M8.
+
+**Phase 8.** A placed stem keeps the level it was mixed at, until distance
+takes it away. The set is calibrated to flat, +4.99 dB for SADIE (D-128). A
+stereo stem is given back what folding it to a point loses (D-129). At the
+listener a source is heard as it is, and crossing through them is a pass
+through the middle, not a flip between the ears (D-130). A project switch,
+on by default, removes the near boost and evens every direction (D-131).
+The drum stem that distorted at the default position now plays within half
+a decibel of itself.

@@ -35,6 +35,12 @@ a source dragged onto the head does not blow up. Attenuation is then
 `(ref_distance / r) ** rolloff` — `rolloff` 1.0 is the physically correct
 inverse-distance law, and lower values soften it (D-21).
 
+With `distance.keep_level` on, as it is unless a project says otherwise,
+`r` is clamped to `ref_distance` instead: nothing is louder for being nearer
+than 1 m, and every direction is as loud as the front (D-131). Inside
+`min_distance` a source is faded towards its flat self as `r` falls, so at
+the origin it is heard as it is, with no direction at all (D-130).
+
 ## Time
 
 The single source of truth for time is **samples, int64, at the project rate**.
@@ -95,7 +101,7 @@ Project
 ├── time_signature   [num, den]
 ├── snap             SnapSetting            global default
 ├── hrtf             HrtfRef
-├── distance         { rolloff, min_distance, ref_distance }
+├── distance         { rolloff, min_distance, ref_distance, keep_level }
 ├── master           { gain_db, limiter_on }
 ├── loop             { start, end } or null  where the transport loops (D-108)
 ├── media_pool       [MediaFile]
@@ -279,9 +285,11 @@ move between two points on opposite sides of the listener therefore travels in
 a straight line **through the origin**, not around it.
 
 The 0.2 m clamp (see *Coordinate system*) stops the distance gain from blowing
-up, but the perceived direction still flips abruptly as the source crosses from
-one side to the other. This is expected behaviour, not a bug — it is a direct
-consequence of having no motion-path presets in v1 (D-25).
+up. Since M4 the direction no longer flips as the source crosses from one side
+to the other: inside `min_distance` it fades to the source's flat self, so the
+crossing passes through the middle (D-130). It still goes through the listener,
+not around, which is a direct consequence of having no motion-path presets in
+v1 (D-25).
 
 The fix, when path presets arrive, is **orbit interpolation**: interpolating
 azimuth and radius rather than cartesian coordinates, so a source moving from
@@ -313,7 +321,7 @@ git-friendliness D-13 was for. The filesystem already knows.
   "time_signature": [4, 4],
   "snap": { "enabled": true, "division": "1/16", "triplet": false },
   "hrtf": { "kind": "builtin", "id": "sadie-d1" },
-  "distance": { "rolloff": 1.0, "min_distance": 0.2, "ref_distance": 1.0 },
+  "distance": { "rolloff": 1.0, "min_distance": 0.2, "ref_distance": 1.0, "keep_level": true },
   "master": { "gain_db": 0.0, "limiter_on": true },
   "loop": { "start": 0, "end": 384000 },
   "media_pool": [

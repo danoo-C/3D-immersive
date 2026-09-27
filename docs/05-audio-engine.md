@@ -72,6 +72,14 @@ project therefore opens in 0.23 s once the set has been prepared once.
 Preparing runs on a worker, shown in the info box, and a closed window
 stops it at its next chunk (`ui/hrtf.py`).
 
+**The bank is calibrated to flat** (D-128). After the transform, each
+direction's loudness to pink noise is read from its spectra, K-weighted as
+ITU-R BS.1770 weights loudness and summed over both ears. Every filter is
+then scaled so straight ahead is as loud as the same sound played flat, a
+response of 1 to both ears: +4.99 dB for SADIE II D1. Each direction's gain
+to that loudness is kept beside the filters as `evening`, −1.7 dB to +3.8 dB
+for SADIE, for a project that keeps its level as mixed (D-131).
+
 #### Buffer length must account for the ITD
 
 The ITD is applied as a frequency-domain phase ramp (see the per-block
@@ -198,6 +206,24 @@ heard, and differs in four places:
 A seek sets `H_prev = H` for the block after it, and so does a new
 snapshot's first block. The accumulator carries across a new snapshot when
 it is the same size, because it is sound already begun.
+
+**Level as mixed** (M4 phase 8, D-128 to D-131) changes what a placed
+channel's level is, not what it is heard from:
+
+- **A stereo clip's mono point** gets back what folding it loses, measured
+  once when its file is decoded and capped at +6 dB (D-129). The code's
+  `(L + R) / 2` is multiplied by the file's `fold`.
+- **Distance**, with the project's `distance.keep_level` on, never rises
+  above 1: `(ref / max(r, ref)) ** rolloff`. Off, it is D-21's law above.
+- **The filter**, with it on, blends each measurement scaled by its
+  `evening` gain, so every direction is as loud as the front. The ITD is
+  blended with the plain weights.
+- **The centre**: inside `min_distance` the filter fades towards 1 and the
+  ITD towards none, as `r / min_distance`, so at the listener the channel is
+  heard as it is (D-130). Flat's share of the delay is rounded to whole
+  samples. A fractional delay of a response that reaches Nyquist rings
+  through the whole transform and wraps, where the measured responses fall
+  away up there and stay compact.
 
 ### Cost estimate
 

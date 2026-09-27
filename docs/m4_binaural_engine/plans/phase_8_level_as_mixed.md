@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 8 — Level as mixed
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -147,4 +147,24 @@ calibration moves an expected number
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, in three steps and a measurement, with two changes the
+building asked for:
+
+- **Calibration uses the blend straight ahead**, not the nearest single
+  measurement. It is the same for SADIE, which measured 0°, but the
+  synthetic head has no measurement there. The nearest one's mutation also
+  survived at first, because the synthetic head's pole is as loud as its
+  front. A head louder in front now tells them apart.
+- **Flat's share of the centre's delay is whole samples** (D-130 amended):
+  the exact fractional delay rang, as the phase doc's Notes describe.
+
+The fold was first built by filtering, which was eight times slower than
+decoding. It is now read from spectra.
+
+All sixteen named mutations were caught, the third only once the
+front-heavy head was there to catch it. The drum stem that distorted at (0, 0, 0) now plays within half
+a decibel of its own loudness, and does not reach the limiter there.
+
+What phase 9 needs: the graph as it ships. With the switch on, a block
+costs what it did at phase 5, and the benchmark should run with it on,
+since that is what a project has.
