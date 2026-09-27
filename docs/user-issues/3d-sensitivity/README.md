@@ -9,6 +9,7 @@ difference in the sound.
 
 **Related:** [why a placed channel at (0, 0, 0) distorts](too-loud-at-the-listener.md),
 the same position's level rather than its direction.
+The proposed answer to both: [level as mixed](level-as-mixed.md).
 
 ## The short answer
 

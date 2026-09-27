@@ -109,6 +109,8 @@ the channel's meter.
 
 ## What could change (none of it is done)
 
+A fuller design grew out of this list: [level as mixed](level-as-mixed.md).
+
 1. **Start new channels one metre in front**, at (0, 1, 0), the reference
    distance, instead of at the listener. There the distance gain is exactly
    0 dB and nothing flips from ear to ear. It is a one-line change, and
