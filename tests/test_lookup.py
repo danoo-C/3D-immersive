@@ -7,7 +7,11 @@ real set. SADIE's own checks run where it has been fetched.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import tracemalloc
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -178,12 +182,10 @@ def test_the_index_offers_the_right_face_before_any_walk(
     assert offered / len(queries) > 0.85
 
 
-def test_weighing_a_block_of_32_makes_no_array(
-    sphere: tuple[Directions, Lookup],
-) -> None:
-    """D-106's measure: nothing kept, and the peak never raised by an
-    array's worth - the KD-tree's query raised it by 4 KB."""
-    _, lookup = sphere
+def weighing() -> tuple[int, int]:
+    """What 100 blocks of 32 directions weighed and blended kept, and how
+    far they raised the peak."""
+    lookup = Lookup.build(fibonacci(800))
     queries = random_directions(32)
     vertices = np.zeros((32, 3), dtype=np.int64)
     weights = np.zeros((32, 3))
@@ -200,8 +202,31 @@ def test_weighing_a_block_of_32_makes_no_array(
         after, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert after - before <= 0
-    assert peak - before < 1024
+    return after - before, peak - before
+
+
+def test_weighing_a_block_of_32_makes_no_array() -> None:
+    """D-106's measure: nothing kept, and the peak never raised by an
+    array's worth - the KD-tree's query raised it by 4 KB.
+
+    Measured in an interpreter of its own, as `test_realtime` measures
+    `process()`. In a pytest-xdist worker, one run in 18 kept 426 bytes that
+    were not the lookup's: PySide6's signature loader, woken by an earlier
+    Qt test, and xdist's own message read."""
+    done = subprocess.run(
+        [sys.executable, str(Path(__file__))],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
+    )
+    kept, peak = json.loads(done.stdout)
+    assert kept <= 0, f"100 blocks left {kept} bytes allocated"
+    assert peak < 1024, f"the blocks raised the peak by {peak} bytes"
+
+
+if __name__ == "__main__":
+    print(json.dumps(weighing()))
 
 
 def test_blend_weighs_a_field_by_the_lookups_weights(

@@ -74,6 +74,8 @@ src/immersive/
     player.py            the one stream, and audition through it (D-107, M3)
     device.py            sounddevice stream lifecycle, device enumeration
     scheduler.py         timeline → which clips are active this block
+    spatial.py           each non-bypassed channel heard from where it is
+                         (D-121, D-122, M4)
     dsp.py               gain, fades, resampling, limiter
     render.py            offline render (reuses engine.process)
     hrtf/
@@ -331,7 +333,9 @@ order are the snapshot's; a channel's gain, mute and solo, folded into one
 linear gain on the UI thread, and a seek are the ring's. A gain command names
 the generation of the snapshot it was worked out against, and one naming
 another is dropped: after a reorder its channel's index means someone else.
-The feed (`audio/feed.py`) decides which to send after every change the
+A channel's position is the ring's kind of change too, a `POSITION` command
+tagged with the generation in the same way (D-121). Whether a channel is
+bypassed, the distance settings and the HRTF bank are the snapshot's. The feed (`audio/feed.py`) decides which to send after every change the
 document reports, and holds every snapshot it has handed over until the engine
 has moved past it - the engine never holds the only reference, so it is the
 feed, on the UI thread, that frees one.

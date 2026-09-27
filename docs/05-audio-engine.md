@@ -177,13 +177,43 @@ them outward; it is tuned by ear, not derived.
   *Parameter smoothing* below; it is not an optimisation to skip when a source
   is "barely moving".
 
+As built (M4, `audio/spatial.py`), the code above is followed in what is
+heard, and differs in four places:
+
+- **Positions** are the snapshot's, changed by `POSITION` commands through
+  the ring (D-121). `automation.eval` arrives with automation, at M6.
+- **The windowed copies** are ordered all fading-out, then all fading-in,
+  rather than interleaved as `0::2` and `1::2`. Each half is then one
+  contiguous block of rows, and numpy makes a buffer for a strided operand
+  (D-122).
+- **The transforms** are float32 into complex64 with `norm="ortho"`, the
+  only way numpy 2's `rfft` keeps to its float32 loop. The two scalings
+  cancel (D-122).
+- **The overlap-add accumulator** is `nfft` long, not a separate `tail`.
+  Each block's inverse is added into it, its first `block` samples go to
+  the bus, and the rest moves up. It drains the same way while the
+  transport is stopped, so a pause decays rather than cuts, and a resume
+  does not replay it.
+
+A seek sets `H_prev = H` for the block after it, and so does a new
+snapshot's first block. The accumulator carries across a new snapshot when
+it is the same size, because it is sound already begun.
+
 ### Cost estimate
 
 At 512 frames, `nfft` = 1024, 32 sources: one batched 64×1024 rFFT (two
 windowed copies per source), a [32, 3, 2, 513] gather-and-weight, two complex
 multiply-accumulates, and two 1024-point inverse transforms over a 2-row array
-— four iFFTs of work. That is well under a millisecond against a 10.7 ms
-budget.
+— four iFFTs of work. That was estimated at well under a millisecond against
+a 10.7 ms budget.
+
+Measured as built (M4 phase 5, SADIE II D1, 512 frames), it is not: one
+source takes 0.13 ms, 16 take 0.72 ms, and 32 take 1.47 ms on average and
+2.61 ms at the 99th percentile. The transforms are constant in source count
+as above, but the filter's blend, the ITD ramp and the windows are numpy
+calls for each channel, and Python's overhead per call grows with the
+channels. The margin is still wide. If it ever narrows, the filters can be
+built for every channel at once, with gathers into one buffer.
 
 The crossfade roughly doubles the FFT work versus a naive uncrossfaded design.
 It is still constant in source count, and the margin is still large — which is

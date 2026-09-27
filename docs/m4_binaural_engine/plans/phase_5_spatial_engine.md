@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 5 — The engine, spatial
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -144,4 +144,22 @@ buffers
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, and D-121 and D-122 held. The fifteen named mutations
+were all caught, though not all by the test named for them. The tail not
+carried (9) was caught by the sideband A/B. The default-norm FFT (14) was
+caught by the zero-allocation test and by the impulse's pair as well. Six
+more were caught: the feed never sending a position, the feed ignoring
+bypass, and two in the lookup's resolution, which was a real bug and is
+fixed (the phase's Notes). The last two are at a swap: a new space that
+does not start fresh, and its tail not carried across. Step 2's "no
+discontinuity at a swap" had no test until the sweep was checked against
+the acceptance at the end, and it has one now.
+
+What phase 6 needs: a bypassed channel already plays flat, as it did before
+this phase, into the same `bus_l` and `bus_r` the spatial path adds into.
+The pan law and balance go on its lanes in `_mix`, and master gain and the
+limiter on the bus after both paths. The limiter runs inside `process()`,
+so the realtime subprocess test must cover it; `run_spatial` already has a
+bypassed channel beside the 32 spatial ones. 05's *Time alignment caveat*
+stands as written: a spatial channel is heard 0 to about 1 ms after a
+bypassed one, and v1 leaves it so.

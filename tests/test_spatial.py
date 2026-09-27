@@ -323,6 +323,51 @@ def test_the_first_block_after_a_seek_crossfades_from_nothing_stale(bank: Bank) 
     np.testing.assert_allclose(moved, fresh + tail, atol=1e-5)
 
 
+def after_a_swap(bank: Bank, audio: npt.NDArray[np.float64]) -> npt.NDArray[np.float32]:
+    """Three blocks ahead, then the channel moved to +X by a snapshot built
+    and installed, as the feed installs one: the block that follows."""
+    project, store = empty()
+    channel = channel_with(project, store, audio, (0.0, 1.0, 0.0))
+    engine = Engine(BLOCK)
+    snapshot = build(project, store.get, None, bank)
+    engine.install(snapshot)
+    engine.set_playing(True)
+    out = np.zeros((BLOCK, 2), dtype=np.float32)
+    for _ in range(3):
+        engine.process(out)
+    channel.position = Position(1.0, 0.0, 0.0)
+    engine.install(build(project, store.get, snapshot, bank))
+    engine.process(out)
+    return out.copy()
+
+
+def test_the_first_block_after_a_swap_crossfades_from_nothing_stale(bank: Bank) -> None:
+    """The seek's test, for a snapshot swap. A new snapshot's first block is
+    the old one's tail carried across, plus this block heard at the new
+    place through its filter alone. Both are measured against an engine
+    that never swapped: one kept at the old place, and one at the new place
+    since before this block's input began, whose filter is steady there
+    whether or not a first block is fresh."""
+    rng = np.random.default_rng(9)
+    audio = rng.uniform(-0.3, 0.3, 8 * BLOCK)
+    silent_after = audio.copy()
+    silent_after[3 * BLOCK :] = 0.0
+    silent_before = audio.copy()
+    silent_before[: 3 * BLOCK] = 0.0
+
+    tail = after_a_swap(bank, silent_after)
+    kept_project, kept_store = empty()
+    channel_with(kept_project, kept_store, silent_after, (0.0, 1.0, 0.0))
+    unswapped = played(kept_project, kept_store, bank, 4)[3 * BLOCK :]
+    assert np.abs(unswapped).max() > 0.01, "there is a tail to carry"
+    np.testing.assert_allclose(tail, unswapped, atol=1e-6)
+
+    steady_project, steady_store = empty()
+    channel_with(steady_project, steady_store, silent_before, (1.0, 0.0, 0.0))
+    steady = played(steady_project, steady_store, bank, 4)[3 * BLOCK :]
+    np.testing.assert_allclose(after_a_swap(bank, audio), steady + tail, atol=1e-5)
+
+
 def test_stopped_the_tail_drains_and_is_not_replayed(bank: Bank) -> None:
     project, store = empty()
     channel_with(project, store, impulse(at=BLOCK - 1), (1.0, 0.0, 0.0))
