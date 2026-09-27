@@ -254,6 +254,15 @@ Stereo source: balance rather than pan. `p > 0` attenuates the left channel by
 bit-transparent. Folding a stereo image with a pan law instead would quietly
 damage exactly the material bypass was meant to protect.
 
+As built (M4, D-125), the law is the clip's, not the channel's: a channel can
+hold mono clips and stereo clips at once, so the lane keeps its mono clips in a
+row of their own until the gain. A channel's gain is then four factors, worked
+out on the UI thread with its gain, mute and solo folded in: a mono clip to the
+left and to the right, and a stereo clip's left and right. Each ramps across a
+block like any gain. Pan belongs to a bypassed channel. For every other
+channel the four factors are its gain, so a placed channel's mono point, and a
+channel played flat for want of a bank, are untouched by it.
+
 ### It is cheaper, not just different
 
 Bypassed channels never enter the FFT. A project whose heaviest element is a
@@ -294,7 +303,7 @@ boolean, and there are no controls to set:
 |---|---|
 | Type | brickwall peak limiter |
 | Ceiling | −0.3 dBFS |
-| Lookahead | 1.5 ms (72 samples at 48 kHz), **internally compensated** |
+| Lookahead | 1.5 ms (72 samples at 48 kHz), **compensated as a latency the engine states** (D-124) |
 | Attack | the lookahead |
 | Release | 50 ms, smoothed |
 | Knee | 2 dB soft |
@@ -304,15 +313,43 @@ things to get wrong in a mix whose point is somewhere else entirely. The
 ceiling sits below 0 dBFS because an inter-sample peak in a 24-bit file that
 measures exactly 0 will still clip somebody's converter.
 
-⚠️ **The lookahead is compensated inside the limiter**, and that is
-load-bearing rather than tidy. Lookahead is what separates a limiter from a
-clipper — it needs to see the peak before deciding — but it delays whatever
-passes through it. Stems skip the limiter (D-41), so an *uncompensated*
-lookahead would leave the master 72 samples later than the stems that are
-supposed to sum to it, and M7's exactness test would fail against a constant
-offset nobody had written down. Compensating it also keeps preview and render
-time-aligned, which is the property the whole offline-reuses-`process` design
-exists for.
+⚠️ **The lookahead is compensated**, and that is load-bearing rather than
+tidy. Lookahead is what separates a limiter from a clipper — it needs to see
+the peak before deciding — but it delays whatever passes through it. Stems
+skip the limiter (D-41), so an *uncompensated* lookahead would leave the master
+72 samples later than the stems that are supposed to sum to it, and M7's
+exactness test would fail against a constant offset nobody had written down.
+
+This section first said *inside* the limiter. Built, it cannot be: to output
+a sample undelayed, the limiter would need the graph to render 72 samples
+ahead of the output, and the spatial path's transform renders a whole block
+at a time, so at every seek and start it would have 72 samples it could not
+make. The compensation is therefore a latency the engine states (D-124).
+The delay runs whether the limiter is on or off, so `Engine.latency` is
+always 72 frames and a switch moves nothing in time. A render drops the
+first 72 frames and plays 72 more at its end, master and stems alike, and
+that keeps preview and render time-aligned, which is the property the whole
+offline-reuses-`process` design exists for.
+
+**As built (D-123).** The gain is computed in decibels of reduction, a
+block at a time, with no per-sample loop and no array made:
+
+1. each sample's need, from the soft knee, on the louder of the two sides,
+   so a peak on one side turns both down alike and the image does not move;
+2. held forward over the lookahead, a sliding maximum of 73 samples;
+3. released with a 50 ms time constant, `r = max(h, a·r_prev)`, computed as a
+   running maximum of `h·a^-n` and carried across blocks;
+4. averaged over the 72 samples of the lookahead, which is the attack;
+5. applied to the audio delayed by 72 samples.
+
+The hold and the average together make it brickwall by construction. The
+average at a peak's sample is of 72 values, each at least that peak's need.
+The knee is centred on the ceiling, so reduction starts at −1.3 dBFS and the
+knee's top, at +0.7 dBFS in, comes out at the ceiling. The ceiling is aimed
+10⁻⁵ dB low: without that, float32 rounding put samples one step past it.
+The limiter's switch fades across a block, like a gain. A block costs 31 to
+59 µs on average, from 256 frames to 2048, and under 0.2 ms at the 99th
+percentile.
 
 Nothing in it is stochastic, so F-36's determinism survives it. It is the only
 nonlinear block in the graph, which makes it the one place where "deterministic
@@ -321,7 +358,9 @@ per machine and build" (D-40) is worth re-checking after a numpy upgrade.
 ### Metering
 
 The bus also publishes a peak per side for the master meter (F-54): the
-highest level each side has reached since the UI last took them. The audio
+highest level each side has reached since the UI last took them. It is read
+after the limiter, so it shows what leaves the engine: with the limiter on,
+nothing passes −0.3 dBFS and the clip light stays dark. The audio
 thread raises two floats in a preallocated array; the UI reads both and sets
 them back to zero at frame rate (`Engine.take_peaks`). No history, no
 allocation, no lock: a block that lands between the read and the reset is one
@@ -523,7 +562,12 @@ laptop speakers mid-audition is a worse outcome than stopping.
 `render.py` runs the **same** `Engine.process` in a loop with no device, which
 is what keeps preview and export from diverging. Differences, all opt-in:
 
-- Smaller block (64) for finer automation resolution.
+- The first `Engine.latency` frames dropped, and as many more rendered past
+  the end: the limiter's lookahead (D-124). Master and stems carry the same
+  latency, so they stay aligned.
+- Smaller block (64) for finer automation resolution. It is shorter than the
+  lookahead, which the limiter handles correctly, though numpy then copies
+  through a buffer, which is fine offline.
 - Longer HRIRs if the dataset offers them.
 - Optional 2× oversampling of the limiter.
 - Per-channel stems by rendering with all but one channel muted, reusing the

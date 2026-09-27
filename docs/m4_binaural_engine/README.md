@@ -18,7 +18,7 @@ channel and project views of the *Parameters pane* in
 | [3 — Directions](phase_3_directions.md) | ✅ |
 | [4 — The bank, and its cache](phase_4_bank.md) | ✅ |
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | ✅ |
-| [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | planned |
+| [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | ✅ |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | not started |
 | [8 — The benchmark, and the switch interval](phase_8_benchmark.md) | not started |
 | [9 — Heard](phase_9_heard.md) | not started |
@@ -137,3 +137,13 @@ default FFT is not (D-122). 32 moving sources take 1.47 ms a block at 512
 frames against 10.67 ms, and the crossfade cuts the block-rate sidebands by
 32.2 dB, where S0 cut them by 33.7. The sweep found a real bug in phase 3's
 lookup, now fixed: an index read its resolution from a constant.
+
+**Phase 6.** A bypassed channel is placed by pan: the constant-power law for
+its mono clips and the balance for its stereo ones, applied per clip since a
+channel may hold both (D-125). Everything then passes the master gain and
+D-54's limiter, brickwall by construction and computed a block at a time
+without a loop per sample (D-123). The master gain and the limiter's switch
+travel as channel gains do (D-126). The lookahead is a latency the engine
+states, 72 frames whether the limiter is on or off, which a render drops
+(D-124). That was the one acceptance line amended: "not delayed" could not
+be had without the graph rendering ahead of itself.

@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 6 — Bypass and the master bus
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -179,4 +179,37 @@ factors, `Snapshot.master`
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, in two steps and a measurement. The four decisions held.
+The first port of the prototype got the knee wrong: it started 2 dB under the
+ceiling instead of 1, and took the excess from the ceiling instead of from
+the knee's top, so it limited at −1.3 dBFS. The static-curve test caught it on
+its first run.
+
+The named mutations were all caught, though not all by the test named for
+them:
+
+- **An average shorter than the hold (10)** is still brickwall. A window
+  inside the hold's still covers the peak. What it breaks is the attack, and
+  the test that the reduction begins 72 samples before its peak caught it.
+  An average scaled wrong, at half the reduction, is what the ceiling tests
+  catch.
+- **"Each side detected alone" (14)** became "only the left side detected".
+  The test was first written with its peak on the left, where that passes,
+  so it now runs a peak on each side.
+- Six more were caught, 25 in all: the master ramping in from unity on a
+  project's first snapshot, the feed never sending the master, a looped fill
+  not cleared, an average at half the reduction, and the hold's and the
+  delay's histories dropped at a block's end.
+
+The risk the plan named was the size of it: 80 tests read the engine's
+output sample for sample and moved by 72 samples. They now read through
+`tests/hearing.py`. A test plays first and reads after, on the timeline, and
+a read plays on as far as the latency holds back. The graph's and the spatial
+path's tests run with the limiter off, since they are about what reaches it.
+The stand-in's ramp stays under half scale.
+
+What phase 7 needs: the pane's fields only have to push their edits. A pan
+edit is a gain command (D-125). A master gain or limiter edit is a `MASTER`
+command (D-126). A position is a `POSITION` (D-121). A bypass, or a rolloff,
+rebuilds the snapshot. The feed already tells each apart, and each is heard
+at the next block, 72 frames late like everything else.

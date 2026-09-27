@@ -419,7 +419,8 @@ trail, the curve and the sound agree.
 ---
 
 ## M7 — Render
-- Offline render reusing `Engine.process`, no device
+- Offline render reusing `Engine.process`, no device, dropping the engine's
+  stated latency at the start and rendering as far past the end (D-124)
 - Render dialog: range, block size, stems toggle, output path. The range is
   the whole project (derived, D-53), the loop region, or typed (F-53)
 - Seeded TPDF dither on the 24-bit conversion (D-56) — unseeded would make

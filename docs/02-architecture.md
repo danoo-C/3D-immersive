@@ -76,7 +76,9 @@ src/immersive/
     scheduler.py         timeline → which clips are active this block
     spatial.py           each non-bypassed channel heard from where it is
                          (D-121, D-122, M4)
-    dsp.py               gain, fades, resampling, limiter
+    dsp.py               gain, pan, fades, resampling
+    limiter.py           the master limiter, and the latency it costs
+                         (D-123, D-124, M4)
     render.py            offline render (reuses engine.process)
     hrtf/
       sofa.py            load SOFA → HRIR set, resample, normalise (M4)
@@ -334,7 +336,9 @@ linear gain on the UI thread, and a seek are the ring's. A gain command names
 the generation of the snapshot it was worked out against, and one naming
 another is dropped: after a reorder its channel's index means someone else.
 A channel's position is the ring's kind of change too, a `POSITION` command
-tagged with the generation in the same way (D-121). Whether a channel is
+tagged with the generation in the same way (D-121), and so are a bypassed
+channel's pan, folded into its gain as four factors (D-125), and the master's
+gain and limiter switch, a `MASTER` command (D-126). Whether a channel is
 bypassed, the distance settings and the HRTF bank are the snapshot's. The feed (`audio/feed.py`) decides which to send after every change the
 document reports, and holds every snapshot it has handed over until the engine
 has moved past it - the engine never holds the only reference, so it is the

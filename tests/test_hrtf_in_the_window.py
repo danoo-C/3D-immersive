@@ -195,9 +195,13 @@ def test_a_request_replaced_is_never_handed_over_late(
         return synthetic()
 
     monkeypatch.setattr(hrtf, "builtin", builtin)
-    # Two at once, so the second runs while the first is held.
+    # Two at once, so the second runs while the first is held. The first is
+    # held before the second is asked for: with both queued at once, the
+    # second's worker could call first and be the one held, and the bank
+    # never came - one run in fifteen.
     window._hrtf._pool.setMaxThreadCount(2)
     window.prepare_hrtf()
+    until(lambda: len(calls) == 1)
     window._hrtf_wanted = None  # ask again, as an open of another set would
     window.prepare_hrtf()
     until(lambda: window.bank() is not None)
