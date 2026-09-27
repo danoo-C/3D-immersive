@@ -1,4 +1,4 @@
-# M4 · Phase 8 — The benchmark, and the switch interval
+# M4 · Phase 9 — The benchmark, and the switch interval
 
 **Status:** not started · **Plan:** not written yet
 
@@ -19,7 +19,7 @@ difference and proves nothing.
 audio thread calling `process` on a real-time schedule while the window
 repaints offscreen, counting missed deadlines with and without the switch
 interval; the switch interval itself; what the live count must be, written
-into phase 9 for the listening machine.
+into phase 10 for the listening machine.
 
 **Out:** optimising past N-1 → only if it fails (05, *If Python is not
 enough*).

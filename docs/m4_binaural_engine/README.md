@@ -20,8 +20,9 @@ channel and project views of the *Parameters pane* in
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | ✅ |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | ✅ |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
-| [8 — The benchmark, and the switch interval](phase_8_benchmark.md) | not started |
-| [9 — Heard](phase_9_heard.md) | not started |
+| [8 — Level as mixed](phase_8_level_as_mixed.md) | not started |
+| [9 — The benchmark, and the switch interval](phase_9_benchmark.md) | not started |
+| [10 — Heard](phase_10_heard.md) | not started |
 
 The order is dependency order, and it is the spike's order. The spike
 proved the pipeline by ear (S0), and this milestone rewrites it properly in
@@ -33,8 +34,9 @@ against numbers the spike measured: a set loaded and normalised, then split
 into delay and spectrum, then made queryable by direction, then prepared as
 a bank. The fifth puts it on the audio thread, the sixth adds the paths that
 skip it and the bus everything lands on, and the seventh gives the pane the
-fields that make it audible. The benchmark is eighth because it measures
-the finished graph, and hearing is last because only a person can do it.
+fields that make it audible. The eighth makes a placed stem keep the level
+it was mixed at. The benchmark is ninth because it measures the finished
+graph, and hearing is last because only a person can do it.
 
 ## Milestone acceptance
 
@@ -52,6 +54,15 @@ Windows or Linux, and both are one sitting (M3 phase 10's Notes). Nothing
 here rests on those boxes: the flat engine this milestone extends is tested
 headless. M4's own last phase needs the same machine, and the same
 headphones.
+
+## Scope amended during the milestone
+
+**Phase 8, level as mixed, was added after phase 7** (2026-09-27), from a
+user issue: [3d-sensitivity](../user-issues/3d-sensitivity/level-as-mixed.md).
+Listening to phase 7's fields found a placed stem at the default position
+14 dB louder than itself and distorting, and every direction and every
+stereo stem at a level nobody chose. The benchmark and hearing moved to 9
+and 10, since the one should measure and the other hear what ships.
 
 ## Scope amended before the milestone started
 
@@ -87,7 +98,7 @@ phase's first decision.
   a 2 dB knee. (Phase 6.)
 - **What "zero xruns" can mean on WSL.** N-1's benchmark is timings with a
   margin here. The live count, with the UI repainting, is the listening
-  machine's. (Phase 8.)
+  machine's. (Phase 9.)
 
 ## What this milestone does not deliver
 

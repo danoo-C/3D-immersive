@@ -140,7 +140,7 @@ buffers
 |---|---|
 | Pan and balance for bypassed channels, master gain, the limiter | phase 6 |
 | The pane's position fields | phase 7 |
-| The N-1 benchmark with the UI repainting | phase 8 |
+| The N-1 benchmark with the UI repainting | phase 9 |
 
 ## Outcome
 
