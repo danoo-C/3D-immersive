@@ -66,6 +66,13 @@ from immersive.ui.widgets.meter import Meter
 from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.text import TextField
 
+#: What the bypass box does, here and in the parameters pane.
+BYPASS_TIP = (
+    "HRTF bypass  (B)\nStraight to the stereo bus, not placed: "
+    "panned instead of heard from a position"
+)
+
+
 #: The headers column's width, and so the corner's above it.
 HEADER_WIDTH = 220
 
@@ -245,7 +252,7 @@ class ChannelHeader(QFrame):
         self.bypass = self._toggle(
             "⊘",
             "Bypass",
-            "HRTF bypass  (B)\nStraight to the stereo bus, unprocessed — heard at M4",
+            BYPASS_TIP,
         )
         self.mute.clicked.connect(lambda on: self._set("mute", on))
         self.solo.clicked.connect(lambda on: self._set("solo", on))

@@ -25,6 +25,7 @@ from immersive.core.model import (
     Fade,
     FadeShape,
     MediaFile,
+    Position,
     SnapSetting,
     new_channel,
 )
@@ -295,9 +296,10 @@ def test_a_tempo_change_moves_the_grid_and_no_clip() -> None:
 def test_the_engines_fields_are_drawn_dead_and_name_m4() -> None:
     window, _ = a_window()
     view = project_view(window)
-    for field in (view.hrtf, view.rolloff, view.master, view.limiter):
+    for field in (view.rolloff, view.master, view.limiter):
         assert not field.isEnabled()
         assert "M4" in field.toolTip()
+    assert not view.hrtf.isEnabled() and "M8" in view.hrtf.toolTip()
     project = window.document().project
     assert view.hrtf.currentText() == project.hrtf.id
     assert view.limiter.isChecked() == project.master.limiter_on
@@ -640,16 +642,69 @@ def test_a_name_left_empty_is_put_back() -> None:
     assert stacked(window) == count and view.name.text() == before
 
 
-def test_position_is_dead_until_m5_and_pan_shows_only_when_bypassed() -> None:
-    _window, view = channels_selected(0)
-    for field in view.position:
-        assert not field.isEnabled() and "M5" in field.toolTip()
+def test_a_position_typed_is_one_edit_of_that_axis_alone() -> None:
+    window, view = channels_selected(0)
+    document = window.document()
+    channel = document.project.channels[0]
+    document.push(SetAttribute(channel, "position", Position(1.0, 2.0, 3.0)))
+    placed = channel.position
+    count = stacked(window)
+
+    type_into(view.position[0], "-2.5")
+
+    assert channel.position == Position(-2.5, 2.0, 3.0)
+    assert stacked(window) == count + 1
+    assert placed == Position(1.0, 2.0, 3.0), "a new one: the old is undo's"
+    assert "right of the listener" in view.position[0].toolTip()
+    document.undo()
+    assert channel.position == Position(1.0, 2.0, 3.0)
+    assert view.position[0].text() == "1.00 m"
+
+
+def test_several_channels_take_a_position_on_the_axis_typed_in_one_edit() -> None:
+    """Each keeps its other two axes (D-127)."""
+    window, view = channels_selected(0, 2)
+    document = window.document()
+    channels = document.project.channels
+    document.push(SetAttribute(channels[0], "position", Position(1.0, 2.0, 0.0)))
+    document.push(SetAttribute(channels[2], "position", Position(-1.0, 3.0, 0.0)))
+    assert [field.text() for field in view.position] == [MIXED, MIXED, "0.00 m"]
+    count = stacked(window)
+
+    type_into(view.position[1], "4")
+
+    assert channels[0].position == Position(1.0, 4.0, 0.0)
+    assert channels[2].position == Position(-1.0, 4.0, 0.0)
+    assert channels[1].position == Position(), "not selected, not moved"
+    assert stacked(window) == count + 1
+
+
+def test_position_is_greyed_only_when_every_channel_is_bypassed_and_pan_shown() -> None:
+    """D-127: a mixed selection keeps its position fields and hides pan."""
+    window, view = channels_selected(0, 1)
+    document = window.document()
+    first, second = document.project.channels[:2]
+    assert all(field.isEnabled() for field in view.position)
     assert view.pan.isHidden()
 
-    view.bypass.click()
+    document.push(SetAttribute(first, "hrtf_bypass", True))
+    assert all(field.isEnabled() for field in view.position)
+    assert view.pan.isHidden()
 
-    assert not view.pan.isHidden() and not view.pan.isEnabled()
-    assert "M4" in view.pan.toolTip()
+    document.push(SetAttribute(second, "hrtf_bypass", True))
+    assert not any(field.isEnabled() for field in view.position)
+    assert all("not placed" in field.toolTip() for field in view.position)
+    assert not view.pan.isHidden() and view.pan.isEnabled()
+
+    count = stacked(window)
+    type_into(view.pan, "-0.5")
+    assert first.pan == second.pan == -0.5 and stacked(window) == count + 1
+
+
+def test_the_bypass_box_says_what_bypass_does_now() -> None:
+    window, view = channels_selected(0)
+    for box in (view.bypass, header(window, 0).bypass):
+        assert "M4" not in box.toolTip() and "not placed" in box.toolTip()
 
 
 # --------------------------------------------------------------------------- #

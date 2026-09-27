@@ -11,14 +11,17 @@ where it differs, and a value set there is set on all of them in one edit
 (04, *Selection*). A clip's start is the exception, and is the selection's
 (D-102).
 
-**Fields a later milestone brings are drawn, disabled**, with that
-milestone in their tooltip, as every unbuilt action in the window is.
+**A field a later milestone brings is drawn, disabled**, with that
+milestone in its tooltip, as every unbuilt action in the window is. Since
+M4 that is only the HRTF set, which shows the set every channel is heard
+through, and names M8 for choosing another.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import replace
+from functools import partial
 from typing import Any, TypeVar
 
 from PySide6.QtCore import Qt
@@ -66,6 +69,7 @@ from immersive.core.model import (
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
 from immersive.ui.timeline.grid import Unit, snap_text
+from immersive.ui.timeline.headers import BYPASS_TIP
 from immersive.ui.timeline.snap_menu import fill_snap_menu
 from immersive.ui.units import Duration, Plain, Position, clock
 from immersive.ui.widgets.check import CheckBox
@@ -75,7 +79,25 @@ from immersive.ui.widgets.waveform import Waveform
 
 #: Why a field is drawn but dead, by the milestone that brings it.
 M4 = "the binaural engine arrives at M4"
-M5 = "the spatial views arrive at M5"
+M8 = "choosing another set arrives at M8"
+
+#: A position's axes, as `Position` names them and as the pane labels them,
+#: with what each means: the listener at the origin, facing +Y (03).
+AXES = (
+    ("x", "X", "metres right of the listener, or left if negative"),
+    ("y", "Y", "metres in front of the listener, or behind if negative"),
+    ("z", "Z", "metres above ear level, or below if negative"),
+)
+
+#: How far a position field reaches, each way.
+REACH = 100.0
+
+#: Why a bypassed channel's position is greyed (D-127).
+UNPLACED = (
+    "Bypassed, so not placed: it goes straight to the stereo bus.\n"
+    "Its position is kept for when bypass is off."
+)
+
 
 #: The tempo's ends and its resolution (D-104).
 TEMPO_FLOOR, TEMPO_CEILING = 20.0, 999.0
@@ -132,17 +154,23 @@ def dead(widget: _W, what: str, arrives: str) -> _W:
     return widget
 
 
+def together(changes: Sequence[Command]) -> Command | None:
+    """Several changes as one edit, one as itself, and none as `None`."""
+    if not changes:
+        return None
+    return changes[0] if len(changes) == 1 else Compound(list(changes))
+
+
 def set_on_all(targets: Sequence[Any], name: str, value: object) -> Command | None:
     """`name` set to `value` on every one of `targets` whose value differs -
     one edit however many, or `None` when none would change."""
-    changes: list[Command] = [
-        SetAttribute(target, name, value)
-        for target in targets
-        if getattr(target, name) != value
-    ]
-    if not changes:
-        return None
-    return changes[0] if len(changes) == 1 else Compound(changes)
+    return together(
+        [
+            SetAttribute(target, name, value)
+            for target in targets
+            if getattr(target, name) != value
+        ]
+    )
 
 
 class View(QWidget):
@@ -283,7 +311,7 @@ class ProjectView(View):
         self.hrtf = QComboBox()
         self.row(
             "HRTF set",
-            dead(self.hrtf, "The HRTF set every channel is heard through", M4),
+            dead(self.hrtf, "The HRTF set every channel is heard through", M8),
         )
         self.rolloff = numeric(0, minimum=0, maximum=10, step=0.01, decimals=2)
         self.row(
@@ -482,19 +510,13 @@ class ClipView(View):
             )
             if wanted != fade:
                 changes.append(SetAttribute(clip, name, wanted))
-        self._push(
-            None
-            if not changes
-            else changes[0]
-            if len(changes) == 1
-            else Compound(changes)
-        )
+        self._push(together(changes))
 
 
 class ChannelView(View):
     """One channel or several: what the header edits - name, colour, gain,
-    mute, solo, bypass and snap - and the position and pan that later
-    milestones bring, drawn until then.
+    mute, solo, bypass and snap - and where it is heard from: its position,
+    or its pan while it is bypassed (D-127).
 
     The header and the pane read the same channel after every change, so an
     edit in either shows in both. Several channels take every field but the
@@ -535,9 +557,7 @@ class ChannelView(View):
         self.bypass = CheckBox("HRTF bypass")
         self.mute.setToolTip("Mute — mute wins over solo")
         self.solo.setToolTip("Solo — several can be soloed")
-        self.bypass.setToolTip(
-            "HRTF bypass  (B)\nStraight to the stereo bus, unprocessed — heard at M4"
-        )
+        self.bypass.setToolTip(BYPASS_TIP)
         for box, name in (
             (self.mute, "mute"),
             (self.solo, "solo"),
@@ -553,20 +573,39 @@ class ChannelView(View):
         self.snap.menu().aboutToShow.connect(self.snap_menu)
         self.row("Snap", self.snap)
 
-        self.position = [
-            dead(
-                numeric(0, minimum=-100, maximum=100, step=0.01, unit="m", decimals=2),
-                f"{axis}: where the channel sits, in metres",
-                M5,
-            )
-            for axis in ("X", "Y", "Z")
+        self._position_tips = [
+            f"{label}: {meaning} — drag, or click and type"
+            for _, label, meaning in AXES
         ]
-        for axis, field in zip(("X", "Y", "Z"), self.position, strict=True):
-            self.row(f"Position {axis}", field)
-        self.pan = numeric(0, minimum=-1, maximum=1, step=0.01, decimals=2)
-        self._pan_row = self.row(
-            "Pan", dead(self.pan, "Left or right, on the bypass path", M4)
+        self.position = [
+            numeric(
+                0,
+                minimum=-REACH,
+                maximum=REACH,
+                step=0.01,
+                unit="m",
+                decimals=2,
+                tip=tip,
+                committed=partial(self._place, axis),
+            )
+            for (axis, _, _), tip in zip(AXES, self._position_tips, strict=True)
+        ]
+        for (_, label, _), field in zip(AXES, self.position, strict=True):
+            self.row(f"Position {label}", field)
+        self.pan = numeric(
+            0,
+            minimum=-1,
+            maximum=1,
+            step=0.01,
+            decimals=2,
+            signed=True,
+            tip=(
+                "Pan, -1 left to +1 right — drag, or click and type\n"
+                "A mono clip by constant power, a stereo one by balance"
+            ),
+            committed=lambda value: self._set("pan", value),
         )
+        self.row("Pan", self.pan)
 
     def _channels(self) -> list[Channel]:
         return self._document.selection.channels()
@@ -617,8 +656,12 @@ class ChannelView(View):
         ):
             show_number(field, values)
         show_number(self.pan, [channel.pan for channel in channels])
-        # 04: pan only when bypassed - it means nothing on the spatial path.
+        # 04, D-127: a position while any is placed, pan only when none is -
+        # it means nothing on the spatial path.
         bypassed = all(channel.hrtf_bypass for channel in channels)
+        for field, tip in zip(self.position, self._position_tips, strict=True):
+            field.setEnabled(not bypassed)
+            field.setToolTip(UNPLACED if bypassed else tip)
         self.pan.setVisible(bypassed)
         label = self._form.labelForField(self.pan)
         if label is not None:
@@ -660,6 +703,22 @@ class ChannelView(View):
 
     def _set(self, name: str, value: object) -> None:
         self._push(set_on_all(self._channels(), name, value))
+
+    def _place(self, axis: str, value: float) -> None:
+        """One axis of every selected channel's position, in one edit
+        (D-127): each a new `Position` with its other two axes its own, so
+        undo has the old one to put back."""
+        self._push(
+            together(
+                [
+                    SetAttribute(
+                        channel, "position", replace(channel.position, **{axis: value})
+                    )
+                    for channel in self._channels()
+                    if getattr(channel.position, axis) != value
+                ]
+            )
+        )
 
     def _rename(self) -> None:
         channels = self._channels()
