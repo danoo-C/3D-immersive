@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from immersive.assets.hrtf import SETS
 from immersive.core.commands import Command, Compound
 from immersive.core.document import Document
 from immersive.core.edits import (
@@ -78,7 +79,6 @@ from immersive.ui.widgets.text import TextField
 from immersive.ui.widgets.waveform import Waveform
 
 #: Why a field is drawn but dead, by the milestone that brings it.
-M4 = "the binaural engine arrives at M4"
 M8 = "choosing another set arrives at M8"
 
 #: A position's axes, as `Position` names them and as the pane labels them,
@@ -266,9 +266,8 @@ def numeric(
 
 
 class ProjectView(View):
-    """Nothing selected: the project's settings. The tempo and signature are
-    live; the HRTF set, distance, master gain and limiter arrive with the
-    binaural engine, and are drawn until then."""
+    """Nothing selected: the project's settings, each one edit. The HRTF set
+    is shown, not chosen: there is one built in until M8 (F-27)."""
 
     def __init__(self, document: Document) -> None:
         super().__init__(document, "Project")
@@ -313,17 +312,48 @@ class ProjectView(View):
             "HRTF set",
             dead(self.hrtf, "The HRTF set every channel is heard through", M8),
         )
-        self.rolloff = numeric(0, minimum=0, maximum=10, step=0.01, decimals=2)
-        self.row(
-            "Distance rolloff",
-            dead(self.rolloff, "How fast level falls with distance", M4),
+        self.rolloff = numeric(
+            1.0,
+            minimum=0,
+            maximum=10,
+            step=0.01,
+            decimals=2,
+            tip=(
+                "Distance rolloff: how fast a source fades as it moves away —"
+                " drag, or click and type\n"
+                "1 halves it at twice the distance, as sound does; 0 not at all"
+            ),
+            committed=lambda value: self._push(
+                set_on_all([self._document.project.distance], "rolloff", value)
+            ),
         )
+        self.row("Distance rolloff", self.rolloff)
         self.master = numeric(
-            0, minimum=-60, maximum=12, step=0.1, unit="dB", signed=True
+            0,
+            minimum=GAIN_FLOOR,
+            maximum=GAIN_CEILING,
+            step=0.1,
+            unit="dB",
+            signed=True,
+            tip=(
+                "Master gain: the whole mix, before the limiter —"
+                " drag, or click and type"
+            ),
+            committed=lambda value: self._push(
+                set_on_all([self._document.project.master], "gain_db", value)
+            ),
         )
-        self.row("Master gain", dead(self.master, "The master bus's gain", M4))
+        self.row("Master gain", self.master)
         self.limiter = CheckBox("Limiter")
-        self.row("", dead(self.limiter, "The master bus's limiter", M4))
+        self.limiter.setToolTip(
+            "The master limiter: nothing leaves louder than -0.3 dBFS"
+        )
+        self.limiter.clicked.connect(
+            lambda on: self._push(
+                set_on_all([self._document.project.master], "limiter_on", bool(on))
+            )
+        )
+        self.row("", self.limiter)
 
     def show_values(self) -> None:
         project = self._document.project
@@ -334,7 +364,8 @@ class ProjectView(View):
             self.note.addItem(str(note))  # a hand-edited file's
         self.note.setCurrentText(str(note))
         self.hrtf.clear()
-        self.hrtf.addItem(project.hrtf.id)
+        known = SETS.get(project.hrtf.id)
+        self.hrtf.addItem(known.title if known is not None else project.hrtf.id)
         self.rolloff.set_value(project.distance.rolloff)
         self.master.set_value(project.master.gain_db)
         self.limiter.setChecked(project.master.limiter_on)

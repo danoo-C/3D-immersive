@@ -14,7 +14,7 @@ import soundfile
 from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QSplitter
+from PySide6.QtWidgets import QApplication, QSplitter, QWidget
 
 from immersive.app import build_application
 from immersive.core.document import Document
@@ -26,6 +26,7 @@ from immersive.core.model import (
     FadeShape,
     MediaFile,
     Position,
+    Project,
     SnapSetting,
     new_channel,
 )
@@ -293,16 +294,58 @@ def test_a_tempo_change_moves_the_grid_and_no_clip() -> None:
     assert to_bar_beat(clip.start, document.project.bpm, (4, 4)) != before[1]
 
 
-def test_the_engines_fields_are_drawn_dead_and_name_m4() -> None:
+def limiting(project: Project) -> bool:
+    """The switch, read afresh: mypy would keep an assert's narrowing."""
+    return project.master.limiter_on
+
+
+def test_rolloff_master_gain_and_the_limiter_are_one_edit_each() -> None:
+    window, _ = a_window()
+    document = window.document()
+    project = document.project
+    view = project_view(window)
+    count = stacked(window)
+
+    type_into(view.rolloff, "2")
+    type_into(view.master, "-6")
+    view.limiter.click()
+
+    assert project.distance.rolloff == 2.0
+    assert project.master.gain_db == -6.0 and not limiting(project)
+    assert stacked(window) == count + 3
+    for _ in range(3):
+        document.undo()
+    assert (project.distance.rolloff, project.master.gain_db) == (1.0, 0.0)
+    assert limiting(project)
+    assert (view.rolloff.text(), view.master.text()) == ("1.00", "0.0 dB")
+    assert view.limiter.isChecked()
+
+
+def test_the_hrtf_set_is_shown_by_its_title_and_names_m8() -> None:
     window, _ = a_window()
     view = project_view(window)
-    for field in (view.rolloff, view.master, view.limiter):
-        assert not field.isEnabled()
-        assert "M4" in field.toolTip()
+    assert view.hrtf.currentText() == "SADIE II D1"
     assert not view.hrtf.isEnabled() and "M8" in view.hrtf.toolTip()
+
+
+def test_no_field_in_the_pane_names_m4_or_m5() -> None:
+    window, grid = a_window()
+    selection = window.document().selection
     project = window.document().project
-    assert view.hrtf.currentText() == project.hrtf.id
-    assert view.limiter.isChecked() == project.master.limiter_on
+    tips = []
+    for kind, items in (
+        (None, []),
+        (Kind.CLIPS, [grid[0][0]]),
+        (Kind.CHANNELS, [project.channels[0]]),
+        (Kind.MEDIA, [project.media_pool[0]]),
+    ):
+        if kind is None:
+            selection.clear()
+        else:
+            selection.select(kind, items)
+        view = window.parameters().view()
+        tips += [widget.toolTip() for widget in view.findChildren(QWidget)]
+    assert tips and not [tip for tip in tips if "M4" in tip or "M5" in tip]
 
 
 def test_the_toolbars_tempo_and_signature_stay_out_of_the_focus_chain() -> None:
