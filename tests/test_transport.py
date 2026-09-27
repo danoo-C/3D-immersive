@@ -17,6 +17,7 @@ from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt
 from PySide6.QtGui import QAction, QColor, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QToolBar, QWidget
 
+from hearing import Tape, listen
 from immersive.app import build_application
 from immersive.audio.device import Output
 from immersive.audio.dsp import ramp_steps
@@ -114,6 +115,12 @@ def heard(backend: Backend, blocks: int = 1) -> Audio:
     return np.concatenate([stream(backend).block()[:, 0] for _ in range(blocks)])
 
 
+def listened(backend: Backend, blocks: int = 1) -> Audio:
+    """The left side of the next `blocks` blocks heard: the latency taken
+    off (D-124)."""
+    return listen(stream(backend), blocks)[:, 0]
+
+
 def at(sample: int, count: int = BLOCK) -> Audio:
     return numbered()[sample : sample + count, 0]
 
@@ -136,15 +143,18 @@ def test_space_plays_from_the_playhead_and_pauses_where_it_is(
 ) -> None:
     window.seek(10_000)
     action(window, PLAY).trigger()
-
-    assert np.array_equal(heard(backend), at(10_000))
-    assert np.array_equal(heard(backend), at(10_000 + BLOCK))
+    tape = Tape(stream(backend))
+    tape.play(2)
     assert window.playing()
 
     action(window, PLAY).trigger()
-    assert not heard(backend).any() and not window.playing()
+    tape.play()
+    assert not window.playing()
     window.tick()
     assert window.timeline().playhead() == 10_000 + 2 * BLOCK, "paused where it was"
+    heard = tape.heard()[:, 0]
+    assert np.array_equal(heard[: 2 * BLOCK], at(10_000, 2 * BLOCK))
+    assert not heard[2 * BLOCK :].any()
 
 
 def test_stop_goes_back_to_where_playback_started(
@@ -152,16 +162,20 @@ def test_stop_goes_back_to_where_playback_started(
 ) -> None:
     window.seek(10_000)
     action(window, PLAY).trigger()
-    heard(backend, 3)
+    tape = Tape(stream(backend))
+    tape.play(3)
 
     action(window, STOP).trigger()
 
     assert window.timeline().playhead() == 10_000 and not window.playing()
-    assert not heard(backend).any()
+    tape.play()
     window.tick()
     assert window.timeline().playhead() == 10_000
     action(window, PLAY).trigger()
-    assert np.array_equal(heard(backend), at(10_000))
+    tape.play()
+    heard = tape.heard()[:, 0]
+    assert not heard[3 * BLOCK : 4 * BLOCK].any()
+    assert np.array_equal(heard[4 * BLOCK :], at(10_000))
 
 
 def test_esc_while_stopped_clears_the_selection(window: MainWindow) -> None:
@@ -180,9 +194,11 @@ def test_enter_returns_to_zero_playing_or_not(
 
     window.seek(10_000)
     action(window, PLAY).trigger()
-    heard(backend, 2)
+    tape = Tape(stream(backend))
+    tape.play(2)
     action(window, START).trigger()
-    assert np.array_equal(heard(backend), at(0)), "and plays on from there"
+    tape.play()
+    assert np.array_equal(tape.heard(2, 1)[:, 0], at(0)), "and plays on from there"
     action(window, STOP).trigger()
     assert window.timeline().playhead() == 0, "where Stop now goes back to"
 
@@ -309,7 +325,7 @@ def test_clicking_the_ruler_during_playback_seeks_there(
             ),
         )
     target = round(window.timeline().axis.sample_at(x))
-    assert np.array_equal(heard(backend), at(target))
+    assert np.array_equal(listened(backend), at(target))
 
 
 def test_the_page_turns_when_the_playhead_leaves_the_view(
@@ -350,7 +366,7 @@ def test_a_position_typed_in_the_readout_moves_the_playhead(
     readout.committed.emit(readout._format.parse(typed))
     assert window.timeline().playhead() == sample
     action(window, PLAY).trigger()
-    assert np.array_equal(heard(backend), at(sample))
+    assert np.array_equal(listened(backend), at(sample))
 
 
 def test_the_readout_shows_the_playhead_in_the_rulers_unit(
@@ -388,7 +404,7 @@ def test_with_looping_on_playback_goes_round_the_region(
     action(window, LOOP).trigger()
     window.seek(10_000)
     action(window, PLAY).trigger()
-    got = heard(backend, 6)
+    got = listened(backend, 6)
     assert np.array_equal(got, np.tile(at(10_000, 300), 6)[: got.shape[0]])
 
 
@@ -420,20 +436,24 @@ def test_an_edit_during_playback_is_heard_at_the_next_block(
     window: MainWindow, backend: Backend
 ) -> None:
     action(window, PLAY).trigger()
-    heard(backend)
+    tape = Tape(stream(backend))
+    tape.play()
     document = window.document()
     document.push(SetAttribute(document.project.channels[0], "mute", True))
-    heard(backend)  # the ramp
-    assert not heard(backend).any()
+    tape.play(2)  # the ramp, then silence
+    assert tape.heard(0, 1).any()
+    assert not tape.heard(2, 1).any()
 
 
 def test_a_double_click_during_playback_is_heard_over_it(
     window: MainWindow, backend: Backend
 ) -> None:
     action(window, PLAY).trigger()
-    heard(backend)
+    tape = Tape(stream(backend))
+    tape.play()
     window.audition_media("m-00000001")
-    got = heard(backend)
+    tape.play()
+    got = tape.heard(1, 1)[:, 0]
     assert np.allclose(got, at(BLOCK) + at(0)), "the arrangement and the sample"
     assert len(backend.streams) == 1
 
@@ -548,7 +568,7 @@ def test_a_project_opened_from_disk_plays_once_its_samples_have_loaded(
     finish(opened)
     action(opened, PLAY).trigger()
 
-    assert np.array_equal(heard(fresh), numbered(SAMPLE_RATE)[:BLOCK, 0])
+    assert np.array_equal(listened(fresh), numbered(SAMPLE_RATE)[:BLOCK, 0])
     opened._player.close()  # type: ignore[union-attr]
     opened.deleteLater()
 
@@ -582,7 +602,7 @@ def test_with_repeat_on_the_end_goes_back_to_0(
     action(window, REPEAT).trigger()
     window.seek(FRAMES - 300)
     action(window, PLAY).trigger()
-    got = heard(backend, 3)
+    got = listened(backend, 3)
     expected = np.concatenate([at(FRAMES - 300, 300), at(0, 3 * BLOCK - 300)])
     assert np.array_equal(got, expected)
 
@@ -628,12 +648,15 @@ def test_esc_stops_an_audition_and_leaves_the_selection(
     document = window.document()
     document.selection.select(Kind.CLIPS, document.project.channels[0].clips)
     assert window.audition_media("m-00000001")
-    assert np.array_equal(heard(backend), at(0))
+    tape = Tape(stream(backend))
+    tape.play()
 
     action(window, STOP).trigger()
 
-    np.testing.assert_allclose(heard(backend), falling(at(BLOCK)), rtol=1e-6)
-    assert not heard(backend).any()
+    tape.play(2)
+    assert np.array_equal(tape.heard(0, 1)[:, 0], at(0))
+    np.testing.assert_allclose(tape.heard(1, 1)[:, 0], falling(at(BLOCK)), rtol=1e-6)
+    assert not tape.heard(2, 1).any()
     assert document.selection.kind is Kind.CLIPS, "Esc silenced; that was all"
     action(window, STOP).trigger()
     assert document.selection.kind is None, "and with nothing sounding, clears"
@@ -644,14 +667,16 @@ def test_stop_during_playback_silences_the_audition_too(
 ) -> None:
     window.seek(10_000)
     action(window, PLAY).trigger()
-    heard(backend)
+    tape = Tape(stream(backend))
+    tape.play()
     window.audition_media("m-00000001")
-    heard(backend)
+    tape.play()
 
     action(window, STOP).trigger()
 
-    np.testing.assert_allclose(heard(backend), falling(at(BLOCK)), rtol=1e-6)
-    assert not heard(backend).any()
+    tape.play(2)
+    np.testing.assert_allclose(tape.heard(2, 1)[:, 0], falling(at(BLOCK)), rtol=1e-6)
+    assert not tape.heard(3, 1).any()
     assert not window.playing() and window.timeline().playhead() == 10_000
 
 

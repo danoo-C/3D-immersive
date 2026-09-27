@@ -28,7 +28,10 @@ which is how a bypassed channel's pan reaches it, and each ramps.
 
 **The master gain ramps the whole bus** after every channel and the
 audition have joined it, from the snapshot's `master` as `MASTER` commands
-change it (D-126).
+change it (D-126). **The limiter** follows it (D-54, D-123), and the master
+meter reads what the limiter lets out. Everything leaves the engine
+`latency` frames after the block it was read in, whether the limiter is on
+or off (D-124): a render drops that many frames at its start.
 
 **The transport lives here too** (phase 9). Playing, the loop region and
 its switch arrive through the ring, ordered with seeks. Stopped, a block
@@ -61,6 +64,7 @@ import numpy.typing as npt
 
 from immersive.audio.device import DEFAULT_BLOCK
 from immersive.audio.dsp import ramp_steps
+from immersive.audio.limiter import LOOKAHEAD, Limiter
 from immersive.audio.scheduler import MONO, STEREO, Lane, Sides, Snapshot, empty, fill
 from immersive.core.model import MIN_LOOP_LENGTH
 
@@ -142,8 +146,11 @@ class Engine:
         #: Where a block's pieces start on the timeline, where in the block,
         #: and how long: more than one only where a loop wraps.
         self._pieces = np.zeros((block // SHORTEST_LOOP + 2, 3), dtype=np.int64)
-        #: The master gain as the last block left it (D-126).
+        #: The master gain and the limiter's switch as the last block left
+        #: them (D-126).
         self._master_level = 1.0
+        self._switch = 1.0
+        self._limiter = Limiter(block)
         #: The bus's highest level on each side since the peaks were taken.
         self._peaks = np.zeros(2, dtype=np.float64)
         self._xruns = np.zeros(1, dtype=np.int64)
@@ -216,6 +223,12 @@ class Engine:
         """Apply what is in the ring now. Only for when no stream is running:
         with no audio thread, nothing else can be reading it."""
         self._drain(self._next)
+
+    @property
+    def latency(self) -> int:
+        """How many frames after its block the engine's output is heard: the
+        limiter's lookahead, on or off (D-124)."""
+        return LOOKAHEAD
 
     @property
     def playhead(self) -> int:
@@ -469,7 +482,8 @@ class Engine:
             np.multiply(row, now, out=into)
 
     def _master(self, snapshot: Snapshot) -> None:
-        """The master gain over the whole bus, ramped (D-126)."""
+        """The master gain over the whole bus, ramped, then the limiter
+        (D-126, D-123)."""
         was = self._master_level
         now = float(snapshot.master[0])
         if was != now:
@@ -482,6 +496,9 @@ class Engine:
         elif now != 1.0:
             np.multiply(self._bus_l, now, out=self._bus_l)
             np.multiply(self._bus_r, now, out=self._bus_r)
+        switch = float(snapshot.master[1])
+        self._limiter.process(self._bus_l, self._bus_r, self._switch, switch)
+        self._switch = switch
 
     def _audition(self) -> None:
         """The voice's next block, summed into the bus over the channels -
@@ -531,6 +548,7 @@ class Engine:
             # The first snapshot: nothing has played, so the master starts
             # where it is rather than ramping there from unity.
             self._master_level = float(snapshot.master[0])
+            self._switch = float(snapshot.master[1])
         # The tail is sound already begun: it carries into the new snapshot
         # when the two are shaped alike. The filters do not (05): its first
         # block starts fresh, with no crossfade from a stale one.

@@ -18,6 +18,7 @@ import pytest
 import soundfile
 
 import immersive
+from hearing import Tape, listen
 from immersive.app import build_application
 from immersive.audio.device import Output, load_backend
 from immersive.audio.dsp import ramp_steps
@@ -111,18 +112,13 @@ def stream(backend: Backend) -> Stream:
 def test_the_frames_go_out_in_order(backend: Backend, player: Player) -> None:
     sample = ramp(BLOCK * 3, channels=2)
     player.audition(sample)
-
-    written = np.concatenate([stream(backend).block() for _ in range(3)])
-
-    np.testing.assert_array_equal(written, sample)
+    np.testing.assert_array_equal(listen(stream(backend), 3), sample)
 
 
 def test_mono_goes_to_both_ears(backend: Backend, player: Player) -> None:
     sample = ramp(BLOCK)
     player.audition(sample)
-
-    out = stream(backend).block()
-
+    out = listen(stream(backend))
     np.testing.assert_array_equal(out[:, 0], sample[:, 0])
     np.testing.assert_array_equal(out[:, 1], sample[:, 0])
 
@@ -133,10 +129,7 @@ def test_after_the_last_frame_silence_and_the_stream_stays_open(
     """D-107: the stream is the transport's, and stays open once needed."""
     sample = ramp(BLOCK + 10)
     player.audition(sample)
-    stream(backend).block()
-
-    last = stream(backend).block()
-
+    last = listen(stream(backend), 2)[BLOCK:]
     np.testing.assert_array_equal(last[:10, 0], sample[BLOCK:, 0])
     assert (last[10:] == 0).all(), "silence, not whatever was in the buffer"
     assert stream(backend).active and not stream(backend).closed
@@ -146,16 +139,18 @@ def test_a_second_sample_replaces_the_first_from_its_first_frame(
     backend: Backend, player: Player
 ) -> None:
     player.audition(ramp(BLOCK * 10))
-    stream(backend).block()
-    stream(backend).block()
+    tape = Tape(stream(backend))
+    tape.play(2)
     second = ramp(BLOCK * 2, channels=2) * -1
 
     player.audition(second)
-    out = stream(backend).block()
+    tape.play(2)
 
     first_falling = ramp(BLOCK * 10)[2 * BLOCK : 3 * BLOCK] * fall()[:, None]
-    np.testing.assert_allclose(out, second[:BLOCK] + first_falling, rtol=1e-6)
-    np.testing.assert_array_equal(stream(backend).block(), second[BLOCK:])
+    np.testing.assert_allclose(
+        tape.heard(2, 1), second[:BLOCK] + first_falling, rtol=1e-6
+    )
+    np.testing.assert_array_equal(tape.heard(3, 1), second[BLOCK:])
 
 
 def sounding(player: Player) -> bool:
@@ -171,18 +166,20 @@ def test_stopping_an_audition_falls_to_silence_and_lets_the_voice_go(
     backend: Backend, player: Player
 ) -> None:
     player.audition(ramp(BLOCK * 10))
-    stream(backend).block()
+    tape = Tape(stream(backend))
+    tape.play()
     assert sounding(player)
 
     player.stop_audition()
 
     assert not sounding(player)
-    out = stream(backend).block()
+    tape.play(2)
     expected = ramp(BLOCK * 10)[BLOCK : 2 * BLOCK] * fall()[:, None]
-    np.testing.assert_allclose(out, np.repeat(expected, 2, axis=1), rtol=1e-6)
-    assert not stream(backend).block().any()
+    np.testing.assert_allclose(
+        tape.heard(1, 1), np.repeat(expected, 2, axis=1), rtol=1e-6
+    )
+    assert not tape.heard(2, 1).any()
     player.release()
-    assert player._voices == []
 
 
 def test_a_voice_is_held_until_the_engine_lets_it_go(
@@ -343,7 +340,7 @@ def test_double_clicking_a_row_plays_it(
 
     pool.tree.doubleClicked.emit(index)
 
-    out = stream(backend).block()
+    out = listen(stream(backend))
     np.testing.assert_array_equal(out[:, 0], ramp(4_000)[:BLOCK, 0])
 
 

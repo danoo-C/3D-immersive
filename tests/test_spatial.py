@@ -18,13 +18,14 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
+from hearing import Tape, listen
 from immersive.audio.engine import Engine
 from immersive.audio.hrtf import lookup
 from immersive.audio.hrtf.bank import Bank, prepare
 from immersive.audio.hrtf.sofa import HrirSet
 from immersive.audio.scheduler import build
 from immersive.core.io.media import Decoded
-from immersive.core.model import Channel, Clip, MediaFile, Position, Project
+from immersive.core.model import Channel, Clip, Master, MediaFile, Position, Project
 
 BLOCK = 256
 TAPS = 128
@@ -92,7 +93,8 @@ def bank() -> Iterator[Bank]:
 
 
 def empty() -> tuple[Project, dict[str, Decoded]]:
-    return Project(), {}
+    """The limiter off: these measure what reaches it, impulses included."""
+    return Project(master=Master(limiter_on=False)), {}
 
 
 def channel_with(
@@ -129,12 +131,7 @@ def played(
     engine = Engine(BLOCK)
     engine.install(build(project, store.get, None, bank))
     engine.set_playing(True)
-    out = np.zeros((BLOCK, 2), dtype=np.float32)
-    rendered = []
-    for _ in range(blocks):
-        engine.process(out)
-        rendered.append(out.copy())
-    return np.concatenate(rendered)
+    return listen(engine, blocks)
 
 
 def impulse(frames: int = 4 * BLOCK, at: int = 0) -> npt.NDArray[np.float64]:
@@ -296,13 +293,12 @@ def after_moving_and_seeking(
     snapshot = build(project, store.get, None, bank)
     engine.install(snapshot)
     engine.set_playing(True)
-    out = np.zeros((BLOCK, 2), dtype=np.float32)
-    for _ in range(3):
-        engine.process(out)
+    tape = Tape(engine)
+    tape.play(3)
     engine.send_position(snapshot.generation, 0, 1.0, 0.0, 0.0)
     engine.seek(8 * BLOCK)
-    engine.process(out)
-    return out.copy()
+    tape.play()
+    return tape.heard(3, 1)
 
 
 def test_the_first_block_after_a_seek_crossfades_from_nothing_stale(bank: Bank) -> None:
@@ -332,13 +328,12 @@ def after_a_swap(bank: Bank, audio: npt.NDArray[np.float64]) -> npt.NDArray[np.f
     snapshot = build(project, store.get, None, bank)
     engine.install(snapshot)
     engine.set_playing(True)
-    out = np.zeros((BLOCK, 2), dtype=np.float32)
-    for _ in range(3):
-        engine.process(out)
+    tape = Tape(engine)
+    tape.play(3)
     channel.position = Position(1.0, 0.0, 0.0)
     engine.install(build(project, store.get, snapshot, bank))
-    engine.process(out)
-    return out.copy()
+    tape.play()
+    return tape.heard(3, 1)
 
 
 def test_the_first_block_after_a_swap_crossfades_from_nothing_stale(bank: Bank) -> None:

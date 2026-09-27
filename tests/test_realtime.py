@@ -28,10 +28,19 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 
+from immersive.audio.dsp import balance, pan_law
 from immersive.audio.engine import Engine, Voice
 from immersive.audio.scheduler import Snapshot, build, even
 from immersive.core.io.media import Decoded
-from immersive.core.model import Channel, Clip, Fade, FadeShape, MediaFile, Project
+from immersive.core.model import (
+    Channel,
+    Clip,
+    Fade,
+    FadeShape,
+    Master,
+    MediaFile,
+    Project,
+)
 
 BLOCK = 2048
 #: What no block may raise traced memory's peak by (D-106).
@@ -47,9 +56,10 @@ def sample(channels: int, seed: int) -> Decoded:
 
 
 def arrangement() -> tuple[Project, dict[str, Decoded]]:
-    """Four channels: a mono loop cut into pieces with fades of both shapes,
-    a stereo pad with clip gain, a mono channel whose sample is missing, and
-    a channel left silent."""
+    """Six channels: a mono loop cut into pieces with fades of both shapes,
+    a stereo pad with clip gain, a mono channel whose sample is missing, a
+    channel left silent, and a mono and a stereo channel bypassed and panned
+    (D-125). The master is 12 dB up, so the limiter works on every block."""
     mono = MediaFile("m-00000001", "/m.wav", "m.wav", 48_000, 1, FRAMES)
     stereo = MediaFile("m-00000002", "/s.wav", "s.wav", 48_000, 2, FRAMES)
     gone = MediaFile("m-00000003", "/g.wav", "g.wav", 48_000, 1, FRAMES)
@@ -93,7 +103,24 @@ def arrangement() -> tuple[Project, dict[str, Decoded]]:
                 clips=[Clip("k-00000301", gone.id, 0, 0, FRAMES)],
             ),
             Channel("c-00000004", "Empty", "#34D399"),
+            Channel(
+                "c-00000005",
+                "Bypassed mono",
+                "#F472B6",
+                hrtf_bypass=True,
+                pan=-0.4,
+                clips=[Clip("k-00000501", mono.id, 0, 0, FRAMES)],
+            ),
+            Channel(
+                "c-00000006",
+                "Bypassed stereo",
+                "#60A5FA",
+                hrtf_bypass=True,
+                pan=0.7,
+                clips=[Clip("k-00000601", stereo.id, 0, 0, FRAMES)],
+            ),
         ],
+        master=Master(gain_db=12.0),
     )
     store = {mono.id: sample(1, 1), stereo.id: sample(2, 2)}
     return project, store
@@ -129,6 +156,13 @@ def run() -> tuple[int, int]:
     allocated between them, and the most any one raised the peak by."""
     project, store = arrangement()
     engine = Engine(BLOCK)
+    # The ring's counts past 256 first, where an integer becomes an object
+    # of its own and keeps 32 bytes, once: in block 1 028 when only gains
+    # and the transport were sent, and in block 466 with pan and the master
+    # too, which is inside what is counted.
+    for _ in range(300):
+        engine.set_repeat(0, False)
+    engine.drain()
     first = build(project, store.get)
     engine.install(first)
     engine.set_playing(True)
@@ -139,7 +173,8 @@ def run() -> tuple[int, int]:
 
     def ui(n: int) -> None:
         """What the UI thread does meanwhile: gains, a mute, a seek, a swap,
-        loops, auditions, a repeat."""
+        loops, auditions, a repeat, pan, the master's gain and its limiter
+        switched off and on."""
         generation = second.generation if engine.holds(second) else first.generation
         engine.take_peaks()
         engine.take_channel_peaks()  # the meters' frame, outside what is measured
@@ -149,6 +184,16 @@ def run() -> tuple[int, int]:
             engine.send_gain(generation, 0, even(0.0))
         if n == 45:
             engine.send_gain(generation, 0, even(1.0))
+        if n % 11 == 0:
+            pan = -1.0 + (n % 21) / 10
+            engine.send_gain(generation, 4, (*pan_law(pan), *balance(pan)))
+            engine.send_gain(generation, 5, (*pan_law(-pan), *balance(-pan)))
+        if n % 13 == 0:
+            engine.send_master(generation, 2.0 + (n % 3), True)
+        if n == 65:
+            engine.send_master(generation, 4.0, False)  # the switch fading off
+        if n == 67:
+            engine.send_master(generation, 4.0, True)
         if n == 60:
             engine.seek(12_345)
         if n == 80:
@@ -180,9 +225,6 @@ def run() -> tuple[int, int]:
     # with a warm-up called apart the first repeat wrapping mid-block kept
     # 32 bytes - once per call, never again in 2 000 blocks.
     #
-    # The ring's read count passes 256, and becomes an object of its own,
-    # only in block 1 028: a run long enough to reach it keeps 32 bytes
-    # there, once, as well.
     blocks = np.zeros((600, 2), dtype=np.int64)
     measured(engine, blocks, lambda n: ui(n % 100))
     counted = blocks[100:]

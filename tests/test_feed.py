@@ -12,6 +12,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
+from hearing import listen
 from immersive.audio.engine import RING, Engine
 from immersive.audio.feed import Feed
 from immersive.audio.scheduler import Snapshot, even
@@ -81,9 +82,8 @@ def block(engine: Engine) -> Audio:
 
 
 def settled(engine: Engine) -> Audio:
-    """A block after any ramp has finished."""
-    block(engine)
-    return block(engine)
+    """A block after any ramp has finished: the second one heard."""
+    return listen(engine, 2)[BLOCK:]
 
 
 def test_a_structural_edit_hands_over_a_snapshot_and_no_command() -> None:
@@ -254,8 +254,7 @@ def test_a_pan_edit_and_a_master_edit_are_commands_not_snapshots() -> None:
     document.push(SetAttribute(document.project.master, "gain_db", -6.0))
 
     assert len(engine.installed) == installed and engine.sent() == sent + 2
-    block(engine)  # the ramps
-    out = block(engine)
+    out = settled(engine)
     assert not out[:, 1].any(), "hard left"
     np.testing.assert_allclose(out[:, 0], 0.5 * 10 ** (-6.0 / 20), rtol=1e-6)
 

@@ -15,11 +15,12 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
+from hearing import Tape, listen
 from immersive.audio.dsp import db_to_gain, ramp_steps
 from immersive.audio.engine import RING, Engine, Voice
 from immersive.audio.scheduler import Snapshot, build, even
 from immersive.core.io.media import Decoded
-from immersive.core.model import Channel, Clip, MediaFile, Project
+from immersive.core.model import Channel, Clip, Master, MediaFile, Project
 
 Audio = npt.NDArray[np.float32]
 BLOCK = 256
@@ -42,8 +43,9 @@ def numbered(frames: int = FRAMES) -> Audio:
 
 def arrangement(*values: float) -> tuple[Project, dict[str, Decoded]]:
     """A channel per value, each playing a whole sample of that one value
-    from 0 - the file's own start and end, so no implicit fades."""
-    project = Project()
+    from 0 - the file's own start and end, so no implicit fades. The limiter
+    is off: these are about what reaches it, some of them at full scale."""
+    project = Project(master=Master(limiter_on=False))
     store: dict[str, Decoded] = {}
     for n, value in enumerate(values):
         media = MediaFile(f"m-0000000{n}", f"/{n}.wav", f"{n}.wav", 48_000, 1, FRAMES)
@@ -89,12 +91,12 @@ def test_the_bus_is_every_channel_at_its_gain() -> None:
     project, store = arrangement(0.25, 0.125)
     project.channels[0].gain_db = -6.0
     engine, _ = playing(project, store)
-
-    out = block(engine)
+    tape = Tape(engine)
+    tape.play()
+    assert engine.playhead == BLOCK
 
     expected = np.float32(0.25) * np.float32(db_to_gain(-6.0)) + np.float32(0.125)
-    assert np.allclose(out, expected)
-    assert engine.playhead == BLOCK
+    assert np.allclose(tape.heard(), expected)
 
 
 @pytest.mark.parametrize(
@@ -118,7 +120,7 @@ def test_mute_and_solo_silence_what_audible_says(
     for n in soloed:
         project.channels[n].solo = True
     engine, _ = playing(project, store)
-    assert np.allclose(block(engine), sum(values[n] for n in heard))
+    assert np.allclose(listen(engine), sum(values[n] for n in heard))
 
 
 def test_a_mono_clip_reaches_both_ears() -> None:
@@ -140,12 +142,14 @@ def steps(signal: Audio) -> float:
 def test_a_gain_change_ramps_across_one_block() -> None:
     project, store = arrangement(1.0)
     engine, snap = playing(project, store)
-    assert np.allclose(block(engine), 1.0)
+    tape = Tape(engine)
+    tape.play()
 
     assert engine.send_gain(snap.generation, 0, even(0.5))
-    ramped = block(engine)[:, 0]
-    after = block(engine)[:, 0]
+    tape.play(2)
+    before, ramped, after = (tape.heard(n, 1)[:, 0] for n in range(3))
 
+    assert np.allclose(before, 1.0)
     assert ramped[0] == pytest.approx(1.0 - 0.5 / BLOCK)
     assert ramped[-1] == pytest.approx(0.5)
     assert steps(ramped) <= 0.5 / BLOCK + 1e-6, "no sample steps past the ramp"
@@ -155,12 +159,14 @@ def test_a_gain_change_ramps_across_one_block() -> None:
 def test_a_mute_ramps_to_silence_rather_than_clicking() -> None:
     project, store = arrangement(1.0)
     engine, snap = playing(project, store)
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     engine.send_gain(snap.generation, 0, even(0.0))
-    ramped = block(engine)[:, 0]
+    tape.play(2)
+    ramped = tape.heard(1, 1)[:, 0]
     assert ramped[0] > 0.99 and ramped[-1] == 0.0
     assert steps(ramped) <= 1.0 / BLOCK + 1e-6
-    assert not block(engine).any()
+    assert not tape.heard(2, 1).any()
 
 
 def test_a_gain_changed_while_a_channel_is_silent_is_in_place_when_it_plays() -> None:
@@ -168,11 +174,13 @@ def test_a_gain_changed_while_a_channel_is_silent_is_in_place_when_it_plays() ->
     project, store = arrangement(1.0)
     project.channels[0].clips[0].start = 3 * BLOCK
     engine, snap = playing(project, store)
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     engine.send_gain(snap.generation, 0, even(0.5))
-    assert not block(engine).any() and not block(engine).any()
+    tape.play(3)
+    assert not tape.heard(0, 3).any()
 
-    assert np.allclose(block(engine), 0.5)
+    assert np.allclose(tape.heard(3, 1), 0.5)
 
 
 def test_a_command_for_another_snapshot_is_dropped() -> None:
@@ -195,7 +203,7 @@ def test_a_command_for_a_channel_that_is_not_there_is_dropped() -> None:
     engine, snap = playing(project, store)
     engine.send_gain(snap.generation, 3, even(0.0))
     engine.send_gain(snap.generation, -1, even(0.0))
-    assert np.allclose(block(engine), 0.25)
+    assert np.allclose(listen(engine), 0.25)
 
 
 def test_a_full_ring_refuses_rather_than_overwriting() -> None:
@@ -217,14 +225,16 @@ def test_a_full_ring_refuses_rather_than_overwriting() -> None:
 def test_a_snapshot_is_taken_up_at_a_block_boundary_whole() -> None:
     project, store = arrangement(0.25)
     engine, first = playing(project, store)
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     project.channels[0].clips[0].gain_db = 6.0
     engine.install(snapshot(project, store, first))
 
-    out = block(engine)
+    tape.play()
 
     expected = np.float32(0.25) * np.float32(db_to_gain(6.0))
-    assert np.allclose(out, expected), "every sample of the block the new one's"
+    assert np.allclose(tape.heard(0, 1), 0.25)
+    assert np.allclose(tape.heard(1, 1), expected), "every sample the new one's"
 
 
 def test_a_channels_gain_ramps_on_across_a_new_snapshot() -> None:
@@ -232,11 +242,13 @@ def test_a_channels_gain_ramps_on_across_a_new_snapshot() -> None:
     changed together with a structural edit does not jump."""
     project, store = arrangement(1.0)
     engine, first = playing(project, store)
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     project.channels[0].gain_db = db_to_gain_db(0.5)
     engine.install(snapshot(project, store, first))
 
-    ramped = block(engine)[:, 0]
+    tape.play()
+    ramped = tape.heard(1, 1)[:, 0]
 
     assert ramped[0] == pytest.approx(1.0 - 0.5 / BLOCK, abs=1e-4)
     assert ramped[-1] == pytest.approx(0.5, abs=1e-4)
@@ -251,7 +263,8 @@ def test_a_snapshot_built_against_one_never_played_starts_at_its_targets() -> No
     first, which the engine never took up."""
     project, store = arrangement(1.0, 1.0)
     engine, first = playing(project, store)
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     second = snapshot(project, store, first)
     project.channels.reverse()
     project.channels[0].gain_db = db_to_gain_db(0.5)
@@ -259,7 +272,8 @@ def test_a_snapshot_built_against_one_never_played_starts_at_its_targets() -> No
     engine.install(second)
     engine.install(third)
 
-    out = block(engine)[:, 0]
+    tape.play()
+    out = tape.heard(1, 1)[:, 0]
 
     assert np.allclose(out, 1.5), "no ramp from a place that means another channel"
 
@@ -293,14 +307,15 @@ def test_after_a_seek_the_next_block_starts_at_the_new_playhead() -> None:
     project, store = arrangement(0.0)
     store["m-00000000"] = Decoded(numbered(), 48_000)
     engine, _ = playing(project, store)
-    block(engine)
-    block(engine)
+    tape = Tape(engine)
+    tape.play(2)
 
     assert engine.seek(10_000)
-    out = block(engine)[:, 0]
-
-    assert np.array_equal(out, numbered()[10_000 : 10_000 + BLOCK, 0])
+    tape.play()
     assert engine.playhead == 10_000 + BLOCK
+
+    out = tape.heard(2, 1)[:, 0]
+    assert np.array_equal(out, numbered()[10_000 : 10_000 + BLOCK, 0])
 
 
 def test_a_seek_and_a_gain_in_one_block_both_apply() -> None:
@@ -308,9 +323,11 @@ def test_a_seek_and_a_gain_in_one_block_both_apply() -> None:
     engine, snap = playing(project, store)
     engine.seek(5_000)
     engine.send_gain(snap.generation, 0, even(0.0))
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     assert engine.playhead == 5_000 + BLOCK
-    assert not block(engine).any()
+    tape.play()
+    assert not tape.heard(1, 1).any()
 
 
 def test_blocks_follow_on_exactly_at_every_size() -> None:
@@ -320,7 +337,7 @@ def test_blocks_follow_on_exactly_at_every_size() -> None:
         engine = Engine(size)
         engine.install(snapshot(project, store))
         engine.set_playing(True)
-        heard = np.concatenate([block(engine)[:, 0] for _ in range(5)])
+        heard = listen(engine, 5)[:, 0]
         assert np.array_equal(heard, numbered()[: 5 * size, 0])
 
 
@@ -382,15 +399,23 @@ def test_a_stopped_engine_holds_its_playhead_and_plays_no_clip() -> None:
     project, store = arrangement(0.5)
     engine = Engine(BLOCK)
     engine.install(snapshot(project, store))
-    assert not block(engine).any() and engine.playhead == 0
+    tape = Tape(engine)
+    tape.play()
+    assert engine.playhead == 0
     engine.seek(1_000)
-    block(engine)
+    tape.play()
     assert engine.playhead == 1_000 and not engine.playing
 
     engine.set_playing(True)
-    assert np.allclose(block(engine), 0.5) and engine.playhead == 1_000 + BLOCK
+    tape.play()
+    assert engine.playhead == 1_000 + BLOCK
     engine.set_playing(False)
-    assert not block(engine).any() and engine.playhead == 1_000 + BLOCK
+    tape.play()
+    assert engine.playhead == 1_000 + BLOCK
+
+    assert not tape.heard(0, 2).any()
+    assert np.allclose(tape.heard(2, 1), 0.5)
+    assert not tape.heard(3, 1).any()
 
 
 def test_a_gain_changed_while_stopped_is_in_place_when_playing_starts() -> None:
@@ -398,11 +423,13 @@ def test_a_gain_changed_while_stopped_is_in_place_when_playing_starts() -> None:
     engine = Engine(BLOCK)
     snap = snapshot(project, store)
     engine.install(snap)
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     engine.send_gain(snap.generation, 0, even(0.5))
-    block(engine)
+    tape.play()
     engine.set_playing(True)
-    assert np.allclose(block(engine), 0.5), "not ramped from 1 on the first block"
+    tape.play()
+    assert np.allclose(tape.heard(2, 1), 0.5), "not ramped from 1 on the first block"
 
 
 def looped(size: int, start: int, length: int, blocks: int) -> Audio:
@@ -412,12 +439,7 @@ def looped(size: int, start: int, length: int, blocks: int) -> Audio:
     engine.set_loop(start, start + length, True)
     engine.seek(start)
     engine.set_playing(True)
-    out = np.zeros((size, 2), dtype=np.float32)
-    heard = []
-    for _ in range(blocks):
-        engine.process(out)
-        heard.append(out[:, 0].copy())
-    return np.concatenate(heard)
+    return listen(engine, blocks)[:, 0]
 
 
 @pytest.mark.parametrize("size", [256, 512, 2048])
@@ -437,7 +459,7 @@ def test_a_playhead_before_the_loop_plays_into_it_and_then_loops() -> None:
     engine.install(snapshot(project, store))
     engine.set_loop(1_000, 1_300, True)
     engine.set_playing(True)
-    heard = np.concatenate([block(engine)[:, 0] for _ in range(8)])
+    heard = listen(engine, 8)[:, 0]
     expected = np.concatenate(
         [numbered()[:1_300, 0], np.tile(numbered()[1_000:1_300, 0], 3)]
     )[: heard.shape[0]]
@@ -451,7 +473,7 @@ def test_a_playhead_past_the_loop_plays_on() -> None:
     engine.set_loop(1_000, 2_000, True)
     engine.seek(5_000)
     engine.set_playing(True)
-    heard = np.concatenate([block(engine)[:, 0] for _ in range(4)])
+    heard = listen(engine, 4)[:, 0]
     assert np.array_equal(heard, numbered()[5_000 : 5_000 + 4 * BLOCK, 0])
 
 
@@ -467,7 +489,7 @@ def test_a_loop_too_short_or_switched_off_plays_through(
     engine.set_loop(start, end, on)
     engine.seek(start)
     engine.set_playing(True)
-    heard = np.concatenate([block(engine)[:, 0] for _ in range(8)])
+    heard = listen(engine, 8)[:, 0]
     assert np.array_equal(heard, numbered()[start : start + 8 * BLOCK, 0])
 
 
@@ -475,9 +497,11 @@ def test_a_gain_ramps_smoothly_across_a_block_the_loop_wraps() -> None:
     project, store = arrangement(1.0)
     engine, snap = playing(project, store)
     engine.set_loop(100, 300, True)
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     engine.send_gain(snap.generation, 0, even(0.5))
-    ramped = block(engine)[:, 0]
+    tape.play()
+    ramped = tape.heard(1, 1)[:, 0]
     assert ramped[-1] == pytest.approx(0.5)
     assert steps(ramped) <= 0.5 / BLOCK + 1e-6
 
@@ -491,19 +515,20 @@ def test_a_voice_plays_from_its_first_frame_to_both_ears_then_silence() -> None:
     engine = Engine(BLOCK)
     sample = numbered(BLOCK + 10)
     engine.audition(Voice(sample))
-    first, second = block(engine), block(engine)
+    tape = Tape(engine)
+    tape.play(3)
+    first, second, third = (tape.heard(n, 1) for n in range(3))
     assert np.array_equal(first[:, 0], sample[:BLOCK, 0])
     assert np.array_equal(first[:, 1], sample[:BLOCK, 0])
     assert np.array_equal(second[:10, 0], sample[BLOCK:, 0])
-    assert not second[10:].any() and not block(engine).any()
+    assert not second[10:].any() and not third.any()
 
 
 def test_a_stereo_voice_keeps_its_sides() -> None:
     engine = Engine(BLOCK)
     sample = np.ascontiguousarray(np.stack([numbered()[:, 0], -numbered()[:, 0]], 1))
     engine.audition(Voice(sample))
-    out = block(engine)
-    assert np.array_equal(out, sample[:BLOCK])
+    assert np.array_equal(listen(engine), sample[:BLOCK])
 
 
 def fall() -> Audio:
@@ -515,13 +540,15 @@ def test_the_next_voice_starts_from_its_first_frame_over_the_first_falling() -> 
     """Replaced, the first does not stop dead, which clicks (D-115)."""
     engine = Engine(BLOCK)
     engine.audition(Voice(level(0.25)))
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     second = Voice(numbered())
     engine.audition(second)
     assert engine.holds_voice(second)
+    tape.play(2)
     expected = numbered()[:BLOCK, 0] + np.float32(0.25) * fall()
-    np.testing.assert_allclose(block(engine)[:, 0], expected, rtol=1e-6)
-    assert np.array_equal(block(engine)[:, 0], numbered()[BLOCK : 2 * BLOCK, 0])
+    np.testing.assert_allclose(tape.heard(1, 1)[:, 0], expected, rtol=1e-6)
+    assert np.array_equal(tape.heard(2, 1)[:, 0], numbered()[BLOCK : 2 * BLOCK, 0])
 
 
 def sounding(engine: Engine) -> bool:
@@ -533,26 +560,30 @@ def test_a_voice_stopped_falls_to_silence_across_one_block() -> None:
     engine = Engine(BLOCK)
     sample = level(0.5)
     engine.audition(Voice(sample))
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     assert sounding(engine)
 
     engine.audition(None)
 
     assert not sounding(engine), "at once, for the window's Esc"
-    out = block(engine)
+    tape.play(2)
+    out = tape.heard(1, 1)
     np.testing.assert_allclose(out[:, 0], np.float32(0.5) * fall(), rtol=1e-6)
     assert np.array_equal(out[:, 0], out[:, 1])
     assert out[0, 0] > 0.49 and out[-1, 0] == 0.0
-    assert not block(engine).any()
+    assert not tape.heard(2, 1).any()
 
 
 def test_a_voice_that_has_finished_is_not_played_again_to_fall() -> None:
     engine = Engine(BLOCK)
     engine.audition(Voice(level(0.5, BLOCK)))
-    block(engine)
+    tape = Tape(engine)
+    tape.play()
     assert not engine.auditioning, "played to its end"
     engine.audition(None)
-    assert not block(engine).any()
+    tape.play()
+    assert not tape.heard(1, 1).any()
 
 
 def test_a_falling_voice_is_held_until_its_block_is_played() -> None:
@@ -583,13 +614,13 @@ def test_a_voice_is_heard_over_the_arrangement_and_under_no_channels_gain() -> N
     engine, _ = playing(project, store)
     project.channels[0].mute = False
     engine.audition(Voice(level(0.125)))
-    assert np.allclose(block(engine), 0.125), (
+    assert np.allclose(listen(engine), 0.125), (
         "the muted channel is silent, the voice not"
     )
 
     playing_too, _ = playing(project, store)
     playing_too.audition(Voice(level(0.125)))
-    assert np.allclose(block(playing_too), 0.375)
+    assert np.allclose(listen(playing_too), 0.375)
 
 
 def test_the_engine_lets_go_of_a_voice_it_has_moved_past() -> None:
@@ -621,7 +652,7 @@ def test_a_wrapped_block_is_silent_where_no_clip_plays() -> None:
     engine.install(snapshot(project, store))
     engine.set_loop(0, 1_000, True)
     engine.set_playing(True)
-    heard = np.concatenate([block(engine)[:, 0] for _ in range(8)])
+    heard = listen(engine, 8)[:, 0]
     passage = np.concatenate([numbered()[:500, 0], np.zeros(500, np.float32)])
     # The clip keeps its file's start, so only its cut end fades (D-42).
     passage[500 - 32 : 500] = heard[500 - 32 : 500]
@@ -662,7 +693,7 @@ def repeating(size: int, end: int, start_at: int) -> Engine:
 def test_at_the_projects_end_playback_goes_back_to_0(size: int) -> None:
     """No gap and no repeated sample, where the end falls inside a block."""
     engine = repeating(size, 10_000, 10_000 - 300)
-    heard = np.concatenate([block(engine)[:, 0] for _ in range(4)])
+    heard = listen(engine, 4)[:, 0]
     project, store = numbered_arrangement()
     passage = numbered()[:10_000, 0].copy()
     # The clip's cut end fades over 32 samples (D-42); its start is the file's.
@@ -671,7 +702,7 @@ def test_at_the_projects_end_playback_goes_back_to_0(size: int) -> None:
     faded.install(snapshot(project, store))
     faded.seek(10_000 - 300)
     faded.set_playing(True)
-    tail = np.concatenate([block(faded)[:, 0], block(faded)[:, 0]])[:300]
+    tail = listen(faded, 2)[:300, 0]
     expected = np.concatenate([tail, passage])[: heard.shape[0]]
     assert np.array_equal(heard, expected)
 

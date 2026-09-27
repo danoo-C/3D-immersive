@@ -78,6 +78,7 @@ class Backend:
 
 
 def ramp(frames: int, channels: int = 1) -> npt.NDArray[np.float32]:
-    """Every frame different, so order and position are visible."""
-    values = (np.arange(frames, dtype=np.float32) + 1) / (frames + 1)
+    """Every frame different, so order and position are visible, and under
+    half scale, where the master limiter leaves it alone (D-54)."""
+    values = (np.arange(frames, dtype=np.float32) + 1) / (2 * (frames + 1))
     return np.ascontiguousarray(np.repeat(values[:, None], channels, axis=1))

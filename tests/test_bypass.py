@@ -16,6 +16,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
+from hearing import Tape, listen
 from immersive.audio.dsp import balance, pan_law
 from immersive.audio.engine import Engine
 from immersive.audio.hrtf import lookup
@@ -81,16 +82,6 @@ def started(
     return engine, snapshot
 
 
-def heard(engine: Engine, blocks: int) -> Audio:
-    """The next `blocks` blocks, `(frames, 2)`."""
-    out = np.zeros((BLOCK, 2), dtype=np.float32)
-    rendered = []
-    for _ in range(blocks):
-        engine.process(out)
-        rendered.append(out.copy())
-    return np.concatenate(rendered)
-
-
 def db(value: float) -> float:
     return 20.0 * math.log10(value)
 
@@ -108,13 +99,13 @@ def test_a_bypassed_stereo_channel_at_centre_is_its_samples_bit_for_bit(
     audio = noise(2, 1)
     engine, snapshot = started(*with_clips(audio), bank)
     assert snapshot.slots == (-1,)
-    np.testing.assert_array_equal(heard(engine, 8), audio[: 8 * BLOCK])
+    np.testing.assert_array_equal(listen(engine, 8), audio[: 8 * BLOCK])
 
 
 def test_a_mono_bypassed_channel_hard_left_is_silent_on_the_right() -> None:
     audio = noise(1, 2)
     engine, _ = started(*with_clips(audio, pan=-1.0))
-    out = heard(engine, 4)
+    out = listen(engine, 4)
     np.testing.assert_array_equal(out[:, 0], audio[: 4 * BLOCK, 0])
     assert not out[:, 1].any()
 
@@ -122,7 +113,7 @@ def test_a_mono_bypassed_channel_hard_left_is_silent_on_the_right() -> None:
 def test_a_mono_bypassed_channel_at_centre_is_3_01_db_down_on_each_side() -> None:
     audio = noise(1, 3)
     engine, _ = started(*with_clips(audio))
-    out = heard(engine, 4).astype(np.float64)
+    out = listen(engine, 4).astype(np.float64)
     source = audio[: 4 * BLOCK, 0].astype(np.float64)
     for side in (0, 1):
         ratio = float(np.sqrt(np.mean(out[:, side] ** 2) / np.mean(source**2)))
@@ -133,7 +124,7 @@ def test_a_mono_bypassed_channel_at_centre_is_3_01_db_down_on_each_side() -> Non
 def test_a_channel_holding_mono_and_stereo_clips_pans_each_by_its_own_law() -> None:
     mono, stereo = noise(1, 4), noise(2, 5)
     engine, _ = started(*with_clips(mono, stereo, pan=0.5))
-    out = heard(engine, 4).astype(np.float64)
+    out = listen(engine, 4).astype(np.float64)
     frames = 4 * BLOCK
     (mono_l, mono_r), (left, right) = pan_law(0.5), balance(0.5)
     m = mono[:frames, 0].astype(np.float64)
@@ -148,10 +139,12 @@ def test_a_pan_change_ramps_across_one_block() -> None:
     held = np.full((FRAMES, 1), 0.5, dtype=np.float32)
     project, store = with_clips(held)
     engine, snapshot = started(project, store)
-    heard(engine, 1)
+    tape = Tape(engine)
+    tape.play()
     project.channels[0].pan = -1.0
     engine.send_gain(snapshot.generation, 0, gains(project)[0])
-    right = heard(engine, 2)[:, 1].astype(np.float64)
+    tape.play(2)
+    right = tape.heard(1, 2)[:, 1].astype(np.float64)
     centre = 0.5 * math.sin(math.pi / 4)
     steps = np.diff(np.concatenate([[centre], right[:BLOCK]]))
     np.testing.assert_allclose(steps, -centre / BLOCK, atol=1e-6)
@@ -164,7 +157,7 @@ def test_pan_does_nothing_to_a_channel_that_is_not_bypassed() -> None:
     project, store = with_clips(audio, bypass=False, pan=-1.0)
     assert gains(project) == [(1.0, 1.0, 1.0, 1.0)]
     engine, _ = started(project, store)
-    out = heard(engine, 4)
+    out = listen(engine, 4)
     np.testing.assert_array_equal(out[:, 0], audio[: 4 * BLOCK, 0])
     np.testing.assert_array_equal(out[:, 1], audio[: 4 * BLOCK, 0])
 
@@ -178,9 +171,11 @@ def test_the_master_gain_ramps_the_whole_bus_across_one_block() -> None:
     held = np.full((FRAMES, 2), 0.5, dtype=np.float32)
     project, store = with_clips(held)
     engine, snapshot = started(project, store)
-    heard(engine, 1)
+    tape = Tape(engine)
+    tape.play()
     assert engine.send_master(snapshot.generation, 0.5, True)
-    out = heard(engine, 2).astype(np.float64)
+    tape.play(2)
+    out = tape.heard(1, 2).astype(np.float64)
     expected = 0.5 * (1.0 - 0.5 * np.arange(1, BLOCK + 1) / BLOCK)
     np.testing.assert_allclose(out[:BLOCK, 0], expected, atol=1e-6)
     np.testing.assert_allclose(out[:BLOCK, 1], expected, atol=1e-6)
@@ -193,6 +188,6 @@ def test_the_snapshot_carries_the_master_and_a_stale_command_is_dropped() -> Non
     project.master = Master(gain_db=-6.0206, limiter_on=True)
     engine, snapshot = started(project, store)
     engine.send_master(snapshot.generation + 1, 2.0, True)  # stale: dropped
-    out = heard(engine, 2)
+    out = listen(engine, 2)
     assert snapshot.master.tolist() == [pytest.approx(0.5, abs=1e-5), 1.0]
     np.testing.assert_allclose(out, 0.25, atol=1e-5)  # from the first sample

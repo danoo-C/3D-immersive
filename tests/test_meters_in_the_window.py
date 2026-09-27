@@ -134,7 +134,10 @@ def test_a_channel_meter_is_after_its_gain_and_a_muted_one_shows_nothing() -> No
 
 
 def test_past_full_scale_lights_only_the_masters_clip_light() -> None:
+    """With the limiter off: on, nothing passes full scale (D-54)."""
     window = arranged(1.5)
+    document = window.document()
+    document.push(SetAttribute(document.project.master, "limiter_on", False))
     played(window)
     [header] = headers(window)
     assert window.meter().clipped()
@@ -143,6 +146,18 @@ def test_past_full_scale_lights_only_the_masters_clip_light() -> None:
     assert light is not None
     window.meter().clear()
     assert not window.meter().clipped()
+    window.deleteLater()
+
+
+def test_with_the_limiter_on_the_master_reads_under_the_ceiling() -> None:
+    """The master meter reads what the limiter lets out; the channel's, what
+    the channel adds (D-117), which is 1.5 whatever the limiter does."""
+    window = arranged(1.5)
+    played(window)
+    [header] = headers(window)
+    assert not window.meter().clipped()
+    assert window.meter().ballistics.levels[0] <= -0.3 + 1e-4
+    assert header.meter.ballistics.levels[0] == pytest.approx(to_db(1.5), abs=0.01)
     window.deleteLater()
 
 
@@ -156,6 +171,8 @@ def test_stopped_every_meter_falls() -> None:
         meter.ballistics._last = clock.now
 
     window.stop()
+    stream(window).block()  # the last of what played, which the limiter held
+    window.tick()
     clock.now += 1.0
     stream(window).block()
     window.tick()
