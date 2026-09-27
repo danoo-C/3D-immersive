@@ -18,7 +18,7 @@ channel and project views of the *Parameters pane* in
 | [3 — Directions](phase_3_directions.md) | ✅ |
 | [4 — The bank, and its cache](phase_4_bank.md) | ✅ |
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | ✅ |
-| [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | not started |
+| [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | planned |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | not started |
 | [8 — The benchmark, and the switch interval](phase_8_benchmark.md) | not started |
 | [9 — Heard](phase_9_heard.md) | not started |

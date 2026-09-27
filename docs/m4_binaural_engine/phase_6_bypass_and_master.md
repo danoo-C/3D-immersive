@@ -1,6 +1,6 @@
 # M4 · Phase 6 — Bypass and the master bus
 
-**Status:** not started · **Plan:** not written yet
+**Status:** planned · **Plan:** [plans/phase_6_bypass_and_master.md](plans/phase_6_bypass_and_master.md)
 
 ## Goal
 
@@ -29,8 +29,14 @@ the limiter and its compensation; the bus meter reading after the limiter.
       centred it is −3.01 dB on each side.
 - [ ] Master gain moves the whole bus, ramped across one block.
 - [ ] With the limiter on, no output sample passes −0.3 dBFS, whatever the
-      input. A signal that never reaches the ceiling comes out equal to its
-      input and **not delayed**: the lookahead is compensated inside.
+      input. A signal that never reaches the knee comes out equal to its
+      input, delayed by exactly the engine's stated latency, 72 frames, and
+      by the same with the limiter off, so switching it moves nothing in
+      time (D-124). *Amended while planning: as first written this said
+      "not delayed", compensated inside. A lookahead cannot be had without
+      the delay unless the graph renders ahead of its output, which the
+      spatial path's block-sized transform cannot do at a seek. And "the
+      ceiling" was the knee's top: a 2 dB soft knee starts 1 dB below it.*
 - [ ] With the limiter off, a signal past full scale passes untouched, and
       the master meter latches.
 - [ ] The zero-allocation test holds with bypassed channels and the limiter
