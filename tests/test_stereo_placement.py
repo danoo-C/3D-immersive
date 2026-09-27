@@ -4,17 +4,29 @@ sources, free or linked in symmetry about a pivot. Headless.
 
 from __future__ import annotations
 
+import math
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
+
 import numpy as np
 import numpy.typing as npt
 import pytest
 
+from hearing import listen
+from immersive.audio.engine import Engine
 from immersive.audio.feed import Feed
+from immersive.audio.hrtf import lookup
+from immersive.audio.hrtf.bank import Bank, prepare
+from immersive.audio.scheduler import build
 from immersive.core.document import Document
 from immersive.core.edits import AddChannel, AddMedia, DropClips, SetAttribute
+from immersive.core.io.loudness import fold, weighted_power
 from immersive.core.io.media import Decoded
 from immersive.core.model import (
     Channel,
     Clip,
+    Master,
     MediaFile,
     Pairing,
     Placement,
@@ -214,3 +226,190 @@ def test_whether_a_channel_is_a_pair_is_a_snapshot() -> None:
     installed = len(engine.installed)
     document.push(SetAttribute(channel.placement, "mode", Pairing.LINKED))
     assert len(engine.installed) == installed, "free to linked only moves a side"
+
+
+# --------------------------------------------------------------------------- #
+# the engine (D-133, D-134)
+# --------------------------------------------------------------------------- #
+
+BLOCK = 256
+
+
+@pytest.fixture(scope="module")
+def bank() -> Iterator[Bank]:
+    from test_spatial import head
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(lookup, "CELLS", 16)
+    patch.setattr(lookup, "SAMPLES", 2)
+    with tempfile.TemporaryDirectory() as cache:
+        made = prepare(head(), BLOCK, Path(cache))
+        assert isinstance(made, Bank)
+        yield made
+    patch.undo()
+
+
+def pink(seconds: float, seed: int) -> Audio:
+    frames = int(seconds * 48_000)
+    spectrum = np.fft.rfft(np.random.default_rng(seed).standard_normal(frames))
+    frequencies = np.fft.rfftfreq(frames, 1 / 48_000)
+    spectrum[1:] /= np.sqrt(frequencies[1:])
+    spectrum[0] = 0.0
+    noise = np.fft.irfft(spectrum, frames)
+    return (0.1 * noise / noise.std()).astype(np.float32)
+
+
+def stem(left: Audio, right: Audio) -> Decoded:
+    audio = np.ascontiguousarray(np.column_stack([left, right]), dtype=np.float32)
+    audio.flags.writeable = False
+    return Decoded(audio, 48_000, fold(audio))
+
+
+def heard_placed(
+    bank: Bank,
+    decoded: Decoded,
+    placement: Placement,
+    left: Position,
+    **distance: object,
+) -> Audio:
+    frames = decoded.frames
+    media = MediaFile("m-00000001", "/s.wav", "s.wav", 48_000, decoded.channels, frames)
+    project = Project(
+        media_pool=[media],
+        master=Master(limiter_on=False),
+        channels=[
+            Channel(
+                "c-00000001",
+                "C",
+                "#A855F7",
+                position=left,
+                placement=placement,
+                clips=[Clip("k-00000001", media.id, 0, 0, frames)],
+            )
+        ],
+    )
+    for name, value in distance.items():
+        setattr(project.distance, name, value)
+    engine = Engine(BLOCK)
+    engine.install(build(project, {media.id: decoded}.get, None, bank))
+    engine.set_playing(True)
+    return listen(engine, frames // BLOCK - 1)
+
+
+def loudness(out: npt.NDArray[np.floating]) -> float:
+    return 10 * math.log10(
+        weighted_power(np.asarray(out[:, 0], np.float64))
+        + weighted_power(np.asarray(out[:, 1], np.float64))
+    )
+
+
+def at(degrees: float) -> Position:
+    """One metre out, `degrees` to the right of straight ahead."""
+    return Position(
+        math.sin(math.radians(degrees)), math.cos(math.radians(degrees)), 0.0
+    )
+
+
+def test_a_pair_at_the_listener_is_the_stem_as_mixed(bank: Bank) -> None:
+    """Each side to its own ear (D-134): the default, heard as it was mixed."""
+    decoded = stem(pink(1.0, 1), pink(1.0, 2))
+    out = heard_placed(bank, decoded, Placement(mode=Pairing.LINKED), Position())
+    np.testing.assert_allclose(out, decoded.audio[: len(out)], atol=1e-5)
+
+
+@pytest.mark.parametrize("apart", [0.0, 30.0, 90.0, 180.0])
+@pytest.mark.parametrize("kind", ["alike", "unrelated"])
+def test_a_pair_is_as_loud_as_its_stem_at_any_separation(
+    bank: Bank, apart: float, kind: str
+) -> None:
+    """Together a pair adds as one source and apart as two; its gain keeps it
+    as loud as the stem as mixed either way (D-133)."""
+    left = pink(2.0, 3)
+    decoded = stem(left, left if kind == "alike" else pink(2.0, 4))
+    placement = Placement(mode=Pairing.FREE, right=at(apart / 2))
+    out = heard_placed(bank, decoded, placement, at(-apart / 2))
+    frames = len(out)
+    as_mixed = loudness(decoded.audio[:frames])
+    assert loudness(out) - as_mixed == pytest.approx(0.0, abs=0.2)
+
+
+def test_with_level_as_mixed_off_each_side_is_at_half_power(bank: Bank) -> None:
+    """At the listener, with no distance law, only the pair's share is left."""
+    decoded = stem(pink(1.0, 5), pink(1.0, 6))
+    out = heard_placed(
+        bank,
+        decoded,
+        Placement(mode=Pairing.LINKED),
+        Position(),
+        keep_level=False,
+        rolloff=0.0,
+    )
+    np.testing.assert_allclose(out, decoded.audio[: len(out)] / math.sqrt(2), atol=1e-5)
+
+
+def test_a_mono_channel_as_two_sources_is_heard_from_both_points(bank: Bank) -> None:
+    mono = pink(1.0, 7)[:, None].copy()
+    mono.flags.writeable = False
+    decoded = Decoded(mono, 48_000)
+    both = Placement(mode=Pairing.FREE, right=at(90.0), mono=True)
+    at_listener = heard_placed(
+        bank, decoded, Placement(mode=Pairing.LINKED, mono=True), Position()
+    )
+    np.testing.assert_allclose(
+        at_listener[:, 0], mono[: len(at_listener), 0], atol=1e-5
+    )
+    np.testing.assert_allclose(
+        at_listener[:, 1], mono[: len(at_listener), 0], atol=1e-5
+    )
+    apart = heard_placed(bank, decoded, both, at(-90.0))
+    alone = heard_placed(bank, decoded, Placement(), at(-90.0))
+
+    def lean(out: Audio) -> float:
+        left, right = (
+            weighted_power(np.asarray(out[:, s], np.float64)) for s in (0, 1)
+        )
+        return abs(10 * math.log10(left / right))
+
+    assert lean(apart) < 0.5 < 2.0 < lean(alone), "from both sides, not one"
+
+
+def test_each_side_is_heard_from_where_it_is(bank: Bank) -> None:
+    """The stem's left alone, placed on the left and then on the right."""
+    decoded = stem(pink(1.0, 8), np.zeros(48_000, dtype=np.float32))
+
+    def ears(left: Position, right: Position) -> float:
+        out = heard_placed(
+            bank, decoded, Placement(mode=Pairing.FREE, right=right), left
+        )
+        powers = [weighted_power(np.asarray(out[:, s], np.float64)) for s in (0, 1)]
+        return 10 * math.log10(powers[1] / powers[0])
+
+    assert ears(at(-90.0), at(90.0)) < -1.0 < 1.0 < ears(at(90.0), at(-90.0))
+
+
+def test_a_pairs_meters_read_its_two_sides(bank: Bank) -> None:
+    frames = 4 * BLOCK
+    audio = np.column_stack(
+        [np.full(frames, 0.4, np.float32), np.full(frames, 0.1, np.float32)]
+    )
+    audio.flags.writeable = False
+    decoded = Decoded(audio, 48_000, fold(audio))
+    media = MediaFile("m-00000001", "/s.wav", "s.wav", 48_000, 2, frames)
+    project = Project(
+        media_pool=[media],
+        channels=[
+            Channel(
+                "c-00000001",
+                "C",
+                "#A855F7",
+                placement=Placement(mode=Pairing.LINKED),
+                clips=[Clip("k-00000001", media.id, 0, 0, frames)],
+            )
+        ],
+    )
+    engine = Engine(BLOCK)
+    engine.install(build(project, {media.id: decoded}.get, None, bank))
+    engine.set_playing(True)
+    engine.process(np.zeros((BLOCK, 2), dtype=np.float32))
+    [(_, left, right)] = engine.take_channel_peaks()
+    assert left == pytest.approx(0.4) and right == pytest.approx(0.1)

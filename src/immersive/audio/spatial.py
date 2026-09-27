@@ -21,7 +21,11 @@ array (D-106). Per block, for each spatial channel:
    Inside the minimum distance the filter fades towards flat and the ITD
    towards none, so at the listener's own position the channel is heard as
    it is (D-130);
-4. **the crossfade** (D-37): the source windowed twice - fading out against
+4. **a pair** (D-132): a channel placed as two sources is two slots, its
+   left side and its right, each placed as above. In the centre each fades
+   to its own ear (D-134), and the two share a gain that keeps the pair as
+   loud as its stem at any separation (D-133);
+5. **the crossfade** (D-37): the source windowed twice - fading out against
    last block's filter, in against this block's.
 
 Then every channel's two copies go through one batched `rfft`. The products
@@ -51,12 +55,21 @@ import numpy.typing as npt
 from immersive.audio.dsp import ramp_steps
 from immersive.audio.hrtf.bank import Bank
 from immersive.audio.hrtf.lookup import Lookup
+from immersive.core.io.loudness import pink_weights
 from immersive.core.model import Distance
 
 #: The direction given a source at the listener's own position. It is heard
 #: from nowhere there - the centre has faded it to flat (D-130) - but the
 #: lookup needs a direction to weigh.
 AHEAD: Final = (0.0, 1.0, 0.0)
+
+#: A pair's two sides at equal power, when the level is not kept (D-133).
+HALF_POWER: Final = 1.0 / math.sqrt(2.0)
+#: The most a pair's gain rises, for sides that would all but cancel.
+PAIR_CAP: Final = 2.0
+
+#: What a source is: a channel's one point, or a pair's left or right side.
+POINT: Final = -1
 
 Samples = npt.NDArray[np.float32]
 Spectra = npt.NDArray[np.complex64]
@@ -67,13 +80,20 @@ class Space:
     """One snapshot's spatial channels, and everything a block writes."""
 
     bank: Bank
-    #: Each source's channel, its index among the snapshot's lanes.
+    #: Each source's channel, its index among the snapshot's lanes, and which
+    #: of it it is: `POINT`, or a pair's side, 0 left and 1 right (D-132).
     channels: tuple[int, ...]
+    sides: tuple[int, ...]
+    #: Each pair's two slots, and how alike its stem's sides are, 1 the same
+    #: signal and 0 unrelated (D-133).
+    pairs: tuple[tuple[int, int], ...]
+    alike: npt.NDArray[np.float64]
     rolloff: float
     min_distance: float
     ref_distance: float
     block: int
-    #: `[S, block]` each channel's mono point, written by the engine.
+    #: `[S, block]` each source's signal - a channel's mono point, or a pair's
+    #: side - written by the engine.
     src: Samples
     #: `[2S, nfft]` fading-out copies, then fading-in; zero past `block`.
     windowed: Samples
@@ -97,8 +117,10 @@ class Space:
     vertices: npt.NDArray[np.int64]
     weights: npt.NDArray[np.float64]
     itds: npt.NDArray[np.float64]
-    #: Each channel's distance gain as the last block ended.
+    #: Each source's gain as the last block ended, and this block's target:
+    #: its distance, and a pair's share (D-133).
     distance: npt.NDArray[np.float64]
+    target: npt.NDArray[np.float64]
     #: Each channel's reach out of the centre this block: 0 at the listener,
     #: 1 at the minimum distance and beyond (D-130).
     reach: npt.NDArray[np.float64]
@@ -117,6 +139,10 @@ class Space:
     angle: Samples
     delay: Spectra
     gather: Spectra
+    #: The pink weights' square roots, normalised so one ear at unity is 1,
+    #: and the four filters a pair's loudness is read from, weighted (D-133).
+    root_weights: Spectra
+    weighed: Spectra
     #: Level as mixed (D-131): no boost nearer than the reference distance,
     #: and every direction as loud as the front.
     keep_level: bool = False
@@ -137,15 +163,29 @@ class Space:
         channels: tuple[int, ...],
         positions: npt.NDArray[np.float64],
         distance: Distance,
+        sides: tuple[int, ...] | None = None,
+        alike: npt.NDArray[np.float64] | None = None,
     ) -> Space:
-        """On the UI thread: every buffer, sized once."""
+        """On the UI thread: every buffer, sized once. `sides` says which of
+        its channel each source is, `POINT` by default; a pair's two sides
+        are next to each other, and `alike` has one number for each pair."""
         count = len(channels)
+        kinds = sides if sides is not None else (POINT,) * count
+        pairs = tuple((slot, slot + 1) for slot in range(count) if kinds[slot] == 0)
+        weights = pink_weights(bank.nfft)
         block, nfft = bank.block, bank.nfft
         bins = nfft // 2 + 1
         steps = ramp_steps(block)
         space = cls(
             bank=bank,
             channels=channels,
+            sides=kinds,
+            pairs=pairs,
+            alike=(
+                np.asarray(alike, dtype=np.float64)
+                if alike is not None
+                else np.ones(len(pairs))
+            ),
             rolloff=distance.rolloff,
             min_distance=distance.min_distance,
             ref_distance=distance.ref_distance,
@@ -168,6 +208,7 @@ class Space:
             weights=np.zeros((count, 3)),
             itds=np.zeros(count),
             distance=np.zeros(count),
+            target=np.zeros(count),
             reach=np.ones(count),
             loudness=np.zeros((count, 3)),
             evening=np.zeros((count, 3)),
@@ -181,10 +222,9 @@ class Space:
             angle=np.zeros(bins, dtype=np.float32),
             delay=np.zeros(bins, dtype=np.complex64),
             gather=np.zeros(bins, dtype=np.complex64),
+            root_weights=np.sqrt(weights / weights.sum()).astype(np.complex64),
+            weighed=np.zeros((4, bins), dtype=np.complex64),
         )
-        for slot, channel in enumerate(channels):
-            _, gain, _ = space._placed(positions, channel, 0)
-            space.distance[slot] = gain
         return space
 
     # ------------------------------------------------------------ a block
@@ -196,31 +236,19 @@ class Space:
         bus_l: Samples,
         bus_r: Samples,
     ) -> None:
-        """Every spatial channel's `src`, placed, summed into the bus."""
+        """Every source's `src`, placed, summed into the bus."""
         count = self.count
         src = self.src
+        sides = self.sides
         for slot in range(count):
-            channel = self.channels[slot]
-            (x, y, z), gain, reach = self._placed(positions, channel, 0)
+            (x, y, z), gain, reach = self._placed(
+                positions, self.channels[slot], max(sides[slot], 0)
+            )
             self.directions[slot, 0] = x
             self.directions[slot, 1] = y
             self.directions[slot, 2] = z
             self.reach[slot] = reach
-            row = src[slot]
-            level = float(self.distance[slot])
-            if level != gain:
-                np.multiply(self.steps, gain - level, out=self.ramp)
-                np.add(self.ramp, level, out=self.ramp)
-                np.multiply(row, self.ramp, out=row)
-                self.distance[slot] = gain
-            elif gain != 1.0:
-                np.multiply(row, gain, out=row)
-            # The meter: what the channel adds, before the HRTF (D-117).
-            np.abs(row, out=self.scratch)
-            loudest = float(self.scratch.max())
-            if loudest > peaks[channel, 0]:
-                peaks[channel, 0] = loudest
-                peaks[channel, 1] = loudest
+            self.target[slot] = gain
 
         bank = self.bank
         bank.lookup.weigh(self.directions, self.vertices, self.weights, count)
@@ -230,6 +258,32 @@ class Space:
             np.multiply(self.weights, self.evening, out=self.loudness)
         for slot in range(count):
             self._filter(slot)
+        if self.pairs:
+            self._pair_gains()
+
+        for slot in range(count):
+            channel = self.channels[slot]
+            row = src[slot]
+            gain = float(self.target[slot])
+            # The first block after a seek or a swap starts at its gain: it
+            # is fresh in its filters too.
+            level = gain if self.fresh else float(self.distance[slot])
+            if level != gain:
+                np.multiply(self.steps, gain - level, out=self.ramp)
+                np.add(self.ramp, level, out=self.ramp)
+                np.multiply(row, self.ramp, out=row)
+            elif gain != 1.0:
+                np.multiply(row, gain, out=row)
+            self.distance[slot] = gain
+            # The meter: what the channel adds, before the HRTF (D-117); a
+            # pair's left side is its left meter and its right its right.
+            np.abs(row, out=self.scratch)
+            loudest = float(self.scratch.max())
+            side = sides[slot]
+            for which in (0, 1) if side == POINT else (side,):
+                if loudest > peaks[channel, which]:
+                    peaks[channel, which] = loudest
+
         if self.fresh or not self.crossfade:
             np.copyto(self.previous_left, self.left)
             np.copyto(self.previous_right, self.right)
@@ -315,26 +369,59 @@ class Space:
                 np.multiply(out, reach, out=out)
         itd = float(self.itds[slot]) * reach
         # Positive: the left ear is the later, far one (phase 2).
-        far, near = (left, right) if itd > 0.0 else (right, left)
+        far = left if itd > 0.0 else right
         if itd != 0.0:
             self._delay(abs(itd))
             np.multiply(far, self.delay, out=far)
         if reach < 1.0:
             # The centre (D-130): the rest of the way to flat, a response of
-            # 1. Its share of the delay is to the nearest whole sample: a
-            # fractional delay of a response reaching up to Nyquist rings
-            # through the whole transform and wraps, where the measured
+            # 1 - to both ears for a point, and to its own ear for a pair's
+            # side (D-134). Its share of the delay is to the nearest whole
+            # sample: a fractional delay of a response reaching up to Nyquist
+            # rings through the whole transform and wraps, where the measured
             # responses, which fall away up there, stay compact. The two
             # shares differ by half a sample at most.
             flat = 1.0 - reach
-            np.add(near, flat, out=near)
+            own = self.sides[slot]
             whole = round(abs(itd))
-            if whole == 0:
-                np.add(far, flat, out=far)
+            for ear, row in ((0, left), (1, right)):
+                if own != POINT and own != ear:
+                    continue
+                if row is far and whole != 0:
+                    self._delay(whole)
+                    np.multiply(self.delay, flat, out=self.gather)
+                    np.add(row, self.gather, out=row)
+                else:
+                    np.add(row, flat, out=row)
+
+    def _pair_gains(self) -> None:
+        """Each pair's share of the gain, into its two sides' targets (D-133):
+        `1 / sqrt((Λaa + Λbb) / 2 + c · Λab)` from its two filters' loudness
+        and shared loudness, relative to one ear at unity, when the level is
+        kept, and equal power when it is not."""
+        weighed = self.weighed
+        root = self.root_weights
+        for index, (first, second) in enumerate(self.pairs):
+            if self.keep_level:
+                np.multiply(self.left[first], root, out=weighed[0])
+                np.multiply(self.right[first], root, out=weighed[1])
+                np.multiply(self.left[second], root, out=weighed[2])
+                np.multiply(self.right[second], root, out=weighed[3])
+                own = float(np.vdot(weighed[0], weighed[0]).real) + float(
+                    np.vdot(weighed[1], weighed[1]).real
+                )
+                other = float(np.vdot(weighed[2], weighed[2]).real) + float(
+                    np.vdot(weighed[3], weighed[3]).real
+                )
+                shared = float(np.vdot(weighed[0], weighed[2]).real) + float(
+                    np.vdot(weighed[1], weighed[3]).real
+                )
+                loud = (own + other) / 2 + float(self.alike[index]) * shared
+                gain = PAIR_CAP if loud <= 1.0 / PAIR_CAP**2 else 1.0 / math.sqrt(loud)
             else:
-                self._delay(whole)
-                np.multiply(self.delay, flat, out=self.gather)
-                np.add(far, self.gather, out=far)
+                gain = HALF_POWER
+            self.target[first] *= gain
+            self.target[second] *= gain
 
     def _delay(self, samples: float) -> None:
         """`self.delay`: a delay of `samples` as a phase ramp over the bins."""

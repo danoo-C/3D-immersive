@@ -435,11 +435,16 @@ class Engine:
             np.copyto(was, now)
             slot = slots[index]
             if space is not None and slot >= 0:
-                # A mono point (D-16): the space places it, meters it after
-                # its distance, and sums it into the bus after the HRTF.
-                row = space.src[slot]
-                np.add(lane_l, lane_r, out=row)
-                np.multiply(row, 0.5, out=row)
+                # The space places it, meters it after its distance, and sums
+                # it into the bus after the HRTF: a pair's two sides as they
+                # are (D-132), or one mono point (D-16).
+                if snapshot.paired[index]:
+                    np.copyto(space.src[slot], lane_l)
+                    np.copyto(space.src[slot + 1], lane_r)
+                else:
+                    row = space.src[slot]
+                    np.add(lane_l, lane_r, out=row)
+                    np.multiply(row, 0.5, out=row)
                 continue
             # What this channel adds to the bus, for its meter (D-117).
             self._raise(peaks, index, 0, lane_l)

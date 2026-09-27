@@ -41,7 +41,7 @@ from immersive.audio.dsp import (
     pan_law,
 )
 from immersive.audio.hrtf.bank import Bank
-from immersive.audio.spatial import Space
+from immersive.audio.spatial import POINT, Space
 from immersive.core.io.media import Decoded
 from immersive.core.model import (
     Channel,
@@ -111,8 +111,12 @@ class Snapshot:
     #: point twice when it is one (D-132); written by the engine from
     #: `POSITION` commands after handover (D-121).
     positions: npt.NDArray[np.float64] = field(repr=False)
-    #: Each channel's row in `space`, or -1 for a channel played flat.
+    #: Each channel's row in `space` - its left side's, when it is a pair -
+    #: or -1 for a channel played flat.
     slots: tuple[int, ...] = ()
+    #: Whether each channel is heard as two sources, a pair (D-132): its
+    #: right side is the row after its left.
+    paired: tuple[bool, ...] = ()
     #: The spatial channels' buffers and the bank, or None: no bank yet,
     #: or every channel bypassed.
     space: Space | None = field(default=None, repr=False)
@@ -203,6 +207,11 @@ def build(
         for index, channel in enumerate(project.channels)
         if bank is not None and not channel.hrtf_bypass
     )
+    # Heard as two sources (D-132): a pair is not folded, so no fold.
+    pairs = tuple(
+        index in spatial and paired(project, channel)
+        for index, channel in enumerate(project.channels)
+    )
     lanes = []
     for index, channel in enumerate(project.channels):
         placed = []
@@ -210,7 +219,7 @@ def build(
             decoded = audio(clip.media_id)
             head, tail = edges(clip, frames.get(clip.media_id, 0))
             gain = db_to_gain(clip.gain_db)
-            if decoded is not None and index in spatial:
+            if decoded is not None and index in spatial and not pairs[index]:
                 # Folded to a point, a stereo clip gets back what the
                 # folding loses (D-129); a mono one's fold is 1.
                 gain *= decoded.fold
@@ -241,7 +250,19 @@ def build(
         ],
         dtype=np.float64,
     ).reshape(len(lanes), 2, 3)
-    slot_of = {index: slot for slot, index in enumerate(spatial)}
+    sources: list[int] = []
+    sides: list[int] = []
+    alike: list[float] = []
+    slot_of: dict[int, int] = {}
+    for index in spatial:
+        slot_of[index] = len(sources)
+        if pairs[index]:
+            sources += [index, index]
+            sides += [0, 1]
+            alike.append(likeness(project.channels[index], audio))
+        else:
+            sources.append(index)
+            sides.append(POINT)
     return Snapshot(
         generation=previous.generation + 1 if previous is not None else 1,
         lanes=tuple(lanes),
@@ -250,8 +271,16 @@ def build(
         peaks=np.zeros((len(lanes), 2), dtype=np.float64),
         positions=positions,
         slots=tuple(slot_of.get(index, -1) for index in range(len(lanes))),
+        paired=pairs,
         space=(
-            Space.build(bank, spatial, positions, project.distance)
+            Space.build(
+                bank,
+                tuple(sources),
+                positions,
+                project.distance,
+                tuple(sides),
+                np.array(alike, dtype=np.float64),
+            )
             if bank is not None and spatial
             else None
         ),
@@ -259,6 +288,21 @@ def build(
         based_on=previous.generation if previous is not None else 0,
         master=np.array(master(project), dtype=np.float64),
     )
+
+
+def likeness(channel: Channel, audio: Callable[[str], Decoded | None]) -> float:
+    """How alike a pair's two sides are, 1 the same signal and 0 unrelated
+    (D-133): `2 / fold² - 1` for a stereo clip, 1 for a mono one heard from
+    both sides, weighted by how long each clip is."""
+    total = weight = 0.0
+    for clip in channel.clips:
+        decoded = audio(clip.media_id)
+        if decoded is None:
+            continue
+        alike = 1.0 if decoded.channels == 1 else 2.0 / decoded.fold**2 - 1.0
+        total += alike * clip.length
+        weight += clip.length
+    return total / weight if weight > 0 else 1.0
 
 
 def empty() -> Snapshot:
