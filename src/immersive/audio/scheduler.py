@@ -41,7 +41,8 @@ from immersive.audio.dsp import (
     pan_law,
 )
 from immersive.audio.hrtf.bank import Bank
-from immersive.audio.spatial import POINT, Space
+from immersive.audio.spatial import POINT, Space, Weighed
+from immersive.core.io.loudness import StemSpectra, measure
 from immersive.core.io.media import Decoded
 from immersive.core.model import (
     Channel,
@@ -252,14 +253,15 @@ def build(
     ).reshape(len(lanes), 2, 3)
     sources: list[int] = []
     sides: list[int] = []
-    alike: list[float] = []
+    spectra: list[Weighed] = []
+    bins = bank.nfft // 2 + 1 if bank is not None else 0
     slot_of: dict[int, int] = {}
     for index in spatial:
         slot_of[index] = len(sources)
         if pairs[index]:
             sources += [index, index]
             sides += [0, 1]
-            alike.append(likeness(project.channels[index], audio))
+            spectra.append(heard_as(project.channels[index], audio, bins))
         else:
             sources.append(index)
             sides.append(POINT)
@@ -279,7 +281,7 @@ def build(
                 positions,
                 project.distance,
                 tuple(sides),
-                np.array(alike, dtype=np.float64),
+                spectra,
             )
             if bank is not None and spatial
             else None
@@ -290,19 +292,35 @@ def build(
     )
 
 
-def likeness(channel: Channel, audio: Callable[[str], Decoded | None]) -> float:
-    """How alike a pair's two sides are, 1 the same signal and 0 unrelated
-    (D-133): `2 / fold² - 1` for a stereo clip, 1 for a mono one heard from
-    both sides, weighted by how long each clip is."""
-    total = weight = 0.0
+def heard_as(
+    channel: Channel, audio: Callable[[str], Decoded | None], bins: int
+) -> Weighed:
+    """A pair's left, right and shared spectra at the bank's `bins`, divided
+    by the stem as mixed (D-133): its clips' files' own, each weighted by
+    how much of its file the clip plays. A mono clip's three are its one."""
+    left = right = None
+    shared = None
     for clip in channel.clips:
         decoded = audio(clip.media_id)
-        if decoded is None:
+        if decoded is None or decoded.frames == 0:
             continue
-        alike = 1.0 if decoded.channels == 1 else 2.0 / decoded.fold**2 - 1.0
-        total += alike * clip.length
-        weight += clip.length
-    return total / weight if weight > 0 else 1.0
+        own = decoded.spectra if decoded.spectra is not None else measure(decoded.audio)
+        share = clip.length / decoded.frames
+        if left is None or right is None or shared is None:
+            left, right, shared = (
+                own.left * share,
+                own.right * share,
+                own.shared * share,
+            )
+        else:
+            left = left + own.left * share
+            right = right + own.right * share
+            shared = shared + own.shared * share
+    if left is None or right is None or shared is None:
+        return StemSpectra(np.ones(1), np.ones(1), np.zeros(1, dtype=np.complex128)).at(
+            bins
+        )
+    return StemSpectra(left, right, shared).at(bins)
 
 
 def empty() -> Snapshot:

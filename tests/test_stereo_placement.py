@@ -318,14 +318,15 @@ def test_a_pair_at_the_listener_is_the_stem_as_mixed(bank: Bank) -> None:
 
 
 @pytest.mark.parametrize("apart", [0.0, 30.0, 90.0, 180.0])
-@pytest.mark.parametrize("kind", ["alike", "unrelated"])
+@pytest.mark.parametrize("kind", ["alike", "unrelated", "lopsided"])
 def test_a_pair_is_as_loud_as_its_stem_at_any_separation(
     bank: Bank, apart: float, kind: str
 ) -> None:
     """Together a pair adds as one source and apart as two; its gain keeps it
     as loud as the stem as mixed either way (D-133)."""
     left = pink(2.0, 3)
-    decoded = stem(left, left if kind == "alike" else pink(2.0, 4))
+    right = {"alike": left, "unrelated": pink(2.0, 4), "lopsided": 0.3 * pink(2.0, 4)}
+    decoded = stem(left, right[kind].astype(np.float32))
     placement = Placement(mode=Pairing.FREE, right=at(apart / 2))
     out = heard_placed(bank, decoded, placement, at(-apart / 2))
     frames = len(out)

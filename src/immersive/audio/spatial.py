@@ -46,6 +46,7 @@ and so allocates, for strided or mixed operands.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -74,6 +75,12 @@ POINT: Final = -1
 Samples = npt.NDArray[np.float32]
 Spectra = npt.NDArray[np.complex64]
 
+#: A pair's left, right and shared spectra at the bank's bins, divided by
+#: the stem as mixed (D-133).
+Weighed = tuple[
+    npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.complex128]
+]
+
 
 @dataclass(eq=False)
 class Space:
@@ -84,10 +91,13 @@ class Space:
     #: of it it is: `POINT`, or a pair's side, 0 left and 1 right (D-132).
     channels: tuple[int, ...]
     sides: tuple[int, ...]
-    #: Each pair's two slots, and how alike its stem's sides are, 1 the same
-    #: signal and 0 unrelated (D-133).
+    #: Each pair's two slots, and its stem's own spectra to read its loudness
+    #: by (D-133): the left's and the right's square roots, and twice the
+    #: shared spectrum's conjugate, `[pairs, bins]`.
     pairs: tuple[tuple[int, int], ...]
-    alike: npt.NDArray[np.float64]
+    pair_left: Spectra
+    pair_right: Spectra
+    pair_shared: Spectra
     rolloff: float
     min_distance: float
     ref_distance: float
@@ -139,10 +149,10 @@ class Space:
     angle: Samples
     delay: Spectra
     gather: Spectra
-    #: The pink weights' square roots, normalised so one ear at unity is 1,
-    #: and the four filters a pair's loudness is read from, weighted (D-133).
-    root_weights: Spectra
+    #: The four filters a pair's loudness is read from, weighted, and the
+    #: two ears' cross terms between its sides (D-133).
     weighed: Spectra
+    cross: Spectra
     #: Level as mixed (D-131): no boost nearer than the reference distance,
     #: and every direction as loud as the front.
     keep_level: bool = False
@@ -164,15 +174,21 @@ class Space:
         positions: npt.NDArray[np.float64],
         distance: Distance,
         sides: tuple[int, ...] | None = None,
-        alike: npt.NDArray[np.float64] | None = None,
+        spectra: Sequence[Weighed] | None = None,
     ) -> Space:
         """On the UI thread: every buffer, sized once. `sides` says which of
         its channel each source is, `POINT` by default; a pair's two sides
-        are next to each other, and `alike` has one number for each pair."""
+        are next to each other, and `spectra` has each pair's stem's own,
+        unrelated pink noise when it is not given."""
         count = len(channels)
         kinds = sides if sides is not None else (POINT,) * count
         pairs = tuple((slot, slot + 1) for slot in range(count) if kinds[slot] == 0)
-        weights = pink_weights(bank.nfft)
+        bins = bank.nfft // 2 + 1
+        if spectra is None:
+            pink = pink_weights(bank.nfft)
+            half = pink / (2.0 * pink.sum())
+            spectra = [(half, half, np.zeros(bins, dtype=np.complex128))] * len(pairs)
+        heard = list(spectra)
         block, nfft = bank.block, bank.nfft
         bins = nfft // 2 + 1
         steps = ramp_steps(block)
@@ -181,11 +197,15 @@ class Space:
             channels=channels,
             sides=kinds,
             pairs=pairs,
-            alike=(
-                np.asarray(alike, dtype=np.float64)
-                if alike is not None
-                else np.ones(len(pairs))
-            ),
+            pair_left=np.array(
+                [np.sqrt(left) for left, _, _ in heard], dtype=np.complex64
+            ).reshape(len(pairs), bins),
+            pair_right=np.array(
+                [np.sqrt(right) for _, right, _ in heard], dtype=np.complex64
+            ).reshape(len(pairs), bins),
+            pair_shared=np.array(
+                [2.0 * np.conj(shared) for _, _, shared in heard], dtype=np.complex64
+            ).reshape(len(pairs), bins),
             rolloff=distance.rolloff,
             min_distance=distance.min_distance,
             ref_distance=distance.ref_distance,
@@ -222,8 +242,8 @@ class Space:
             angle=np.zeros(bins, dtype=np.float32),
             delay=np.zeros(bins, dtype=np.complex64),
             gather=np.zeros(bins, dtype=np.complex64),
-            root_weights=np.sqrt(weights / weights.sum()).astype(np.complex64),
             weighed=np.zeros((4, bins), dtype=np.complex64),
+            cross=np.zeros((2, bins), dtype=np.complex64),
         )
         return space
 
@@ -396,27 +416,29 @@ class Space:
 
     def _pair_gains(self) -> None:
         """Each pair's share of the gain, into its two sides' targets (D-133):
-        `1 / sqrt((Λaa + Λbb) / 2 + c · Λab)` from its two filters' loudness
-        and shared loudness, relative to one ear at unity, when the level is
-        kept, and equal power when it is not."""
-        weighed = self.weighed
-        root = self.root_weights
+        `1 / sqrt(loudness)`, the pair's loudness read with its stem's own
+        spectra and relative to the stem as mixed, when the level is kept,
+        and equal power when it is not."""
+        weighed, cross = self.weighed, self.cross
         for index, (first, second) in enumerate(self.pairs):
             if self.keep_level:
-                np.multiply(self.left[first], root, out=weighed[0])
-                np.multiply(self.right[first], root, out=weighed[1])
-                np.multiply(self.left[second], root, out=weighed[2])
-                np.multiply(self.right[second], root, out=weighed[3])
-                own = float(np.vdot(weighed[0], weighed[0]).real) + float(
-                    np.vdot(weighed[1], weighed[1]).real
+                own, other = self.pair_left[index], self.pair_right[index]
+                np.multiply(self.left[first], own, out=weighed[0])
+                np.multiply(self.right[first], own, out=weighed[1])
+                np.multiply(self.left[second], other, out=weighed[2])
+                np.multiply(self.right[second], other, out=weighed[3])
+                np.conjugate(self.left[second], out=cross[0])
+                np.multiply(self.left[first], cross[0], out=cross[0])
+                np.conjugate(self.right[second], out=cross[1])
+                np.multiply(self.right[first], cross[1], out=cross[1])
+                np.add(cross[0], cross[1], out=cross[0])
+                loud = (
+                    float(np.vdot(weighed[0], weighed[0]).real)
+                    + float(np.vdot(weighed[1], weighed[1]).real)
+                    + float(np.vdot(weighed[2], weighed[2]).real)
+                    + float(np.vdot(weighed[3], weighed[3]).real)
+                    + float(np.vdot(self.pair_shared[index], cross[0]).real)
                 )
-                other = float(np.vdot(weighed[2], weighed[2]).real) + float(
-                    np.vdot(weighed[3], weighed[3]).real
-                )
-                shared = float(np.vdot(weighed[0], weighed[2]).real) + float(
-                    np.vdot(weighed[1], weighed[3]).real
-                )
-                loud = (own + other) / 2 + float(self.alike[index]) * shared
                 gain = PAIR_CAP if loud <= 1.0 / PAIR_CAP**2 else 1.0 / math.sqrt(loud)
             else:
                 gain = HALF_POWER

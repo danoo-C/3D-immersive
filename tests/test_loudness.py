@@ -4,6 +4,7 @@ folded to a point (D-129). Headless."""
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -17,6 +18,7 @@ from immersive.core.io.loudness import (
     SHELF_A,
     SHELF_B,
     fold,
+    measure,
     pink_power,
     pink_weights,
     weighted_power,
@@ -110,3 +112,46 @@ def test_a_mono_file_or_a_silent_one_loses_nothing() -> None:
     assert fold(mono) == 1.0
     assert fold(np.zeros((48_000, 2), dtype=np.float32)) == 1.0
     assert fold(np.zeros((0, 2), dtype=np.float32)) == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# a stem's own spectra (D-133)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_mono_files_three_spectra_are_its_one() -> None:
+    mono = np.random.default_rng(8).standard_normal((20_000, 1)).astype(np.float32)
+    measured = measure(mono)
+    np.testing.assert_allclose(measured.left, measured.right)
+    np.testing.assert_allclose(measured.shared.real, measured.left, rtol=1e-6)
+    assert np.abs(measured.shared.imag).max() < 1e-6 * measured.left.max()
+
+
+def test_brought_to_a_banks_bins_a_stems_sides_sum_to_one() -> None:
+    """So a side heard as it is, in its own ear, is 1."""
+    rng = np.random.default_rng(9)
+    audio = stereo(rng.standard_normal(40_000), 0.5 * rng.standard_normal(40_000))
+    for bins in (257, 513, 2049):
+        left, right, _ = measure(audio).at(bins)
+        assert left.shape == (bins,)
+        assert left.sum() + right.sum() == pytest.approx(1.0)
+        assert left.sum() == pytest.approx(0.8, abs=0.02), "four times the power"
+
+
+def test_decoding_keeps_the_spectra_and_the_fold_comes_from_them(
+    tmp_path: Path,
+) -> None:
+    import soundfile
+
+    from immersive.core.io.media import Decoded, decode
+
+    rng = np.random.default_rng(10)
+    audio = stereo(rng.standard_normal(30_000), rng.standard_normal(30_000))
+    soundfile.write(tmp_path / "s.wav", audio, 48_000, subtype="FLOAT")
+    decoded = decode(tmp_path / "s.wav")
+    assert isinstance(decoded, Decoded) and decoded.spectra is not None
+    assert (
+        decoded.fold
+        == pytest.approx(decoded.spectra.fold)
+        == pytest.approx(fold(audio))
+    )

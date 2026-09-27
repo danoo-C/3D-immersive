@@ -19,6 +19,7 @@ change what the two share.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Final
 
 import numpy as np
@@ -79,47 +80,106 @@ def weighted_power(samples: npt.NDArray[np.floating]) -> float:
     return _powers(samples[:, None])[0]
 
 
-def fold(audio: npt.NDArray[np.floating]) -> float:
-    """What a stereo file loses folded to the average of its sides, as the
-    factor that gives it back (D-129): `sqrt(((P_L + P_R) / 2) / P_M)`, at
-    most `FOLD_CAP`. A mono or silent file loses nothing: 1.
+@dataclass(frozen=True, eq=False)
+class StemSpectra:
+    """A sample's K-weighted power spectra, averaged over its 4096-frame
+    segments (D-133): its left side's, its right's, and the cross-spectrum
+    between them, `E[L · conj(R)]`. A mono sample's three are its one
+    spectrum. At `SEGMENT`'s bins, from 0 Hz to Nyquist, in Parseval's scale,
+    which every use divides out."""
 
-    Read from the spectra of 4096-frame segments rather than by filtering:
-    for a weighting as smooth as K's that is the filtered answer, within
-    0.002 dB on the stems measured, and ten times quicker - 0.2 s against
-    2.2 s for three minutes of stereo, which every import pays."""
-    if audio.ndim != 2 or audio.shape[1] != 2:
-        return 1.0
-    left, right, middle = _spectral_powers(audio)
-    sides = (left + right) / 2
-    if sides == 0.0:
-        return 1.0
-    if middle <= sides / FOLD_CAP**2:
-        return FOLD_CAP
-    return math.sqrt(sides / middle)
+    left: npt.NDArray[np.float64]
+    right: npt.NDArray[np.float64]
+    shared: npt.NDArray[np.complex128]
+
+    def at(
+        self, bins: int
+    ) -> tuple[
+        npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.complex128]
+    ]:
+        """The three at `bins` rfft bins across the same 0 Hz to Nyquist,
+        each the average of the finer bins its band covers, divided by the
+        stem as mixed - its two sides' power summed - so a side heard at
+        unity in its own ear is 1."""
+        fine = SEGMENT // 2 + 1
+        centres = np.arange(bins) * ((fine - 1) / max(bins - 1, 1))
+        edges = np.clip(
+            np.ceil(centres - (fine - 1) / max(bins - 1, 1) / 2), 0, fine - 1
+        )
+        starts = edges.astype(np.int64)
+        starts[0] = 0
+        counts = np.diff(np.append(starts, fine))
+        counts = np.maximum(counts, 1)
+
+        def banded(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return np.asarray(
+                np.add.reduceat(values, starts) / counts, dtype=np.float64
+            )
+
+        left = banded(self.left)
+        right = banded(self.right)
+        shared = np.empty(bins, dtype=np.complex128)
+        shared.real = banded(self.shared.real)
+        shared.imag = banded(self.shared.imag)
+        total = float(left.sum() + right.sum())
+        if total <= 0.0:
+            half = np.full(bins, 0.5 / bins)
+            return half, half.copy(), np.zeros(bins, dtype=np.complex128)
+        return left / total, right / total, shared / total
+
+    @property
+    def fold(self) -> float:
+        """What folding to the sides' average loses, as the factor that
+        gives it back (D-129), at most `FOLD_CAP`."""
+        left, right = float(self.left.sum()), float(self.right.sum())
+        middle = (left + right + 2.0 * float(self.shared.real.sum())) / 4.0
+        sides = (left + right) / 2.0
+        if sides == 0.0:
+            return 1.0
+        if middle <= sides / FOLD_CAP**2:
+            return FOLD_CAP
+        return math.sqrt(sides / middle)
 
 
-def _spectral_powers(audio: npt.NDArray[np.floating]) -> tuple[float, float, float]:
-    """The K-weighted power of a stereo file's left, its right, and their
-    average, summed over its segments' spectra. Their scale is Parseval's,
-    which the fold's ratio does not need."""
+def measure(audio: npt.NDArray[np.floating]) -> StemSpectra:
+    """A sample's `StemSpectra`, read from the spectra of 4096-frame
+    segments rather than by filtering: for a weighting as smooth as K's
+    that is the filtered answer, within 0.002 dB on the stems measured, and
+    ten times quicker - 0.2 s against 2.2 s for three minutes of stereo,
+    which every import pays."""
     weights = weighting(
         np.arange(SEGMENT // 2 + 1, dtype=np.float64) * (SAMPLE_RATE / SEGMENT)
     )
-    left_total = right_total = middle_total = 0.0
+    bins = SEGMENT // 2 + 1
+    left_total = np.zeros(bins)
+    right_total = np.zeros(bins)
+    shared_total = np.zeros(bins, dtype=np.complex128)
+    stereo = audio.ndim == 2 and audio.shape[1] == 2
     for start in range(0, audio.shape[0], SEGMENT * SEGMENTS_AT_ONCE):
         part = np.asarray(
             audio[start : start + SEGMENT * SEGMENTS_AT_ONCE], dtype=np.float32
-        )
+        ).reshape(-1, audio.shape[1] if audio.ndim == 2 else 1)
         short = -part.shape[0] % SEGMENT
         if short:
             part = np.pad(part, ((0, short), (0, 0)))
-        spectra = np.fft.rfft(part.reshape(-1, SEGMENT, 2), axis=1)
-        left, right = spectra[..., 0], spectra[..., 1]
-        left_total += float((np.abs(left) ** 2).sum(axis=0) @ weights)
-        right_total += float((np.abs(right) ** 2).sum(axis=0) @ weights)
-        middle_total += float((np.abs(left + right) ** 2).sum(axis=0) @ weights) / 4
-    return left_total, right_total, middle_total
+        spectra = np.fft.rfft(part.reshape(-1, SEGMENT, part.shape[1]), axis=1)
+        left = spectra[..., 0]
+        right = spectra[..., 1] if stereo else left
+        left_total += (np.abs(left) ** 2).sum(axis=0)
+        right_total += (np.abs(right) ** 2).sum(axis=0)
+        shared_total += (left * np.conj(right)).sum(axis=0)
+    return StemSpectra(
+        left_total * weights, right_total * weights, shared_total * weights
+    )
+
+
+def fold(audio: npt.NDArray[np.floating]) -> float:
+    """What a stereo file loses folded to the average of its sides, as the
+    factor that gives it back (D-129): `sqrt(((P_L + P_R) / 2) / P_M)`, at
+    most `FOLD_CAP`. A mono or silent file loses nothing: 1."""
+    if audio.ndim != 2 or audio.shape[1] != 2:
+        return 1.0
+    return measure(audio).fold
 
 
 def _powers(audio: npt.NDArray[np.floating]) -> list[float]:
