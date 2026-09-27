@@ -7,6 +7,9 @@
 The fields are very sensitive: a small change in the numbers makes a huge
 difference in the sound.
 
+**Related:** [why a placed channel at (0, 0, 0) distorts](too-loud-at-the-listener.md),
+the same position's level rather than its direction.
+
 ## The short answer
 
 Nothing is broken. The channel is sitting **inside your head**.
