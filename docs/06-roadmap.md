@@ -279,12 +279,28 @@ arrives with the playhead, at M3.
 ---
 
 ## M2 — Media
+
+Phases: [`docs/m2_media/`](m2_media/README.md)
+
+- The project in the window: File › New, Open, Save, Save As and Edit › Undo,
+  Redo wired to M1's model, file and stack, with missing media reported on
+  open. *Added before the milestone started* — M1 was headless by design and
+  no milestone had been given the wiring, which importing cannot do without
 - Decode via `soundfile`, resample to 48 kHz via `soxr`, hold in RAM
 - Content hashing, relink handling
 - Peak pyramid generation + on-disk cache
 - Media pool tree in the explorer, with filter and drag source
 - Waveform widget, reused later by clips and the parameters pane
 - Audition playback: the first use of `sounddevice`, deliberately trivial
+- `--device` and `--block` command-line flags, and the 48 kHz stream rule
+  (F-55, D-63). *Moved here from M3 before the milestone started*: D-63 and
+  [05](05-audio-engine.md) already said "from M2", because audition is the
+  first sound
+- Import and load progress, and cancelling an import (F-59), in an info
+  box at the right of the transport toolbar that any later work - render,
+  the HRTF cache - uses too (D-116). *Added after the milestone's phases
+  were built*, once a real project's 22 stems had imported with nothing on
+  screen until the end
 
 **Done when:** you can import a folder, see waveforms, and double-click to hear
 a sample.
@@ -292,8 +308,13 @@ a sample.
 ---
 
 ## M3 — Timeline
+
+Phases: [`docs/m3_timeline/`](m3_timeline/README.md)
+
 - Channels: create, rename, reorder, recolour, gain/mute/solo, bypass flag
-- `QGraphicsView` timeline with ruler, grid, playhead, loop region
+- `QGraphicsView` timeline with ruler, grid, playhead, loop region, over the
+  one shared `TimeAxis` the risk register below names — built here, where
+  its first observer is, so that M6's curve editor observes the same one
 - Drop from pool → clip; move, trim, split, duplicate, delete
 - Snap with global setting, per-channel override, and `Alt` bypass
 - Selection: multi-select across channels, rubber band, and the one-kind rule
@@ -304,9 +325,20 @@ a sample.
 - The master meter and its clip indicator (F-54) — the first milestone that
   produces a level at all, and the last comfortable one to add it before M4
   starts summing 32 sources
-- `--device` and `--block` command-line flags, and the 48 kHz stream rule
-  (F-55, D-63). Preferences promotes them at M8; the gap between the first
-  sound and M8 is otherwise five milestones with no way to pick a device
+- ~~`--device` and `--block` command-line flags, and the 48 kHz stream rule~~
+  — moved to M2, where the first sound is (D-63). Preferences still promotes
+  them at M8
+- Per-clip gain and fades (F-15), edited in the parameters pane and by a
+  handle on the clip. *Added before the milestone started*: no milestone had
+  them, and the scheduler that applies them is this one's
+- The parameters pane, for the selections this milestone introduces —
+  channel, clip, media file, and the project when nothing is selected.
+  *Added before the milestone started*: clip gain and fade shape have no
+  other editor, and M5 adds fields to a pane no milestone built
+- Implicit 32-sample edge fades in the scheduler (D-42), and the
+  zero-allocation test on `process()`. *Moved here from M4 before the
+  milestone started*: split and trim make the edges the fade exists for, and
+  the flat engine is the first code on the audio thread
 
 **Done when:** you can build an arrangement and hear it play back flat. This
 validates the whole realtime plumbing — command ring, snapshot swap, xrun
@@ -315,8 +347,12 @@ counting — *before* any HRTF complexity is layered on top.
 ---
 
 ## M4 — Binaural engine 🔴 *the risk milestone*
+
+Phases: [`docs/m4_binaural_engine/`](m4_binaural_engine/README.md)
+
 - Pick and bundle the default full-sphere SOFA dataset (listening test; see
-  QA-24 in [07-qa-archive.md](07-qa-archive.md))
+  QA-30 in [07-qa-archive.md](07-qa-archive.md) - this read QA-24, the fixed
+  listener, until M4 started)
 - SOFA loading, resampling, normalisation
 - ITD extraction + minimum-phase decomposition
 - Spherical triangulation + barycentric interpolation + KD-tree lookup
@@ -336,9 +372,15 @@ counting — *before* any HRTF complexity is layered on top.
 - The master bus: gain, and the fixed-design limiter with its lookahead
   compensated internally (D-54) — the compensation is what keeps M7's
   stems-sum test honest, since stems skip the limiter (D-41)
-- Implicit 32-sample edge fades in the scheduler (D-42)
-- The zero-allocation test on `process()`
+- ~~Implicit 32-sample edge fades in the scheduler (D-42)~~ — moved to M3,
+  where split and trim make the edges it exists for
+- The zero-allocation test on `process()`, held over the spatial path — it
+  starts at M3, on the flat one
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
+- The channel's position X/Y/Z fields in the parameters pane, live. *Moved
+  here from M5 before the milestone started*: the acceptance below is
+  positions set numerically, and without the fields that means editing a
+  `.3dim` by hand
 
 **Done when:** positions set numerically in a test project are audibly, correctly
 placed — and the benchmark passes. If it does not pass here, we find out now,
@@ -354,7 +396,8 @@ with the port seam still tiny, rather than after the UI is built on top.
 - Read-only isometric 3D view via `QPainter`, in the workspace's second tab
 - Distance-as-radius, gain-as-opacity, mute/solo states
 - The bypass strip under the top view, and bypassed channels leaving the canvases
-- Position spinboxes in the parameters pane, two-way bound
+- ~~Position spinboxes in the parameters pane~~ - moved to M4, which sets
+  positions numerically; binding them two-way to a drag stays here
 
 **Done when:** you can drag a sound around the head while it plays and hear it
 move.
@@ -376,7 +419,8 @@ trail, the curve and the sound agree.
 ---
 
 ## M7 — Render
-- Offline render reusing `Engine.process`, no device
+- Offline render reusing `Engine.process`, no device, dropping the engine's
+  stated latency at the start and rendering as far past the end (D-124)
 - Render dialog: range, block size, stems toggle, output path. The range is
   the whole project (derived, D-53), the loop region, or typed (F-53)
 - Seeded TPDF dither on the 24-bit conversion (D-56) — unseeded would make
@@ -395,19 +439,36 @@ trail, the curve and the sound agree.
 ---
 
 ## M8 — Polish & ship
+
+Beta is a line drawn through this milestone rather than a milestone of its own
+(D-84). The first list is what beta needs; the second follows it.
+
+**Before beta**
+
+- `PyInstaller` bundles for Windows and Linux
+- README with install instructions for those two platforms
+- Autosave and crash recovery: the sidecar file, and the offer on next launch
+  (F-49, D-64)
+- Missing-media relink dialog, hung off the notice built at M9 — the first of
+  the actions that hang off individual notices
+
+**After beta**
+
 - Preferences: audio device, block size, HRTF set, and the theme picker
   promoted out of the `View` menu (the theme *system* is M9). The device and
   block flags from M3 become fields here (F-55)
 - Session persistence: window geometry, splitters, recent projects
-- Autosave and crash recovery: the sidecar file, and the offer on next launch
-  (F-49, D-64)
-- Missing-media relink dialog, hung off the notice built at M9
 - Error surfaces **promoted, not invented**: the notice centre is M9 (D-65);
-  M8 adds the actions that hang off individual notices and the first-run
-  polish around them
+  M8 adds the remaining actions that hang off individual notices and the
+  first-run polish around them
 - Empty states and a first-run sample project
-- `PyInstaller` bundles for Windows, macOS and Linux
-- README with install instructions per platform
+- The macOS bundle, with signing and notarisation
+- README install instructions for macOS
+
+**Beta when:** somebody who is not you installs it on Windows or Linux from a
+bundle, takes a folder of their own samples to a rendered binaural WAV —
+import, arrange, place, animate, render — without being helped, and a crash
+along the way costs them no more than the last autosave interval.
 
 **Done when:** someone who is not you can install it and make a mix.
 

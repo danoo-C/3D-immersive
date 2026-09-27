@@ -56,7 +56,12 @@ src/immersive/
     time.py              samples ↔ seconds ↔ bars:beats, snapping
     commands.py          Command base + undo/redo stack
     edits.py             concrete commands (MoveClip, AddKeyframe, …)
-    selection.py         what is currently selected, observed by ui
+    document.py          the open project: model, stack, file (D-85, M2)
+    relink.py            pointing a missing sample at a file (D-90, M2)
+    media_store.py       preparing a file, the session's decoded audio (D-93, M2)
+    selection.py         what is currently selected, owned by the document,
+                         observed by ui (D-96, M3)
+    clipboard.py         what Copy and Cut took, owned by the document (D-99, M3)
     signals.py           tiny observer so core can notify without Qt
     io/
       project_io.py      .3dim (de)serialisation + schema migration
@@ -65,28 +70,50 @@ src/immersive/
 
   audio/
     engine.py            the realtime graph. THE SEAM.
+    feed.py              the UI thread's side: snapshots and commands (D-105, M3)
+    player.py            the one stream, and audition through it (D-107, M3)
     device.py            sounddevice stream lifecycle, device enumeration
     scheduler.py         timeline → which clips are active this block
-    dsp.py               gain, fades, resampling, limiter
+    spatial.py           each non-bypassed channel heard from where it is
+                         (D-121, D-122, M4)
+    dsp.py               gain, pan, fades, resampling
+    limiter.py           the master limiter, and the latency it costs
+                         (D-123, D-124, M4)
     render.py            offline render (reuses engine.process)
     hrtf/
-      sofa.py            load SOFA → HRIR set, resample, normalise
-      prepare.py         ITD extraction + minimum-phase decomposition
-      interp.py          spherical triangulation + barycentric lookup
-      bank.py            the ready-to-use frequency-domain HRTF bank
+      sofa.py            load SOFA → HRIR set, resample, normalise (M4)
+      decompose.py       ITD extraction + minimum-phase decomposition (M4)
+      lookup.py          triangulation, and locating a direction without
+                         allocating (D-119, M4)
+      bank.py            the frequency-domain bank, and the cache of what is
+                         slow to make (D-120, M4)
 
   ui/
     main_window.py       menus, toolbar, splitter layout
     theme.py             palette + qss
     theme_io.py          .3dimtheme parse, merge, report (D-77, M9)
     theme_menu.py        theme directory, View > Theme, persistence (M9)
+    time_axis.py         scroll and zoom, shared by the timeline and the curve
+                         editor, owned by neither - no Qt (D-94, M3)
     notices.py           the notice model - no Qt, so theme_io may use it (D-81)
-    explorer/            media pool tree (top) + params pane (bottom)
+    hrtf.py              preparing the HRTF set's bank on a worker (D-120, M4)
+    importer.py          preparing samples on workers, how far, and cancel
+                         (N-3, F-59, M2)
+    activity.py          anything slow, begun, updated, finished - no Qt,
+                         the info box's model (D-116, M2)
+    metering.py          how a meter moves - no Qt (D-118, M3)
+    explorer/            media pool tree (top)
+    parameters/          the params pane (bottom): a view per kind of
+                         selection, and the project's with none (M3)
     timeline/            ruler, channel headers, clip lanes, playhead
     spatial/             ortho_view.py (top & front), view3d.py (read-only)
     keyframes/           curve editor panel
     widgets/             shared small widgets
+      info_box.py        the toolbar's info box: what is under way (D-116, M2)
+      meter.py           a peak meter: the master's and each channel's (F-54, F-60, M3)
       notices.py         the status-bar line, count and list (F-56, M9)
+      numeric.py         a number dragged or typed, in any unit (M3)
+      check.py           the painted check box (M3)
       meter.py           the master output meter (F-54, M3)
   assets/
     app.qss              the stylesheet, substituted from a theme (M9)
@@ -283,6 +310,15 @@ setuptools would also work; there is no reason to prefer it here. → D-31
 | **Audio** (PortAudio callback) | Engine state, preallocated buffers | Allocate, lock, log, or touch the model |
 | **Workers** (`QThreadPool`) | Decode, resample, peak generation, offline render | Touch widgets directly |
 
+A worker says how far it has got through a `core.progress.Progress`: a
+fraction it writes and a cancel flag it reads between chunks, each one
+attribute assigned whole, which the GIL makes safe to share without a
+lock. The UI thread reads the fractions when it chooses - the importer
+fifteen times a second - and turns them into an *activity* for the info
+box (D-116). An activity is begun, updated and finished on the UI thread
+only, like everything else a widget shows. The importer has a pool of its
+own, so cancelling it clears only its own queue.
+
 ### Crossing from UI to audio
 
 The audio thread never reads the `Project` model. Instead:
@@ -293,6 +329,20 @@ The audio thread never reads the `Project` model. Instead:
 - **Structural changes** (add clip, load media) build a new immutable
   *engine snapshot* on the UI thread and hand it over with one atomic pointer
   swap. The old snapshot is freed on the UI thread, never in the callback.
+
+Which is which is D-105's. Clips, samples, clip gain, fades and the channels'
+order are the snapshot's; a channel's gain, mute and solo, folded into one
+linear gain on the UI thread, and a seek are the ring's. A gain command names
+the generation of the snapshot it was worked out against, and one naming
+another is dropped: after a reorder its channel's index means someone else.
+A channel's position is the ring's kind of change too, a `POSITION` command
+tagged with the generation in the same way (D-121), and so are a bypassed
+channel's pan, folded into its gain as four factors (D-125), and the master's
+gain and limiter switch, a `MASTER` command (D-126). Whether a channel is
+bypassed, the distance settings and the HRTF bank are the snapshot's. The feed (`audio/feed.py`) decides which to send after every change the
+document reports, and holds every snapshot it has handed over until the engine
+has moved past it - the engine never holds the only reference, so it is the
+feed, on the UI thread, that frees one.
 
 ### Keeping the callback honest
 

@@ -126,7 +126,7 @@ icon in the application without shipping a second copy of any of them.
 | Ink | `currentColor`, substituted at load |
 | Normal state | `text.primary` |
 | Disabled state | `text.disabled`, supplied explicitly |
-| Shipped today | `transport_start` `play` `pause` `stop` `loop` `undo` `redo` `arm` `app` |
+| Shipped today | `transport_start` `play` `pause` `stop` `loop` `repeat` `undo` `redo` `arm` `app` |
 
 Two of those are not toolbar glyphs. `arm` is the dot this document draws as
 `● ARM`, an icon rather than a character so that the Craft rule against ASCII
@@ -374,13 +374,86 @@ who owns what. M9 is built *third*, before all of them:
 |---|---|
 | window, panel, menu, toolbar, button, **tab**, splitter, scrollbar, status bar, tooltip, **focus** | M9 — the widgets that exist when the system is built. Tab and focus were missing from this row until M9 phase 1 went looking: the tab bar exists because of D-49 and the focus ring is required by *Accessibility and feel*, and the stylesheet has styled both since M0 |
 | notice line, notice count, notice list | M9 — it builds them (D-65) |
-| tree view, header, filter field, waveform thumbnail | M2 |
-| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 |
+| tree view, header, filter field, waveform thumbnail | M2 — built as `tree`, `header`, `filter` and the painted `waveform`. The filter is styled by its object name |
+| ruler, grid, playhead, loop region, clip body, clip selected border, fade handle, channel header, meter | M3 — the ruler, grid and playhead built at phase 1 as the painted `ruler` and `timeline` groups, the second named and shaped by the worked example under *The file*; the channel header at phase 2 as `channel`, styled by object name, with the line between lanes as `timeline.separator`; the clip body at phase 3 as the painted `clip` group, the first with keys painted per channel; the clip's selected border and the rubber
+band at phase 4 as `clip.selected.border` and `timeline.band`, and a
+selected header as `channel.selected.background` and
+`channel.selected.marker`; the meters, the master's and each channel's,
+at phase 10 as the painted `meter` group |
 | head glyph, distance ring, source icon, motion trail, bypass chip | M5 |
 | curve, keyframe diamond, bezier handle, value axis | M6 |
-| dialog, progress bar, input field, spin box, check box, slider, combo box | M8 — the first milestone with dialogs and a preferences form |
+| input field | M3 — built at phase 2 as `input`, for the numeric field a channel's gain is the first to use. It was listed under M8 for whichever milestone drew one first, and that turned out to be this one. Phase 7 gave it `disabled.text`, for the pane's fields a later milestone brings |
+| check box, combo box, parameters pane | M3 — built at phase 7, the first to draw either input: the combo box as `combo`, and the check box as the painted `check` group, since a sheet that styles a check box's indicator loses its tick. The pane's heading and labels are `pane` |
+| dialog, spin box, slider | M8 — the first milestone with dialogs and a preferences form. Phase 7 drew no spin box: the style's arrows came out black on the dark panel and the sheet's border triangles render as bars, so a count is a numeric field like every other number |
+| info box, progress bar | M2 — built at phase 8 as `info`: the box at the right end of the transport toolbar that shows any activity (D-116), its label, its *+n more*, and its thin bar, whose chunk is `info.bar` on `info.track`. Listed under M8 until the import asked for a bar first |
 
-The QSS today styles none of the input widgets in that last row, which is
+**Painted groups.** Some widgets draw with a painter rather than a
+stylesheet — the waveform is the first, and clips, the spatial views and the
+curves will follow. Their groups are named in `theme.PAINTED` (D-92), read by
+`group_color()` when the widget paints, and held by a test to having every
+key read by something, just as the stylesheet's groups are held to its
+placeholders. The waveform's, built at M2:
+
+| `waveform` key | Default | For |
+|---|---|---|
+| `background` | `surface.panel` | behind the lanes |
+| `centre` | `border` | the zero line — what silence looks like |
+| `fill` | `text.secondary` | the envelope, one lane per channel |
+| `missing` | `warn` | a sample whose file has gone, which also says so in text |
+
+The timeline's, built at M3. The lanes and the playhead draw from
+`timeline`, whose `grid` and `playhead` values the worked example under *The
+file* already gave; the ruler draws from its own group. The three grid
+colours rely on the surfaces being monotonic, deepest first, and not on
+their values:
+
+| `timeline` key | Default | For |
+|---|---|---|
+| `background` | `surface.panel` | behind the lanes |
+| `grid` | `border` | bar lines — the strongest |
+| `grid.beat` | `surface.hover` | beat lines |
+| `grid.division` | `surface.raised` | the snap division — the faintest, and only while snapping is on |
+| `playhead` | `accent` | the playhead, over everything, in the lanes and across the ruler |
+| `separator` | `border` | the line under each lane |
+| `loop.region` | `accent.pressed` | the loop region: filled in the ruler while looping, an outline while not, faint behind the lanes while looping |
+| `drop` | `accent` | the dashed outline of where a drop from the pool will land |
+| `band` | `accent` | the rubber band's outline, over a faint fill of the same |
+
+The clips', built at M3 as the worked example under *The file* named them.
+`body` and `waveform` are the reserved `channel` value — the first keys any
+widget paints per channel — so a theme may paint every clip one colour, and
+the built-in paints each in its channel's:
+
+| `clip` key | Default | For |
+|---|---|---|
+| `body` | `channel` | the clip, translucent over its lane |
+| `waveform` | `channel` | the envelope, solid over the body |
+| `text` | `text.primary` | the clip's name |
+| `missing` | `text.disabled` | the body of a clip whose sample has gone, which also says so in text |
+| `selected.border` | `accent` | a 2 px border inside a selected clip — a shape as well as a colour |
+| `fade` | `text.primary` | a fade's gain curve, over the whole height of the clip |
+| `fade.handle` | `text.secondary` | the square at a fade's end, on a selected clip, as the worked example under *The file* named it |
+
+The check box's, built at M3 phase 7. It paints itself, so its state is a
+tick or a dash as well as a fill:
+
+| `check` key | Default | For |
+|---|---|---|
+| `background` | `surface.window` | inside an unticked box |
+| `box` | `text.disabled` | an unticked box's outline |
+| `checked` | `accent` | a ticked box, or one holding a dash |
+| `tick` | `text.primary` | the tick, or the dash of a box standing for several that differ |
+| `text` | `text.primary` | the label |
+| `disabled` | `text.disabled` | the box, its mark and its label, while it is disabled |
+| `focus` | `accent` | the ring around the box while it has the keyboard |
+
+| `ruler` key | Default | For |
+|---|---|---|
+| `background` | `surface.raised` | behind the ticks and labels |
+| `tick` | `text.disabled` | tick marks |
+| `text` | `text.secondary` | labels |
+
+The QSS today styles none of the widgets in the last row, which is
 correct — nothing renders one yet. It is listed so that the milestone which
 first does knows the groups are its to add, rather than discovering a
 `QLineEdit` drawn in the toolkit's default light grey on a dark panel and
@@ -395,20 +468,91 @@ thumbnail. Filter box at the top.
 - Double-click auditions the sample (non-spatial, straight to the output).
 - Drag a row onto a timeline channel to create a clip.
 - Drag onto empty timeline space to create a new channel holding it.
+
+A drop lands on the lane under the pointer, at the sample under it snapped
+to the grid and to every clip's edges on any channel (F-13, F-17), by that
+channel's own snap setting (F-18), or exactly where it was dropped while
+`Alt` is held. Several rows dropped together ask how, in a menu at the
+pointer (F-58, D-112): **In Parallel, a New Channel for Each** inserts a
+channel per sample at that lane, in the order the pool lists them, each
+named after its sample and all starting there; **In Series** puts them end
+to end from there on the lane, or below the last lane on one new channel
+holding them all. `Esc` drops nothing, and `Enter` takes the answer given
+last. A dashed outline shows where it will land before the release - for
+several, the first sample, where both answers start. A
+drop over existing clips trims them to make room, removes those it covers,
+and splits one it lands inside (D-95); with Shift held, a drop that would
+overlap is refused, and the pointer says so before the release; several
+rows are offered only in parallel there, which overlaps nothing. Each drop
+is one Undo, the new channels included.
 - Missing files show in `warn` with a relink action.
+
+The folders mirror those beneath what was imported: the deepest folder every
+sample shares is the root, so importing one folder shows its subfolders and
+not the path to it. A missing row says so in words — `⚠` before its name — as
+well as in `warn`.
+
+A dragged row carries **`application/x-3dimmersive-media`**: a JSON list of
+the dragged samples' media ids, in the order they appear. This is the
+contract the timeline accepts at M3.
 
 ## Parameters pane (left, bottom)
 
-Context-sensitive on the current selection. Resizable; collapsible to a strip.
+Context-sensitive on the current selection. Resizable, and collapsible to
+its header: clicking the header hides the fields and gives the room to the
+pool above, and the header's arrow (▾ open, ▸ collapsed) says which way a
+click will go.
 
 | Selection | Shows |
 |---|---|
 | **Media file** | path, source rate, channels, duration, full waveform, audition button |
-| **Channel** | name, colour swatch, gain, mute/solo, **HRTF bypass**, snap override, position X/Y/Z spinboxes (greyed when bypassed), pan (only when bypassed) |
+| **Channel** | name, colour swatch, gain, mute/solo, **HRTF bypass**, snap override, position X/Y/Z fields (greyed when bypassed), pan (only when bypassed) |
 | **Clip** | source, start, length, crop offset, gain, fade-in/out length and shape |
 | **Nothing** | project settings: BPM, time signature, HRTF set, distance rolloff, master gain, limiter |
 
 Numeric fields are drag-scrubbable and accept typed values with units.
+
+**What the fields read.** A clip's start reads as the ruler counts,
+`2.1.000` or `0:02.000`, and takes either typed, or `s` and `ms`. Lengths
+and crop offsets read `1.500 s` and fade lengths `250 ms`, and each takes
+either unit (D-103). The tempo runs 20 to 999 BPM; the signature is 1 to 32
+beats over a 1, 2, 4, 8 or 16 note (D-104). A value past a limit lands at
+the limit, and the field shows where it landed: a length at the neighbour
+or the sample's end, a crop offset at the sample's ends, a fade where the
+other begins (D-101). A value that changes nothing is put back.
+
+**Several things at once.** A field shows the value they share, or `—`
+where it differs, and a value set there goes to all of them in one edit. A
+field reading `—` is typed into rather than dragged, since a drag has no
+value to start from, and a check box reading `—` holds a dash that a click
+turns on for all. Four exceptions:
+
+- **A clip's start is the selection's**, the earliest, and a typed one moves
+  every selected clip by the same amount, as a drag does (D-102).
+- **Length, crop offset and fades go to each clip as far as it can take
+  them**, so the selection may end up with different values.
+- **A channel's name** reads `—` and is disabled with several selected:
+  one name for several channels is never wanted.
+- **A channel's position** is live while any selected channel is placed,
+  and greyed only when every one is bypassed; pan shows only then. A value
+  typed there goes to each channel on the axis typed, its other two axes
+  its own (D-127).
+
+A clip's source is shown, not edited.
+
+**The toolbar's tempo and signature** are the project view's two live
+fields, in reach whatever is selected: the tempo a numeric field, and the
+signature a button whose menu offers 2/4, 3/4, 4/4, 5/4, 6/8, 7/8 and 12/8.
+Any other signature is set in the pane. Changing the tempo moves the grid
+and no clip (D-52).
+
+**A field a later milestone brings** is drawn with the project's value,
+disabled, and names that milestone in its tooltip. Since M4 that is only
+the HRTF set: it shows the built-in set every channel is heard through, and
+choosing another arrives at M8. Position, pan, distance rolloff, master
+gain and the limiter are live, one edit each, and heard at the next block. The
+sample view's Audition button is disabled, saying why, with several
+selected, with the file missing, or with no audio output.
 
 ## Workspace (centre)
 
@@ -484,13 +628,126 @@ Ruler across the top, switchable bars:beats ↔ min:sec, with the grid drawn fro
 BPM and the current snap division. Channel headers on the left — colour chip,
 name, gain, M/S, ⊘ (HRTF bypass), snap-override indicator. Lanes to the right.
 
+```
+┌─────────────┬──────────────────────────────┐
+│ Add channel │ ruler — follows the lanes →  │
+├─────────────┼──────────────────────────────┤
+│ ■ Name  snap│                              │
+│ 0.0 dB M S ⊘│ lanes — scroll both ways     │
+├─────────────┤                              │
+│ headers     │                              │
+│ follow the  │                              │
+│ lanes ↕     │                              │
+└─────────────┴──────────────────────────────┘
+```
+
+The headers never scroll sideways and the ruler never scrolls up and down;
+each follows the lanes on the other axis, so a header is always level with
+its own lane. The corner above the headers holds *Add channel*, in reach
+however far the lanes are scrolled.
+
+- **Gain** runs from −60 dB to +12 dB, dragged or typed like every numeric
+  field. Below −60 is what mute is for, and a fader that reaches −∞ spends
+  its most-used range in its last few pixels.
+- **M, S and ⊘** are letters or a symbol as well as a colour when on. A
+  channel silenced by another's solo says *silenced* beside its name; a muted
+  one does not, because its M already says why it is quiet.
+- **The snap indicator** reads `snap` while the channel follows the project,
+  and the division — `1/8`, `1/4T`, `off` — while it overrides it. Clicking
+  it offers the channel's own: *Follow Project*, *Off*, the six divisions
+  and *Triplet*.
+- **The name** is renamed by double-clicking it, and ends in an ellipsis
+  rather than running into the controls beside it.
+- **The chip** is the channel's own colour, from the project. Clicking it
+  offers the theme's channel palette. Dragging a header up or down reorders
+  the channels, and a right-click offers Rename and Remove.
+- **Clicking a header** selects its channel, with the modifiers a clip
+  takes (*Selection*). A selected header wears a bar down its left edge as
+  well as a lighter background, and the bar's room is always there, so
+  selecting a header does not shift what is in it.
+- **The meter** at the header's right edge is what the channel adds to the
+  mix, left and right: after its gain, mute and solo, and from M4 its
+  distance, before the HRTF (F-60, D-117). It moves as the master's does
+  (D-118) and has no clip light, since only the output can clip. A silent
+  channel's meter is empty.
+
+The grid thins as the view zooms out rather than crowding: no two lines are
+drawn closer than a few pixels, the snap division goes first, then beats, and
+bars are thinned to every second, fourth or eighth bar but never removed. The
+division is drawn only while snapping is on, because it is there to show
+where a drag will land.
+
+- **A clip's fades** are drawn as the curves the engine plays
+  (`FadeShape.gain`): a fade-in rising from silence at its start, a
+  fade-out falling to it at its end, linear or equal power. A selected clip
+  shows a handle at the end of each fade, in its name strip. A press there
+  takes the handle, and below the strip a press near an edge still trims. A
+  handle's drag changes the same fade of every selected clip by the same
+  amount, each as far as it can: no shorter than nothing and no longer than
+  the other fade leaves room for (D-101). It is drawn as it goes, pushed as
+  one edit on release, and put back by `Esc`. It does not snap. Where two
+  fades meet, the fade-in's handle is the one taken.
 - Clips render name + waveform; waveform detail drops out as you zoom out.
-- Drag body to move; drag either edge to trim; `S` splits at playhead.
+  A clip is its channel's colour, translucent over the lane, with its part
+  of its sample drawn solid over that — a trimmed clip shows its own frames,
+  not its sample's start. Narrower than a few pixels it is its body alone,
+  and its name ends in an ellipsis until even that would not fit. A clip
+  whose sample is missing is grey and says *⚠ missing* in its name strip.
+- **Drag a selected clip's body to move the selection**, across lanes as
+  well as along them: every clip by the same time and the same number of
+  lanes, stopping together at the first and last lane and at 0. What they
+  land on is overwritten as a drop overwrites it (D-97).
+- **Drag within a few pixels of an edge to trim** — at most a third of the
+  clip, so a narrow one can still be moved; the pointer shows an edge before
+  the press. Every selected clip's same edge moves by the same amount, each
+  as far as it can: no further than its sample or the next clip on its
+  channel, and no shorter than 64 samples (D-98).
+- **A drag edits nothing until the release.** While it lasts the clips are
+  drawn where the release will put them, in the colour of the lane they will
+  land in; the release is one Undo, and `Esc` before it puts everything back.
+- `S` splits every selected clip under the playhead, and the tails join the
+  selection. `Ctrl+D` copies the selection to just after itself and selects
+  the copies, so pressing it again carries the run on. `Delete` removes the
+  selection. Each is one Undo, and each is enabled only while clips are
+  selected.
+- **`Ctrl+C` copies the selected clips, `Ctrl+X` cuts them and `Ctrl+V`
+  pastes them** (F-50). Copy is not an edit; Cut is one Undo, and so is a
+  paste. A paste lands at the playhead on the focused channel, the one
+  `Ctrl+A` reads, or with none on the lane it was copied from. Its clips keep
+  their spacing in time and across lanes, overwrite what they land on as a
+  drop does, and become the selection. Lanes it needs past the last become
+  new channels (D-100). The clipboard is the open project's: New and Open
+  empty it, and Paste is disabled while a copied clip's sample is not in the
+  pool (D-99). Cut and Copy are enabled only while clips are selected; Paste
+  is enabled whatever is selected. The playhead stays put, so a second paste
+  lands on the first.
 - **Shift+drag** moves the clip *and* its channel's automation (D-7).
-- Snap honours the channel override, and holding `Alt` bypasses snap entirely.
+- **A drag snaps** to the grid and to other clips' edges, nearest wins
+  (F-17). A trim snaps the edge it moves. A move snaps the grabbed clip's
+  start to either, or its end to a clip edge, whichever is nearer, so a clip
+  butts against a neighbour from either side. The setting is the channel's
+  the clip lands in — its override, or the project's — and holding `Alt`
+  bypasses snap entirely.
+- **The snap chip** in the toolbar chooses the project's setting: *Off*, the
+  divisions from 1/1 to 1/32, and *Triplet*. *Off* keeps the division, so
+  turning snapping back on returns to it. Each choice is one Undo.
 - Playhead in `accent`, always drawn over everything.
-- Loop region set by dragging in the ruler.
+- **The ruler takes three gestures** (D-109). A press within 5 px of the
+  playhead takes it, and a drag moves it, seeking as it goes; the pointer
+  shows when a press would take it. A press anywhere else that moves draws
+  a loop region, dashed until the release. A press that does not move is a
+  click, which seeks. All three snap to the grid and to the clips' edges by
+  the project's setting, and `Alt` places exactly.
+- **The loop region** (D-108) is the project's, saved with it, and drawing
+  one is one Undo; drawing the same one again is none, and one shorter than
+  64 samples is not drawn. In the ruler it is a band in `loop.region`,
+  filled while looping and an outline while not; behind the lanes it is a
+  faint band while looping. Drawing a region turns looping on.
 - Scroll = vertical, Shift+scroll = horizontal, Ctrl+scroll = zoom about cursor.
+  A trackpad's or a tilt wheel's sideways movement scrolls along time with no
+  key held, and a **middle-button drag pans both ways**, the lanes following
+  the hand — the gesture pro tools give a mouse with only an up-and-down
+  wheel, which otherwise needs Shift for every move through time.
 
 Implemented on `QGraphicsView` with cached waveform pixmaps per clip and
 level-of-detail on zoom — at a few hundred clips a naive repaint will not hold
@@ -536,6 +793,53 @@ own.
 
 ## Transport and the ARM toggle
 
+The toolbar's first five buttons are the Transport menu's own actions, so a
+button and its key are one thing (F-20, D-110):
+
+- **Play / Pause** (`Space`) plays from the playhead and pauses where it is.
+  Its icon is the other one while playing.
+- **Stop** (`Esc`) stops and puts the playhead back where playback last
+  started, so play, listen and stop can be repeated over one passage. It
+  also silences a sample being auditioned, fading it over one block
+  (D-115). With nothing sounding it clears the selection instead.
+- **Return to Start** (`Enter`) puts the playhead at 0, playing or not;
+  playing, 0 is then where Stop goes back to.
+- **Toggle Loop** (`L`) loops over the loop region, and is enabled only while
+  there is one. A project opens with it off.
+- **Repeat Project** (`Shift+L`) goes back to 0 when playback reaches the end
+  of the last clip, and plays on (F-57, D-111). Inside the project the loop
+  region wins; a playhead already past the end plays on. It is not saved,
+  and a project opening leaves it as it was. Its icon is an arrow turning
+  back to a bar, where Loop's is a circle.
+
+Without an audio output all five are disabled and say why. The playhead
+readout beside them is a numeric field: it reads as the ruler counts,
+dragging it moves the playhead, and it takes a position typed in
+bars.beats.ticks, minutes:seconds, `s` or `ms`. While playing, the window
+reads the engine's playhead thirty times a second and draws it there, and a
+playhead that leaves the view turns the page, bringing it a tenth of the way
+in (D-110). A seek is drawn at once, and the engine's playhead is not read
+again until the engine has taken the seek.
+
+**The info box** is at the right end of the toolbar, past the free space,
+and shows anything slow while it runs (D-116): a label, a thin bar, and a
+✕ when the work can be stopped. An import reads *Importing 7 of 22 files*,
+its bar counting the files' bytes (D-113), and its ✕ drops the whole
+import quietly (D-114). A project's samples loading on open read *Loading
+7 of 22 samples*, with no ✕. With more than one running, the first begun
+is shown, *+1 more* beside it, and the tooltip names them all. It appears
+once the work has run for a quarter of a second, is hidden when nothing
+runs, and moves nothing when it comes and goes. At the window's narrowest
+it gives way to 150 px and elides its label, rather than fold into the
+toolbar's overflow menu. While an import runs, *Import Audio…* and *Import
+Folder…* are disabled, and say so.
+
+**A field that commits on `Enter` or cancels on `Esc`** - a channel's name
+being typed, a numeric field being typed into - keeps both keys while it
+has the keyboard, and a clip drag keeps `Esc` to cancel itself. Otherwise
+they are the transport's: `Enter` would send the playhead to 0 instead of
+committing a gain.
+
 `● ARM` in the toolbar is automation write-arm (F-32). Off, dragging a source
 icon edits the channel's static position. On, the icon turns red-ringed in all
 views and dragging during playback writes keyframes at the playhead. It is a
@@ -548,13 +852,14 @@ do to you.
 | Key | Action |
 |---|---|
 | `Space` | play / pause |
-| `Esc` | stop |
-| `Enter` | return playhead to start |
+| `Esc` | stop, back to where playback started, and silence an audition; with nothing sounding, clear the selection |
+| `Enter` | return playhead to 0 |
 | `L` | toggle loop |
-| `S` | split selected clip at playhead |
+| `Shift+L` | toggle repeat: back to 0 at the end of the last clip |
+| `S` | split the selected clips at the playhead |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
-| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | cut / copy / paste clips |
-| `Ctrl+D` | duplicate selection |
+| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | cut / copy / paste clips — a paste at the playhead, on the focused channel |
+| `Ctrl+D` | duplicate the selection, just after itself |
 | `Ctrl+A` | select all clips on the focused channel |
 | `Delete` | delete selection |
 | `Alt` (held) | bypass snap |
@@ -562,13 +867,36 @@ do to you.
 | `Ctrl+S` / `Ctrl+O` / `Ctrl+N` | save / open / new |
 | `Ctrl+R` | render |
 | `1` `2` `3` | focus top / front / 3D view |
-| `B` | toggle HRTF bypass on the selected channel |
+| `B` | toggle HRTF bypass on the selected channels |
 
 This table is the specification, and where a toolkit default disagrees with it
 the table wins: `QKeySequence.StandardKey.Redo` resolves to `Ctrl+Y` on Linux
 and Windows, so redo is written out rather than taken from it (D-68). Qt maps
 `Ctrl+` onto Command on macOS by itself, so one spelling is correct on all
 three platforms.
+
+## The open project
+
+There is always exactly one, held by the window and owned by a document that
+knows its file and its history (D-85). A new window holds an empty, untitled
+one.
+
+- The **title** names it — its file's stem, or *Untitled* — and marks unsaved
+  changes the platform's own way, through Qt's `[*]`: an asterisk on Windows
+  and Linux, a dot in the close button on macOS.
+- **New, Open and Quit over unsaved changes ask once**: *Save*, *Discard* or
+  *Cancel*. Nothing is asked when there is nothing unsaved. *Save* goes ahead
+  only if the save worked — a Save As dialog that was cancelled, or a write
+  that failed, must not be followed by throwing away the project somebody
+  just asked to keep. This is the one confirmation named under
+  *Accessibility and feel*.
+- A name typed into Save As without a suffix gets `.3dim`, or the Open dialog's
+  own filter hides the file the next time anyone looks for it.
+- **Success is quiet.** Opening and saving post nothing; the title's mark
+  clearing is the feedback. A project that will not open is an `error` notice
+  carrying the reasons, and the project that was open stays open, history and
+  unsaved changes included. One that opens with media missing is **one**
+  `warn` notice whose detail lines name each missing file (F-3).
 
 ## Notices — where "reported" goes
 
@@ -642,10 +970,28 @@ summing in the frequency domain, each scaled by a distance attenuation that
 *moves while it plays*, do not have a predictable sum. A channel's fader
 position tells you nothing about what reaches the bus.
 
-Per-channel meters are deliberately not provided (D-55) — that is a mixing
-console, which [00-overview.md](00-overview.md) puts out of scope, and solo
-plus the parameters pane answers the same question at the rate this
-application needs it answered.
+**How it moves (D-118).** Both sides are read thirty times a second, as the
+highest sample since the last frame, on a scale of −60 to 0 dBFS drawn in
+dB. A bar rises at once and falls at 24 dB a second. The hold marks the
+highest level for 1.5 s, then falls at the same rate, never below its bar.
+Above −6 dBFS the bar is `meter.hot`. The clip light at its end latches
+when a sample passes full scale, shows `!` as well as its colour, and is
+cleared by clicking it.
+
+**Each channel has one too** (F-60, D-117), in its header: what it adds to
+the mix, so a source whose fader says little about what reaches the bus can
+be seen doing it. They supersede D-55, which left them out as a mixing
+console. A console is faders, sends and inserts; a level strip in a track's
+header is not one. The master meter stays the only clip light.
+
+| `meter` key | Default | For |
+|---|---|---|
+| `background` | `surface.hover` | the bars' track, and the clip light while it is not lit |
+| `level` | `accent` | a bar up to −6 dBFS |
+| `hot` | `warn` | a bar above −6 dBFS |
+| `hold` | `text.primary` | the peak hold's mark |
+| `clip` | `warn` | the master's clip light, latched |
+| `clip.text` | `surface.window` | the `!` on it |
 
 ## Selection
 
@@ -655,15 +1001,56 @@ One kind of thing at a time, plural within that kind (D-57).
 |---|---|
 | Kinds | clips · keyframes · channels · media files |
 | Switching kind | clears the previous one — selecting a clip deselects every keyframe |
-| Plural | click, `Shift+click` for a range, `Ctrl+click` to toggle one |
-| Rubber band | drag on empty lane space in the timeline, or on empty space in the keyframe editor |
+| Plural | click, `Shift+click` for a range, `Ctrl+click` to toggle one, `Ctrl+Shift+click` to add a range |
+| Rubber band | drag on empty lane space in the timeline, or on empty space in the keyframe editor; with `Ctrl` or `Shift` it adds |
 | Across channels | yes, for clips and keyframes |
 | `Ctrl+A` | every clip on the focused channel; again for every clip in the project |
 | Clearing | click empty space, or `Esc` when the transport is stopped |
+| Where | a clip in the lanes, a channel by its header, a sample by its row in the pool |
 
 Mixing kinds was considered and rejected: `Delete` with a clip *and* a
 keyframe selected has no answer a modifier can rescue, and every edit verb in
 the application belongs to exactly one kind.
+
+**The range** runs from the *anchor* — the thing last clicked or
+Ctrl-clicked — to the thing clicked, and replaces the selection; with
+`Ctrl` it is added instead. For channels that is every header between the
+two. For clips it is the rule file managers teach, carried across the two
+dimensions a timeline has: every clip that overlaps the stretch of time from
+the earlier of the two to the later, on every lane from the anchor's to the
+clicked one's.
+
+**A press on a selected clip waits for the release.** A press on an
+unselected clip selects it at once. A press on one already selected leaves
+the selection alone, so that a drag from any selected clip can move them all,
+and only a release that never moved selects that clip alone. Every file
+manager and every DAW behaves this way; a click that changed its meaning when
+dragging arrived would be learnt twice.
+
+**The focused channel** that `Ctrl+A` reads is the one last clicked, by its
+header or by one of its clips. It is also where a paste lands (D-100): F-50's
+"selected channel", since while clips are selected no channel is. A rubber
+band focuses nothing. With none, the first `Ctrl+A` already selects every
+clip in the project, and a paste lands on the lane it was copied from. A
+line edit keeps `Ctrl+A`, `Esc`, `Ctrl+X`, `Ctrl+C` and `Ctrl+V` for itself:
+with a channel's name being edited they act on its text, and the selection
+is untouched. A numeric field keeps them only while it is being typed into.
+
+**`Esc`** is *Stop*, and clears the selection when the transport is already
+stopped (D-110). Without an audio output Stop is disabled, a disabled
+action's shortcut does not fire, and `Esc` reaches the window, which clears
+the selection all the same.
+
+**`B`** toggles HRTF bypass on every selected channel as one edit: if any is
+off they all go on, and if all are on they all go off, so a mixed selection
+comes out of one press agreeing. With no channel selected it is disabled, and
+its tooltip says to select one.
+
+**What marks a selection** is a shape as well as a colour (*Accessibility
+and feel*): a 2 px border inside a clip, a bar down a header's left edge, the
+highlighted row in the pool. The pool's tree keeps a selection of its own
+because Qt insists on one; it is kept in step with the document's both ways,
+and never decides anything by itself.
 
 The parameters pane follows the selection. With several things of one kind
 selected it shows the fields they have in common, and a field whose value
@@ -679,7 +1066,8 @@ set on all of them.
   exemptions, both standard: `text.disabled`, which is disabled text, and `accent`,
   which is not a text colour — see the palette note above.
 - Every destructive action is undoable, so no confirmation dialogs except for
-  discarding an unsaved project.
+  discarding an unsaved project — *Save*, *Discard* or *Cancel*, as *The open
+  project* above describes.
 - The xrun counter sits in the status bar, quiet when zero, `error` when not.
   Beside it, left to right: the master meter, the notice count, the version.
 - **Keyboard focus is always visible**, as a 1 px `accent` ring. Left to the

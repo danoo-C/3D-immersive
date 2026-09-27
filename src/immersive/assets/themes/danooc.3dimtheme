@@ -1,0 +1,411 @@
+{
+  "author": "3d immersive",
+  "channels": [
+    "#A855F7",
+    "#22D3EE",
+    "#F59E0B",
+    "#34D399",
+    "#F472B6",
+    "#60A5FA",
+    "#FB923C",
+    "#A3E635"
+  ],
+  "groups": {
+    "button": {
+      "background": "surface.hover",
+      "border": "border",
+      "checked.background": "accent.pressed",
+      "checked.border": "accent",
+      "disabled.border": "surface.hover",
+      "disabled.text": "text.disabled",
+      "hover.border": "accent.text",
+      "pressed.background": "accent.pressed",
+      "text": "text.primary"
+    },
+    "channel": {
+      "background": "surface.raised",
+      "border": "border",
+      "bypass.background": "text.secondary",
+      "bypass.text": "surface.window",
+      "mute.background": "warn",
+      "mute.text": "surface.window",
+      "name": "text.primary",
+      "quiet": "text.disabled",
+      "selected.background": "surface.hover",
+      "selected.marker": "accent",
+      "solo.background": "accent.text",
+      "solo.text": "surface.window"
+    },
+    "check": {
+      "background": "surface.window",
+      "box": "text.disabled",
+      "checked": "accent",
+      "disabled": "text.disabled",
+      "focus": "accent",
+      "text": "text.primary",
+      "tick": "text.primary"
+    },
+    "clip": {
+      "body": "channel",
+      "fade": "text.primary",
+      "fade.handle": "text.secondary",
+      "missing": "text.disabled",
+      "selected.border": "accent",
+      "text": "text.primary",
+      "waveform": "channel"
+    },
+    "combo": {
+      "background": "surface.window",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "focus.border": "accent",
+      "list.background": "surface.raised",
+      "list.border": "border",
+      "list.selected.background": "surface.hover",
+      "list.text": "text.primary",
+      "text": "text.primary"
+    },
+    "filter": {
+      "background": "surface.window",
+      "border": "border",
+      "focus.border": "accent",
+      "text": "text.primary"
+    },
+    "focus": {
+      "menu.background": "surface.hover",
+      "ring": "accent"
+    },
+    "header": {
+      "background": "surface.raised",
+      "border": "border",
+      "text": "text.secondary"
+    },
+    "info": {
+      "background": "surface.raised",
+      "bar": "accent",
+      "border": "border",
+      "more": "text.secondary",
+      "text": "text.primary",
+      "track": "surface.hover"
+    },
+    "input": {
+      "background": "surface.window",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "focus.border": "accent",
+      "text": "text.primary"
+    },
+    "menu": {
+      "background": "surface.raised",
+      "bar.background": "surface.raised",
+      "bar.border": "border",
+      "bar.selected.background": "surface.hover",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "selected.background": "accent.pressed",
+      "selected.text": "text.primary",
+      "separator": "border"
+    },
+    "pane": {
+      "heading": "text.primary",
+      "label": "text.secondary"
+    },
+    "panel": {
+      "background": "surface.panel",
+      "text": "text.primary"
+    },
+    "ruler": {
+      "background": "surface.raised",
+      "text": "text.secondary",
+      "tick": "text.disabled"
+    },
+    "scrollbar": {
+      "background": "surface.panel",
+      "handle": "surface.hover",
+      "hover.handle": "accent.pressed"
+    },
+    "splitter": {
+      "handle": "border",
+      "hover.handle": "accent"
+    },
+    "statusbar": {
+      "background": "surface.raised",
+      "border": "border",
+      "text": "text.secondary"
+    },
+    "tab": {
+      "background": "surface.window",
+      "bar.background": "surface.window",
+      "hover.background": "surface.raised",
+      "hover.text": "text.primary",
+      "pane.background": "surface.panel",
+      "selected.background": "surface.panel",
+      "selected.marker": "accent",
+      "selected.text": "text.primary",
+      "text": "text.secondary"
+    },
+    "timeline": {
+      "background": "surface.panel",
+      "band": "accent",
+      "drop": "accent",
+      "grid": "border",
+      "grid.beat": "surface.hover",
+      "grid.division": "surface.raised",
+      "loop.region": "accent.pressed",
+      "playhead": "accent",
+      "separator": "border"
+    },
+    "toolbar": {
+      "background": "surface.raised",
+      "border": "border",
+      "separator": "border"
+    },
+    "tooltip": {
+      "background": "surface.raised",
+      "border": "accent.pressed",
+      "text": "text.primary"
+    },
+    "tree": {
+      "background": "surface.panel",
+      "hover.background": "surface.raised",
+      "selected.background": "surface.hover",
+      "selected.text": "text.primary",
+      "text": "text.primary"
+    },
+    "waveform": {
+      "background": "surface.panel",
+      "centre": "border",
+      "fill": "text.secondary",
+      "missing": "warn"
+    },
+    "window": {
+      "background": "surface.window"
+    }
+  },
+  "name": "VS Code Dark",
+  "schema_version": 1,
+  "tokens": {
+    "accent": "#A855F7",
+    "accent.pressed": "#7E3FF2",
+    "accent.text": "#C77DFF",
+    "border": "#8b288f",
+    "error": "#f82e7b",
+    "surface.hover": "#5c1b70",
+    "surface.panel": "#1F1F1F",
+    "surface.raised": "#252526",
+    "surface.window": "#181818",
+    "text.disabled": "#6E6E6E",
+    "text.primary": "#CCCCCC",
+    "text.secondary": "#9D9D9D",
+    "warn": "#F59E0B"
+  }
+}
+
+
+
+
+
+
+{
+  "author": "3d immersive",
+  "channels": [
+    "#A855F7",
+    "#22D3EE",
+    "#F59E0B",
+    "#34D399",
+    "#F472B6",
+    "#60A5FA",
+    "#FB923C",
+    "#A3E635"
+  ],
+  "groups": {
+    "button": {
+      "background": "surface.hover",
+      "border": "border",
+      "checked.background": "accent.pressed",
+      "checked.border": "accent",
+      "disabled.border": "surface.hover",
+      "disabled.text": "text.disabled",
+      "hover.border": "accent.text",
+      "pressed.background": "accent.pressed",
+      "text": "text.primary"
+    },
+    "channel": {
+      "background": "surface.raised",
+      "border": "border",
+      "bypass.background": "text.secondary",
+      "bypass.text": "surface.window",
+      "mute.background": "warn",
+      "mute.text": "surface.window",
+      "name": "text.primary",
+      "quiet": "text.disabled",
+      "selected.background": "surface.hover",
+      "selected.marker": "accent",
+      "solo.background": "accent.text",
+      "solo.text": "surface.window"
+    },
+    "check": {
+      "background": "surface.window",
+      "box": "text.disabled",
+      "checked": "accent",
+      "disabled": "text.disabled",
+      "focus": "accent",
+      "text": "text.primary",
+      "tick": "text.primary"
+    },
+    "clip": {
+      "body": "channel",
+      "fade": "text.primary",
+      "fade.handle": "text.secondary",
+      "missing": "text.disabled",
+      "selected.border": "accent",
+      "text": "text.primary",
+      "waveform": "channel"
+    },
+    "combo": {
+      "background": "surface.window",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "focus.border": "accent",
+      "list.background": "surface.raised",
+      "list.border": "border",
+      "list.selected.background": "surface.hover",
+      "list.text": "text.primary",
+      "text": "text.primary"
+    },
+    "filter": {
+      "background": "surface.window",
+      "border": "border",
+      "focus.border": "accent",
+      "text": "text.primary"
+    },
+    "focus": {
+      "menu.background": "surface.hover",
+      "ring": "accent"
+    },
+    "header": {
+      "background": "surface.raised",
+      "border": "border",
+      "text": "text.secondary"
+    },
+    "info": {
+      "background": "surface.raised",
+      "bar": "accent",
+      "border": "border",
+      "more": "text.secondary",
+      "text": "text.primary",
+      "track": "surface.hover"
+    },
+    "input": {
+      "background": "surface.window",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "focus.border": "accent",
+      "text": "text.primary"
+    },
+    "menu": {
+      "background": "surface.raised",
+      "bar.background": "surface.raised",
+      "bar.border": "border",
+      "bar.selected.background": "surface.hover",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "selected.background": "accent.pressed",
+      "selected.text": "text.primary",
+      "separator": "border"
+    },
+    "pane": {
+      "heading": "text.primary",
+      "label": "text.secondary"
+    },
+    "panel": {
+      "background": "surface.panel",
+      "text": "text.primary"
+    },
+    "ruler": {
+      "background": "surface.raised",
+      "text": "text.secondary",
+      "tick": "text.disabled"
+    },
+    "scrollbar": {
+      "background": "surface.panel",
+      "handle": "surface.hover",
+      "hover.handle": "accent.pressed"
+    },
+    "splitter": {
+      "handle": "border",
+      "hover.handle": "accent"
+    },
+    "statusbar": {
+      "background": "surface.raised",
+      "border": "border",
+      "text": "text.secondary"
+    },
+    "tab": {
+      "background": "surface.window",
+      "bar.background": "surface.window",
+      "hover.background": "surface.raised",
+      "hover.text": "text.primary",
+      "pane.background": "surface.panel",
+      "selected.background": "surface.panel",
+      "selected.marker": "accent",
+      "selected.text": "text.primary",
+      "text": "text.secondary"
+    },
+    "timeline": {
+      "background": "surface.panel",
+      "band": "accent",
+      "drop": "accent",
+      "grid": "border",
+      "grid.beat": "surface.hover",
+      "grid.division": "surface.raised",
+      "loop.region": "accent.pressed",
+      "playhead": "accent",
+      "separator": "border"
+    },
+    "toolbar": {
+      "background": "surface.raised",
+      "border": "border",
+      "separator": "border"
+    },
+    "tooltip": {
+      "background": "surface.raised",
+      "border": "accent.pressed",
+      "text": "text.primary"
+    },
+    "tree": {
+      "background": "surface.panel",
+      "hover.background": "surface.raised",
+      "selected.background": "surface.hover",
+      "selected.text": "text.primary",
+      "text": "text.primary"
+    },
+    "waveform": {
+      "background": "surface.panel",
+      "centre": "border",
+      "fill": "text.secondary",
+      "missing": "warn"
+    },
+    "window": {
+      "background": "surface.window"
+    }
+  },
+  "name": "VS Code Dark",
+  "schema_version": 1,
+  "tokens": {
+    "accent": "#A855F7",
+    "accent.pressed": "#7E3FF2",
+    "accent.text": "#C77DFF",
+    "border": "#3C3C3C",
+    "error": "#F88A8A",
+    "surface.hover": "#2D2D2D",
+    "surface.panel": "#1F1F1F",
+    "surface.raised": "#252526",
+    "surface.window": "#181818",
+    "text.disabled": "#6E6E6E",
+    "text.primary": "#CCCCCC",
+    "text.secondary": "#9D9D9D",
+    "warn": "#F59E0B"
+  }
+}
+

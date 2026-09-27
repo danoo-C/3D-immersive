@@ -8,16 +8,28 @@ deliberate: a fixed layout with draggable splitters, not dockable panels
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
-from PySide6.QtGui import QAction, QKeySequence, QMouseEvent
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QKeyEvent,
+    QKeySequence,
+    QMouseEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QLabel,
     QMainWindow,
     QMenu,
     QMenuBar,
+    QMessageBox,
+    QSizePolicy,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -27,14 +39,71 @@ from PySide6.QtWidgets import (
 )
 
 from immersive import __version__
+from immersive.audio.feed import Feed
+from immersive.audio.hrtf.bank import Bank
+from immersive.audio.player import Player
+from immersive.core.commands import Compound
+from immersive.core.document import Document
+from immersive.core.edits import (
+    AddMedia,
+    DuplicateClips,
+    PasteClips,
+    RemoveClips,
+    SetAttribute,
+    SplitClips,
+)
+from immersive.core.io import project_io
+from immersive.core.io.media import Refused
+from immersive.core.media_store import SUFFIXES, MediaStore, Prepared, admit, find_audio
+from immersive.core.model import MediaFile, Project, SnapSetting
+from immersive.core.relink import relink
+from immersive.core.selection import Kind
 from immersive.ui import icons, theme, theme_io, theme_menu
+from immersive.ui.activity import Activities, Activity
+from immersive.ui.explorer.media_pool import MediaPool
+from immersive.ui.hrtf import Preparer
+from immersive.ui.importer import Importer
 from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
+from immersive.ui.parameters.pane import ParametersPane
+from immersive.ui.parameters.views import LONGEST, TEMPO_CEILING, TEMPO_FLOOR, TIME_STEP
 from immersive.ui.theme_menu import ThemeMenu
+from immersive.ui.time_axis import TimeAxis
+from immersive.ui.timeline.grid import Unit, snap_text
+from immersive.ui.timeline.panel import TimelinePanel
+from immersive.ui.timeline.snap_menu import fill_snap_menu
+from immersive.ui.units import Plain, Position
+from immersive.ui.widgets.info_box import InfoBox
+from immersive.ui.widgets.meter import Meter
 from immersive.ui.widgets.notices import NoticeCount
+from immersive.ui.widgets.numeric import NumericField
 from immersive.ui.widgets.placeholder import Placeholder
 
 WINDOW_TITLE = "3d immersive"
+
+#: How often the window looks at the audio thread: fast enough for a
+#: moving playhead to look smooth, slow enough to cost nothing.
+TICK_HZ = 30
+
+#: What the signature chip offers. Anything else is typed in the pane.
+COMMON_SIGNATURES = ((2, 4), (3, 4), (4, 4), (5, 4), (6, 8), (7, 8), (12, 8))
+
+#: What the Open and Save As dialogs show.
+PROJECT_FILTER = f"3d immersive project (*{project_io.SUFFIX})"
+
+#: What the Import Audio dialog shows: F-5's formats (D-93).
+AUDIO_FILTER = "Audio ({})".format(
+    " ".join(f"*{suffix}" for suffix in sorted(SUFFIXES))
+)
+
+
+class Unsaved(Enum):
+    """The three answers to "save changes first?" - 04's one confirmation."""
+
+    SAVE = "save"
+    DISCARD = "discard"
+    CANCEL = "cancel"
+
 
 # Initial splitter sizes, in pixels. Qt distributes any surplus proportionally,
 # so these set the relative weights as much as the literal widths.
@@ -49,9 +118,6 @@ _PARAMS_H = 220
 # milestone rather than a dozen scattered strings - and so that a grep for
 # "M3" finds everything the timeline milestone switches on. The milestones
 # themselves are defined in docs/06-roadmap.md.
-_M1 = "the project model and undo stack arrive at M1"
-_M2 = "the media pool arrives at M2"
-_M3 = "the timeline and transport arrive at M3"
 _M5 = "the spatial views arrive at M5"
 _M6 = "automation arrives at M6"
 _M7 = "rendering arrives at M7"
@@ -106,15 +172,81 @@ def _menu_is_open(bar: QMenuBar) -> bool:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, player: Player | None = None, unavailable: str = "") -> None:
         super().__init__()
+        #: The one output stream and the engine behind it (D-107), or `None`
+        #: with the reason in `unavailable`. A window built by a test has
+        #: neither, and hears nothing: only a real launch goes looking for a
+        #: sound card.
+        self._player = player
+        self._unavailable = unavailable
         #: Everything this session has reported (F-56, D-65). Built before
         #: the status bar, which draws it.
         self._notices = NoticeLog()
+        #: Anything slow, as the info box shows it (D-116).
+        self._activities = Activities()
+        if player is not None:
+            # The player reports on this thread only: a device lost on
+            # PortAudio's is found by `poll`, from the tick below.
+            player.report = self._report_audio_problem
+        #: The project that is open (D-85). Every edit goes through it, and
+        #: the window reads its state back after each one rather than keeping
+        #: a second copy that could disagree.
+        self._document = Document()
+        #: The session's decoded audio and peaks, by media id - not the model,
+        #: and not saved. Kept across Undo so Redo of an import is free.
+        self._store = MediaStore()
+        self._importer = Importer(self)
+        self._importer.finished.connect(self._imported)
+        self._importer.cancelled.connect(self._import_cancelled)
+        self._importer.progressed.connect(self._import_progressed)
+        #: Fills the store for a project opened from disk, which imports
+        #: never touched: the same workers, and no edit.
+        self._loader = Importer(self)
+        self._loader.finished.connect(self._loaded)
+        self._loader.cancelled.connect(self._load_superseded)
+        self._loader.progressed.connect(self._load_progressed)
+        #: What the info box shows of each, while it runs (D-116).
+        self._import_activity: Activity | None = None
+        self._load_activity: Activity | None = None
+        #: The project's HRTF set, prepared on a worker when the application
+        #: asks (D-120) - never because a window was built.
+        self._hrtf = Preparer(self)
+        self._hrtf.prepared.connect(self._hrtf_prepared)
+        self._hrtf.refused.connect(self._hrtf_refused)
+        self._hrtf.progressed.connect(self._hrtf_progressed)
+        self._bank: Bank | None = None
+        #: The set and block asked for, once anything has asked.
+        self._hrtf_wanted: tuple[str, int] | None = None
+        self._hrtf_activity: Activity | None = None
+        self._loading: list[MediaFile] = []
+        self._loading_into: Project | None = None
+        #: The project an import in flight is for. A different one by the
+        #: time it finishes means the person opened another, and the samples
+        #: must not land in it.
+        self._importing_into: Project | None = None
+        #: Which span of the timeline is on show, and at what zoom (D-94).
+        #: Held here rather than by the timeline, because the curve editor at
+        #: M6 observes the same one and neither panel may own it.
+        self._axis = TimeAxis()
         #: Widgets that paint themselves from a token, and the token they use.
         #: Kept so a theme change can ask for the colour again (D-82).
         self._chips: list[tuple[QLabel, str]] = []
         self._icon_actions: list[tuple[QAction, str]] = []
+        #: The transport as the window asked for it (D-110): whether it is
+        #: playing, where playback last started - where Stop goes back to -
+        #: and the engine's command count after the last seek, until the
+        #: engine has caught up with it.
+        self._playing = False
+        self._started_at = 0
+        self._seek_mark: int | None = None
+        #: The project the loop switch was last set for: another one means
+        #: New or Open, and a project opens with looping off (D-108).
+        self._looping_for: Project | None = None
+        #: What the engine plays, kept in step with the project (D-105).
+        self._feed = (
+            Feed(player.engine, self._store.audio) if player is not None else None
+        )
         self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(icons.app_icon())
         self.resize(1500, 950)
@@ -124,6 +256,20 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self.setCentralWidget(self._build_layout())
         self._build_statusbar()
+        self._timeline.sought.connect(self.seek)
+        self._timeline.loop_drawn.connect(lambda: self._loop.setChecked(True))
+        self._document.observe(self._feed_update)
+        self._document.observe(self._document_changed)
+        self._document.selection.observe(self._selection_changed)
+        self._document_changed()
+        self._selection_changed()
+        #: The window's look at the audio thread, TICK_HZ times a second:
+        #: where the playhead is, and whether the device is still there.
+        self._ticker = QTimer(self)
+        self._ticker.setInterval(1000 // TICK_HZ)
+        self._ticker.timeout.connect(self.tick)
+        if player is not None:
+            self._ticker.start()
         # Last, because it may report - and the notice centre it reports to
         # is built by _build_statusbar.
         self.restore_theme()
@@ -137,13 +283,27 @@ class MainWindow(QMainWindow):
         bar.installEventFilter(self._menu_hover)
 
         file_menu = self._menu(bar, "&File")
-        self._add(file_menu, "&New Project", "Ctrl+N", arrives=_M1)
-        self._add(file_menu, "&Open Project…", "Ctrl+O", arrives=_M1)
+        self._add(file_menu, "&New Project", "Ctrl+N").triggered.connect(
+            self.new_project
+        )
+        self._add(file_menu, "&Open Project…", "Ctrl+O").triggered.connect(
+            lambda: self.open_project()
+        )
         file_menu.addSeparator()
-        self._add(file_menu, "&Save", "Ctrl+S", arrives=_M1)
-        self._add(file_menu, "Save &As…", "Ctrl+Shift+S", arrives=_M1)
+        self._add(file_menu, "&Save", "Ctrl+S").triggered.connect(self.save_project)
+        self._add(file_menu, "Save &As…", "Ctrl+Shift+S").triggered.connect(
+            self.save_project_as
+        )
         file_menu.addSeparator()
-        self._add(file_menu, "&Import Audio…", "Ctrl+I", arrives=_M2)
+        self._import_audio = self._add(file_menu, "&Import Audio…", "Ctrl+I")
+        self._import_audio.triggered.connect(self.import_files)
+        self._import_folder = self._add(file_menu, "Import &Folder…", "Ctrl+Shift+I")
+        self._import_folder.triggered.connect(self.import_folder)
+        #: Their tooltips as `_add` made them, for when an import has ended.
+        self._import_tips = {
+            action: action.toolTip()
+            for action in (self._import_audio, self._import_folder)
+        }
         file_menu.addSeparator()
         quit_action = self._add(file_menu, "&Quit", _quit_shortcut())
         quit_action.triggered.connect(self.close)
@@ -153,22 +313,54 @@ class MainWindow(QMainWindow):
         # and Windows StandardKey.Redo resolves to Ctrl+Y, and 04-ui-spec.md's
         # keyboard table promises Ctrl+Shift+Z. Qt maps "Ctrl+" onto Command on
         # macOS by itself, so writing it this way stays correct there too.
-        self._add(edit_menu, "&Undo", "Ctrl+Z", arrives=_M1)
-        self._add(edit_menu, "&Redo", "Ctrl+Shift+Z", arrives=_M1)
+        self._undo = self._history_action(edit_menu, "undo", "&Undo", "Ctrl+Z")
+        self._redo = self._history_action(edit_menu, "redo", "&Redo", "Ctrl+Shift+Z")
+        self._undo.triggered.connect(self._document.undo)
+        self._redo.triggered.connect(self._document.redo)
         edit_menu.addSeparator()
-        self._add(edit_menu, "&Copy", "Ctrl+C", arrives=_M3)
-        self._add(edit_menu, "&Paste", "Ctrl+V", arrives=_M3)
-        self._add(edit_menu, "&Duplicate", "Ctrl+D", arrives=_M3)
-        self._add(edit_menu, "De&lete", QKeySequence.StandardKey.Delete, arrives=_M3)
-        self._add(edit_menu, "&Split at Playhead", "S", arrives=_M3)
+        self._add(edit_menu, "Add &Channel").triggered.connect(
+            lambda: self._timeline.add_channel()
+        )
+        edit_menu.addSeparator()
+        # Ctrl+A in a text field selects its text: a line edit claims the
+        # standard key before any window action sees it.
+        self._add(edit_menu, "Select &All", "Ctrl+A").triggered.connect(
+            lambda: self._timeline.view.select_all()
+        )
+        # Spelled out, as Redo is: the keyboard table is the specification
+        # (D-68). A line edit claims all three for its text before any action
+        # here does.
+        self._cut = self._add(edit_menu, "Cu&t", "Ctrl+X")
+        self._cut.triggered.connect(self.cut_clips)
+        self._copy = self._add(edit_menu, "&Copy", "Ctrl+C")
+        self._copy.triggered.connect(self.copy_clips)
+        self._paste = self._add(edit_menu, "&Paste", "Ctrl+V")
+        self._paste.triggered.connect(self.paste_clips)
+        self._duplicate = self._add(edit_menu, "&Duplicate", "Ctrl+D")
+        self._duplicate.triggered.connect(self.duplicate_clips)
+        self._delete = self._add(edit_menu, "De&lete", QKeySequence.StandardKey.Delete)
+        self._delete.triggered.connect(self.delete_clips)
+        self._split = self._add(edit_menu, "&Split at Playhead", "S")
+        self._split.triggered.connect(self.split_clips)
 
         view_menu = self._menu(bar, "&View")
         self._add(view_menu, "Focus &Top View", "1", arrives=_M5)
         self._add(view_menu, "Focus &Front View", "2", arrives=_M5)
         self._add(view_menu, "Focus &3D View", "3", arrives=_M5)
         view_menu.addSeparator()
-        self._add(view_menu, "Ruler: &Bars / Beats", arrives=_M3)
-        self._add(view_menu, "Ruler: &Minutes / Seconds", arrives=_M3)
+        # One checked pair: the ruler counts in one unit at a time (F-19).
+        self._ruler_units = QActionGroup(self)
+        for text, unit in (
+            ("Ruler: &Bars / Beats", Unit.BARS),
+            ("Ruler: &Minutes / Seconds", Unit.TIME),
+        ):
+            action = self._add(view_menu, text)
+            action.setCheckable(True)
+            action.setChecked(unit is Unit.BARS)
+            self._ruler_units.addAction(action)
+            action.triggered.connect(
+                lambda _checked=False, unit=unit: self.set_ruler_unit(unit)
+            )
         view_menu.addSeparator()
         # M8 promotes this into Preferences; the menu is what M9 ships
         # (F-48). It lives under View because it changes how things look,
@@ -178,12 +370,29 @@ class MainWindow(QMainWindow):
         view_menu.addMenu(self._theme_menu)
 
         transport_menu = self._menu(bar, "&Transport")
-        self._add(transport_menu, "&Play / Pause", "Space", arrives=_M3)
-        self._add(transport_menu, "&Stop", "Esc", arrives=_M3)
-        self._add(transport_menu, "&Return to Start", "Return", arrives=_M3)
-        self._add(transport_menu, "Toggle &Loop", "L", arrives=_M3)
+        # One action each, in the menu and on the toolbar: two with one
+        # shortcut would be ambiguous, and Qt would fire neither.
+        self._play = self._transport(transport_menu, "play", "&Play / Pause", "Space")
+        self._play.triggered.connect(self.play_pause)
+        self._stop = self._transport(transport_menu, "stop", "&Stop", "Esc")
+        self._stop.triggered.connect(self.stop)
+        self._to_start = self._transport(
+            transport_menu, "transport_start", "&Return to Start", "Return"
+        )
+        self._to_start.triggered.connect(self.return_to_start)
+        self._loop = self._transport(transport_menu, "loop", "Toggle &Loop", "L")
+        self._loop.setCheckable(True)
+        self._loop.toggled.connect(self.set_looping)
+        # At the end of the last clip, back to the start (F-57, D-111). Kept
+        # across New and Open: it is how somebody is listening, not a project.
+        self._repeat = self._transport(
+            transport_menu, "repeat", "Re&peat Project", "Shift+L"
+        )
+        self._repeat.setCheckable(True)
+        self._repeat.toggled.connect(lambda _on: self._send_repeat())
         transport_menu.addSeparator()
-        self._add(transport_menu, "Toggle HRTF &Bypass on Channel", "B", arrives=_M3)
+        self._bypass = self._add(transport_menu, "Toggle HRTF &Bypass on Channel", "B")
+        self._bypass.triggered.connect(self.toggle_bypass)
 
         render_menu = self._menu(bar, "&Render")
         self._add(render_menu, "&Render Mix…", "Ctrl+R", arrives=_M7)
@@ -192,6 +401,21 @@ class MainWindow(QMainWindow):
         help_menu = self._menu(bar, "&Help")
         self._add(help_menu, "&Documentation", arrives=_M8)
         self._add(help_menu, f"&About {WINDOW_TITLE}", arrives=_M8)
+
+    def _history_action(
+        self, menu: QMenu, icon: str, text: str, shortcut: str
+    ) -> QAction:
+        """Undo or Redo: one action, shown in the menu and on the toolbar.
+
+        One object rather than two kept in step, so the menu and the toolbar
+        cannot disagree about whether there is anything to undo. The icon is
+        for the toolbar; menus in this application carry none.
+        """
+        action = self._add(menu, text, shortcut)
+        action.setIcon(icons.icon(icon))
+        action.setIconVisibleInMenu(False)
+        self._icon_actions.append((action, icon))
+        return action
 
     def _menu(self, bar: QMenuBar, title: str) -> QMenu:
         """A menu whose action tooltips are actually shown.
@@ -243,39 +467,87 @@ class MainWindow(QMainWindow):
         bar.setIconSize(QSize(16, 16))
         self.addToolBar(bar)
 
-        # Tooltips carry the shortcut and say why the button is dead - a dead
-        # button with no explanation is the whole reason M0 looked unfinished.
-        transport = (
-            ("transport_start", "Return to Start", "Return", _M3),
-            ("play", "Play / Pause", "Space", _M3),
-            ("stop", "Stop", "Esc", _M3),
-            ("loop", "Toggle Loop", "L", _M3),
-        )
-        for name, text, shortcut, arrives in transport:
-            bar.addAction(self._tool_action(name, text, shortcut, arrives))
+        # The Transport menu's own actions, so the button and the key are one.
+        for action in (
+            self._to_start,
+            self._play,
+            self._stop,
+            self._loop,
+            self._repeat,
+        ):
+            bar.addAction(action)
 
         bar.addSeparator()
-        # The playhead readout. Every comparable tool has one, and the ruler
-        # alone cannot give you a value you can read off or type back in.
-        self._position = self._chip("1.1.000", primary=True)
-        self._position.setToolTip(
-            "Playhead position, bars.beats.ticks\n"
-            "Click the ruler label to switch to minutes:seconds.\n"
-            f"Not live yet — {_M3}."
+        # The playhead readout (F-52). Every comparable tool has one, and the
+        # ruler alone cannot give you a value you can read off or type back
+        # in. It reads as the ruler counts and takes either unit typed.
+        self._position = NumericField(
+            0,
+            minimum=0,
+            maximum=LONGEST,
+            step=TIME_STEP,
+            decimals=0,
+            format=Position(self._tempo_now, self._ruler_unit),
         )
+        self._position.setObjectName("PlayheadReadout")
+        self._position.setFixedWidth(96)
+        self._position.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._position.setToolTip(
+            "Playhead position, as the ruler counts - drag, or click and type\n"
+            "Takes bars.beats.ticks, minutes:seconds, or s and ms."
+        )
+        self._position.committed.connect(lambda sample: self.seek(round(sample)))
         bar.addWidget(self._position)
         bar.addSeparator()
-        bar.addWidget(self._chip("120.0 BPM"))
-        bar.addWidget(self._chip("4/4"))
+        # The open project's tempo, signature and snap, read back after every
+        # change the document reports, and each a control: the tempo dragged
+        # or typed, the signature and the snap chosen from a menu (F-16). The
+        # pane edits the same two, and any signature the menu does not list.
+        self._tempo = NumericField(
+            120.0,
+            minimum=TEMPO_FLOOR,
+            maximum=TEMPO_CEILING,
+            step=0.1,
+            format=Plain("BPM", 1),
+        )
+        self._tempo.setObjectName("TempoField")
+        self._tempo.setFixedWidth(92)
+        # Out of the focus chain, like the snap chip, so the window does not
+        # open with a ring around it; a click still gives it the keyboard.
+        self._tempo.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._tempo.setToolTip(
+            "Tempo — drag, or click and type. The grid moves; clips do not."
+        )
+        self._tempo.committed.connect(self._set_tempo)
+        self._signature_chip = QToolButton()
+        self._signature_chip.setObjectName("SignatureChip")
+        self._signature_chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._signature_chip.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._signature_chip.setMenu(QMenu(self._signature_chip))
+        self._signature_chip.menu().aboutToShow.connect(self.signature_menu)
+        self._signature_chip.setToolTip(
+            "Time signature\nAny other in the parameters pane, with nothing selected."
+        )
+        self._snap_chip = QToolButton()
+        self._snap_chip.setObjectName("SnapChip")
+        # Like the buttons the toolbar makes for its actions: out of the
+        # focus chain, so the window does not open with a ring around it.
+        self._snap_chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._snap_chip.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._snap_chip.setMenu(QMenu(self._snap_chip))
+        self._snap_chip.menu().aboutToShow.connect(self.snap_menu)
+        self._snap_chip.setToolTip(
+            "Snap — the grid a drag lands on, and whether it snaps at all\n"
+            "Hold Alt while dragging to place exactly."
+        )
+        bar.addWidget(self._tempo)
+        bar.addWidget(self._signature_chip)
         bar.addSeparator()
-        bar.addWidget(self._chip("Snap 1/16"))
+        bar.addWidget(self._snap_chip)
         bar.addSeparator()
 
-        for name, text, shortcut in (
-            ("undo", "Undo", "Ctrl+Z"),
-            ("redo", "Redo", "Ctrl+Shift+Z"),
-        ):
-            bar.addAction(self._tool_action(name, text, shortcut, _M1))
+        bar.addAction(self._undo)
+        bar.addAction(self._redo)
 
         bar.addSeparator()
 
@@ -294,16 +566,29 @@ class MainWindow(QMainWindow):
         self._arm.setToolTip(f"Automation write-arm  (F-32)\nNot built yet — {_M6}.")
         bar.addWidget(self._arm)
 
-    def _tool_action(
-        self, name: str, text: str, shortcut: str, arrives: str
-    ) -> QAction:
-        action = QAction(icons.icon(name), text, self)
-        action.setToolTip(f"{text}  ({shortcut})\nNot built yet — {arrives}.")
-        action.setEnabled(False)
+        # The info box, at the right end past a spacer that takes the free
+        # width, so it comes and goes without moving anything (D-116).
+        spacer = QWidget()
+        spacer.setObjectName("ToolbarSpacer")
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        bar.addWidget(spacer)
+        self._info = InfoBox(self._activities)
+        self._info.attach(bar.addWidget(self._info))
+
+    def _transport(self, menu: QMenu, icon: str, text: str, shortcut: str) -> QAction:
+        """A transport action, with its icon for the toolbar. Without an
+        output it is disabled, and says why - never a milestone, now that it
+        is built."""
+        action = self._add(menu, text, shortcut)
+        action.setIcon(icons.icon(icon))
         # icons.icon() memoises the rendered QIcon, so a theme change needs
         # the action's icon set again rather than merely invalidated - phase
         # 1's Outcome flagged this and D-82 is where it gets paid for.
-        self._icon_actions.append((action, name))
+        self._icon_actions.append((action, icon))
+        if self._player is None:
+            action.setEnabled(False)
+            reason = self._unavailable or "no audio output"
+            action.setToolTip(f"{action.toolTip()}\nCannot be heard: {reason}")
         return action
 
     def _chip(self, text: str, *, primary: bool = False) -> QLabel:
@@ -323,8 +608,21 @@ class MainWindow(QMainWindow):
     def _build_layout(self) -> QWidget:
         # Left column: media pool over the context-sensitive params pane.
         left = QSplitter(Qt.Orientation.Vertical)
-        left.addWidget(Placeholder("Media Pool", "imported audio, drag to timeline"))
-        left.addWidget(Placeholder("Parameters", "follows the current selection"))
+        self._pool = MediaPool(self._document, self._store, self.audition_media)
+        self._pool.set_hearing(
+            "Double-click to hear it"
+            if self._player is not None
+            else f"Cannot be heard: {self._unavailable or 'no audio output'}"
+        )
+        left.addWidget(self._pool)
+        self._parameters = ParametersPane(
+            self._document,
+            unit=lambda: self._timeline.unit(),
+            peaks=self._store.peaks,
+            audition=self.audition_media if self._player is not None else None,
+            unavailable=self._unavailable,
+        )
+        left.addWidget(self._parameters)
         left.setSizes([_POOL_H, _PARAMS_H])
 
         # Workspace: two tabs (D-49). The editable ortho views share the first
@@ -358,7 +656,8 @@ class MainWindow(QMainWindow):
 
         root = QSplitter(Qt.Orientation.Vertical)
         root.addWidget(upper)
-        root.addWidget(Placeholder("Timeline", "channels, clips, ruler, playhead"))
+        self._timeline = TimelinePanel(self._document, self._axis, self._store)
+        root.addWidget(self._timeline)
         root.setSizes([950 - _TIMELINE_H, _TIMELINE_H])
         root.setStretchFactor(0, 1)
 
@@ -372,15 +671,18 @@ class MainWindow(QMainWindow):
 
     def _build_statusbar(self) -> None:
         bar = QStatusBar()
-        bar.showMessage("No project")
 
         self._xruns = QLabel("xruns 0")
         self._xruns.setStyleSheet(f"color: {theme.color('text.disabled')};")
-        self._xruns.setToolTip("Audio dropouts since the stream started")
+        self._xruns.setToolTip(
+            "Audio dropouts since the application started - quiet at none"
+        )
         bar.addPermanentWidget(self._xruns)
 
         # 04-ui-spec.md, *Accessibility and feel*: left to right, the master
-        # meter (M3), the notice count, the version.
+        # meter, the notice count, the version (F-54, D-118).
+        self._meter = Meter(Qt.Orientation.Horizontal, clip_light=True)
+        bar.addPermanentWidget(self._meter)
         self._notice_count = NoticeCount(self._notices)
         bar.addPermanentWidget(self._notice_count)
         self._notices.observe(self._notices_changed)
@@ -390,6 +692,481 @@ class MainWindow(QMainWindow):
         bar.addPermanentWidget(self._version)
 
         self.setStatusBar(bar)
+
+    # ---------------------------------------------------------- document
+
+    def document(self) -> Document:
+        """The open project. Edits go through it, never around it (D-85)."""
+        return self._document
+
+    def new_project(self) -> bool:
+        """File > New. False when the person chose to keep what was open."""
+        if not self._may_discard():
+            return False
+        self._store.clear()
+        self._document.new()
+        return True
+
+    def open_project(self, path: Path | None = None) -> bool:
+        """File > Open. `path` skips the dialog, for a caller that has one.
+
+        A file that will not open is an `error` notice and nothing else: the
+        document leaves the open project exactly as it was (D-85). Media that
+        is not on this machine is one `warn` notice for the whole open, with a
+        line per file (F-3) - one open raising the count once per sample that
+        moved would be counting the wrong thing.
+        """
+        if not self._may_discard():
+            return False
+        chosen = path if path is not None else self._choose_open_path()
+        if chosen is None:
+            return False
+        try:
+            self._document.open(chosen)
+        except project_io.ProjectFileError as refused:
+            self._report_failure(
+                f"{chosen.name} could not be opened",
+                [str(problem) for problem in refused.problems],
+            )
+            return False
+        except OSError as unreadable:
+            self._report_failure(
+                f"{chosen.name} could not be opened", [_reason(unreadable)]
+            )
+            return False
+
+        # Reaching here, the open succeeded: every failure returned above.
+        self._store.clear()
+        self._load_samples()
+        if self._hrtf_wanted is not None:
+            self.prepare_hrtf()  # the set it names, if it names another
+
+        missing = [
+            media for media in self._document.project.media_pool if media.missing
+        ]
+        if missing:
+            count = len(missing)
+            self._notices.add(
+                Severity.WARN,
+                f"{chosen.name} opened with {count} media "
+                f"file{'s' if count != 1 else ''} missing",
+                [media.path for media in missing],
+            )
+        return True
+
+    def save_project(self) -> bool:
+        """File > Save. An untitled project asks where, through Save As."""
+        path = self._document.path
+        if path is None:
+            return self.save_project_as()
+        return self._written(path, self._document.save)
+
+    def save_project_as(self) -> bool:
+        """File > Save As. A name typed without a suffix gets `.3dim`.
+
+        Otherwise a project saved as "mix" is written, and then hidden by the
+        Open dialog's own filter the next time anyone looks for it.
+        """
+        chosen = self._choose_save_path()
+        if chosen is None:
+            return False
+        if not chosen.suffix:
+            chosen = chosen.with_suffix(project_io.SUFFIX)
+        target = chosen
+        return self._written(target, lambda: self._document.save_as(target))
+
+    def audition_media(self, media_id: str) -> bool:
+        """Play a sample straight to the output, replacing any other (F-8)."""
+        audio = self._store.audio(media_id)
+        if self._player is None or audio is None:
+            return False
+        return self._player.audition(audio.audio)
+
+    def tick(self) -> None:
+        """What the timer does, TICK_HZ times a second: the device looked at
+        from this thread, the playhead drawn where the engine says it is,
+        the page turned if it has left the view, and the xruns counted. A
+        test calls it directly rather than waiting for the timer."""
+        player = self._player
+        if player is None:
+            return
+        player.poll()
+        if self._playing and not player.running:
+            self._set_playing(False)  # the device went: stopped, where it was
+        engine = player.engine
+        self._meter.feed(*engine.take_peaks())
+        self._feed_channel_meters(engine.take_channel_peaks())
+        if self._seek_mark is not None:
+            if not engine.caught_up(self._seek_mark):
+                return  # the engine's playhead is from before the seek
+            self._seek_mark = None
+        position = engine.playhead
+        if player.running and position != self._timeline.playhead():
+            # Only the engine moves it here - a person's seek has already
+            # been drawn - so the page follows it, including the last few
+            # blocks before a pause the previous tick had not seen.
+            self._timeline.set_playhead(position)
+            self._position.set_value(position)
+            self._turn_page(position)
+        self._show_xruns()
+
+    def _feed_channel_meters(self, peaks: list[tuple[str, float, float]]) -> None:
+        """Each header's meter its channel's peaks, by id (D-117). A header
+        the playing snapshot does not hold yet - a channel just added - is
+        fed silence, so every meter falls when nothing plays."""
+        levels = {channel: (left, right) for channel, left, right in peaks}
+        for header in self._timeline.headers.headers():
+            header.meter.feed(*levels.get(header.channel.id, (0.0, 0.0)))
+
+    def meter(self) -> Meter:
+        """The master meter, in the status bar."""
+        return self._meter
+
+    def _report_audio_problem(self, message: str) -> None:
+        self._notices.add(Severity.WARN, message)
+
+    def timeline(self) -> TimelinePanel:
+        return self._timeline
+
+    def pool(self) -> MediaPool:
+        return self._pool
+
+    def store(self) -> MediaStore:
+        """The session's decoded audio and peaks, by media id."""
+        return self._store
+
+    def importing(self) -> bool:
+        """Whether workers are still preparing samples - imported or loaded."""
+        return self._importer.busy or self._loader.busy
+
+    def _load_samples(self) -> None:
+        """Prepare the opened project's samples that are here, into the store.
+
+        Not an edit: nothing in the model changes, so nothing is marked
+        unsaved and no hash is written into an old project (D-89). Samples
+        whose files have gone are not tried - they are already reported.
+        """
+        # A load still running is the project being replaced's: dropped, so
+        # this project's own samples load rather than wait on it (D-114).
+        self._loader.cancel()
+        present = [
+            media for media in self._document.project.media_pool if not media.missing
+        ]
+        if not present:
+            return
+        self._loading = present
+        self._loading_into = self._document.project
+        self._loader.start([Path(media.path) for media in present])
+        *_, total = self._loader.progress()
+        self._load_activity = self._activities.begin(
+            _counted("Loading", 0, len(present), "sample"), maximum=total
+        )
+
+    def _load_progressed(self, done: int, files: int, read: int, total: int) -> None:
+        if self._load_activity is not None:
+            self._load_activity.update(
+                read, maximum=total, label=_counted("Loading", done, files, "sample")
+            )
+
+    def _load_superseded(self) -> None:
+        self._loading, self._loading_into = [], None
+        self._end_load_activity()
+
+    def _end_load_activity(self) -> None:
+        if self._load_activity is not None:
+            self._load_activity.finish()
+            self._load_activity = None
+
+    def _loaded(self, results: list[Prepared | Refused]) -> None:
+        self._end_load_activity()
+        loading, self._loading = self._loading, []
+        into, self._loading_into = self._loading_into, None
+        if into is not self._document.project:
+            return
+        trouble: list[str] = []
+        for media, result in zip(loading, results, strict=True):
+            if isinstance(result, Refused):
+                trouble.append(str(result))
+                continue
+            self._store.keep(media.id, result)
+            if media.hash and media.hash != result.hash:
+                trouble.append(f"{media.name}: has changed since the project was saved")
+        if trouble:
+            self._notices.add(
+                Severity.WARN,
+                f"{len(trouble)} sample{'s' if len(trouble) != 1 else ''} "
+                "did not load as saved",
+                trouble,
+            )
+        self._pool.tree.viewport().update()
+        self._timeline.media_changed()
+        self._parameters.refresh()
+        self._feed_update()
+
+    def import_files(self) -> bool:
+        """File > Import Audio. Several files, prepared on workers."""
+        return self.import_paths(self._choose_audio_files())
+
+    def import_folder(self) -> bool:
+        """File > Import Folder. Everything F-5 can read beneath it (D-93)."""
+        folder = self._choose_folder()
+        if folder is None:
+            return False
+        found = find_audio(folder)
+        if not found:
+            self._notices.add(
+                Severity.INFO, f"No audio found in {folder.name}", [str(folder)]
+            )
+            return False
+        return self.import_paths(found)
+
+    def import_paths(self, paths: list[Path]) -> bool:
+        """Prepare `paths` on workers; the pool fills when all are in (N-3).
+
+        While they are prepared the info box shows how far, with a ✕ that
+        drops the import (D-113, D-114), and the Import actions are disabled.
+        """
+        if not paths or self._importer.busy:
+            return False
+        self._importing_into = self._document.project
+        self._importer.start(list(paths))
+        *_, total = self._importer.progress()
+        self._import_activity = self._activities.begin(
+            _counted("Importing", 0, len(paths), "file"),
+            maximum=total,
+            cancel=self._importer.cancel,
+        )
+        for action in self._import_tips:
+            action.setEnabled(False)
+            action.setToolTip(f"{self._import_tips[action]}\nAn import is running.")
+        return True
+
+    def _import_progressed(self, done: int, files: int, read: int, total: int) -> None:
+        if self._import_activity is not None:
+            self._import_activity.update(
+                read, maximum=total, label=_counted("Importing", done, files, "file")
+            )
+
+    def _import_ended(self) -> None:
+        if self._import_activity is not None:
+            self._import_activity.finish()
+            self._import_activity = None
+        for action, tip in self._import_tips.items():
+            action.setEnabled(True)
+            action.setToolTip(tip)
+
+    def _import_cancelled(self) -> None:
+        """The ✕: nothing was added, and nothing is said - the person did it."""
+        self._importing_into = None
+        self._import_ended()
+
+    def _imported(self, results: list[Prepared | Refused]) -> None:
+        """On the UI thread, the only place the model is edited from.
+
+        One import is one edit, so one Undo takes back a folder of forty.
+        Everything that did not come in is one notice with a line each -
+        success on its own is quiet, since the pool itself shows it.
+        """
+        self._import_ended()
+        into, self._importing_into = self._importing_into, None
+        if into is not self._document.project:
+            self._notices.add(
+                Severity.INFO,
+                "Import set aside: another project was opened while it ran",
+                [str(result.path) for result in results],
+            )
+            return
+
+        admission = admit(self._document.project, results)
+        if admission.admitted:
+            for entry, prepared in admission.admitted:
+                self._store.keep(entry.id, prepared)
+            self._document.push(
+                AddMedia(
+                    self._document.project, [entry for entry, _ in admission.admitted]
+                )
+            )
+            self._timeline.media_changed()
+
+        detail = [str(refusal) for refusal in admission.refused] + [
+            f"{path.name}: already in the pool" for path in admission.already
+        ]
+        if detail:
+            count = len(admission.admitted)
+            self._notices.add(
+                Severity.WARN if admission.refused else Severity.INFO,
+                f"Imported {count} of {len(results)} "
+                f"file{'s' if len(results) != 1 else ''}",
+                detail,
+            )
+
+    def relink_media(self, media: MediaFile, path: Path) -> bool:
+        """Point a sample at another file, and say what that did (D-90).
+
+        M8's relink dialog is the caller in waiting. The same audio is quiet;
+        different audio is allowed and is a `warn`, because the person should
+        know the sample they placed has changed under their clips; a file that
+        cannot stand in is an `error`, since what they asked for did not
+        happen.
+        """
+        name = media.name
+        result = relink(self._document, media, path)
+        if isinstance(result, Refused):
+            self._report_failure(f"{name} was not relinked", [str(result)])
+            return False
+        if result.same_audio is False:
+            self._notices.add(
+                Severity.WARN,
+                f"{name} now points at different audio",
+                [f"{path} is not the file this sample was imported from"],
+            )
+        return True
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Quit asks, like New and Open, and Cancel keeps the window.
+
+        Work still on the workers is asked to stop at its next chunk, so
+        closing does not wait for a folder to finish decoding.
+        """
+        if self._may_discard():
+            self.stop_work()
+            if self._player is not None:
+                self._player.close()
+            event.accept()
+        else:
+            event.ignore()
+
+    def _written(self, path: Path, write: Callable[[], None]) -> bool:
+        """Run a save, and turn a failure into a notice rather than a crash."""
+        try:
+            write()
+        except project_io.ProjectFileError as refused:
+            self._report_failure(
+                f"{path.name} was not saved",
+                [str(problem) for problem in refused.problems],
+            )
+            return False
+        except OSError as failed:
+            self._report_failure(f"{path.name} was not saved", [_reason(failed)])
+            return False
+        return True
+
+    def _report_failure(self, message: str, detail: list[str]) -> None:
+        self._notices.add(Severity.ERROR, message, detail)
+
+    def _may_discard(self) -> bool:
+        """Whether the open project may be replaced or closed.
+
+        ⚠️ **Save goes ahead only if the save worked.** A Save As dialog that
+        was cancelled, or a write that failed, must not be followed by
+        throwing away the project somebody just asked to keep.
+        """
+        if not self._document.is_dirty:
+            return True
+        answer = self._ask_about_unsaved()
+        if answer is Unsaved.CANCEL:
+            return False
+        if answer is Unsaved.SAVE:
+            return self.save_project()
+        return True
+
+    # --- the places this window waits for a person. Methods, so a
+    # --- test replaces them; conftest.py fails any test that reaches the
+    # --- real dialogs instead of hanging on them.
+
+    def _ask_about_unsaved(self) -> Unsaved:
+        """04's one confirmation. An instance and `exec()`, never the static
+        `QMessageBox.question`, which runs its loop where no test can reach."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(WINDOW_TITLE)
+        box.setText(f"Save changes to {self._document.title}?")
+        box.setInformativeText("Your changes will be lost if you don't save them.")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        box.setEscapeButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        return {
+            QMessageBox.StandardButton.Save: Unsaved.SAVE,
+            QMessageBox.StandardButton.Discard: Unsaved.DISCARD,
+        }.get(box.standardButton(box.clickedButton()), Unsaved.CANCEL)
+
+    def _choose_open_path(self) -> Path | None:
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", self._dialog_directory(), PROJECT_FILTER
+        )
+        return Path(chosen) if chosen else None
+
+    def _choose_save_path(self) -> Path | None:
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", self._dialog_directory(), PROJECT_FILTER
+        )
+        return Path(chosen) if chosen else None
+
+    def _choose_audio_files(self) -> list[Path]:
+        chosen, _ = QFileDialog.getOpenFileNames(
+            self, "Import Audio", self._dialog_directory(), AUDIO_FILTER
+        )
+        return [Path(each) for each in chosen]
+
+    def _choose_folder(self) -> Path | None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Import Folder", self._dialog_directory()
+        )
+        return Path(chosen) if chosen else None
+
+    def _dialog_directory(self) -> str:
+        path = self._document.path
+        return str(path.parent) if path is not None else ""
+
+    def _document_changed(self) -> None:
+        """Read the document back into everything that shows it.
+
+        The title uses Qt's `[*]` placeholder, so unsaved changes are marked
+        the way each platform marks them - an asterisk on Windows and Linux, a
+        dot in the close button on macOS - rather than one glyph imposed on
+        all three.
+        """
+        document = self._document
+        self.setWindowTitle(f"{document.title}[*] — {WINDOW_TITLE}")
+        project = document.project
+        self._tempo.set_value(project.bpm)
+        self._signature_chip.setText("{}/{}".format(*project.time_signature))
+        self._snap_chip.setText(snap_text(project.snap))
+        self.setWindowModified(document.is_dirty)
+        for action, able, nothing in (
+            (self._undo, document.can_undo, "Nothing to undo."),
+            (self._redo, document.can_redo, "Nothing to redo."),
+        ):
+            action.setEnabled(able)
+            # 04, Craft: a disabled control says why. "Not built yet" is one
+            # reason; having nothing to undo is the other.
+            summary = action.toolTip().partition("\n")[0]
+            action.setToolTip(summary if able else f"{summary}\n{nothing}")
+        self._clipboard_changed()
+        self._loop_changed()
+        self._send_repeat()
+
+    def _loop_changed(self) -> None:
+        """The loop switch after a change to the project: off for a project
+        just opened (D-108), off when an Undo took the region away, and the
+        engine told the region as it now stands."""
+        project = self._document.project
+        if project is not self._looping_for or project.loop is None:
+            self._looping_for = project
+            self._loop.setChecked(False)
+        able = self._player is not None and project.loop is not None
+        self._loop.setEnabled(able)
+        summary = self._loop.toolTip().partition("\n")[0]
+        if able:
+            self._loop.setToolTip(summary)
+        elif self._player is not None:
+            self._loop.setToolTip(f"{summary}\nDraw a loop region in the ruler first.")
+        self._send_loop()
 
     # ----------------------------------------------------------- theming
 
@@ -477,12 +1254,29 @@ class MainWindow(QMainWindow):
         because every widget in that walk re-reads its colours through the
         accessor, and one that runs before `use()` has landed gets the colour
         it already had.
+
+        **A theme that is already applied is not applied again.** Qt re-polishes
+        every widget on every `setStyleSheet`, identical sheet or not, and a
+        fresh window's `restore_theme()` asks for exactly the theme
+        `build_application()` has just applied - which was half the cost of
+        building a window, for nothing that changes on screen. Both halves of
+        the check are needed: the active theme can be right while the
+        application still wears another's sheet, and then it has to be
+        painted. The sheet is compared only once the theme matches, so a real
+        switch does exactly the work, in exactly the order, described above.
         """
+        app = QApplication.instance()
+        if (
+            chosen == theme.active()
+            and isinstance(app, QApplication)
+            and app.styleSheet() == theme.stylesheet(chosen)
+        ):
+            return
+
         theme.use(chosen)
         icons.icon.cache_clear()
         icons.app_icon.cache_clear()
 
-        app = QApplication.instance()
         if isinstance(app, QApplication):
             app.setStyleSheet(theme.stylesheet(chosen))
 
@@ -504,8 +1298,348 @@ class MainWindow(QMainWindow):
         self._arm.setIcon(icons.icon("arm"))
         for label, token in self._chips:
             label.setStyleSheet(f"color: {theme.color(token)}; padding: 0 8px;")
-        for label in (self._xruns, self._version):
-            label.setStyleSheet(f"color: {theme.color('text.disabled')};")
+        self._version.setStyleSheet(f"color: {theme.color('text.disabled')};")
+        self._show_xruns()
+        self._play.setIcon(icons.icon("pause" if self._playing else "play"))
+
+    def toggle_bypass(self) -> None:
+        """B: HRTF bypass on every selected channel, as one edit. If any is
+        off they all go on; if all are on they all go off - so one press
+        never leaves the selection split."""
+        channels = self._document.selection.channels()
+        if not channels:
+            return
+        on = not all(channel.hrtf_bypass for channel in channels)
+        self._document.push(
+            Compound(
+                [
+                    SetAttribute(channel, "hrtf_bypass", on)
+                    for channel in channels
+                    if channel.hrtf_bypass != on
+                ]
+            )
+        )
+
+    def snap_menu(self) -> QMenu:
+        """The snap chip's menu, filled for the project's setting as it is
+        now; each choice is one command."""
+        project = self._document.project
+
+        def choose(chosen: SnapSetting | None) -> None:
+            if chosen is not None and chosen != project.snap:
+                self._document.push(SetAttribute(project, "snap", chosen))
+
+        return fill_snap_menu(self._snap_chip.menu(), project.snap, choose)
+
+    def _set_tempo(self, bpm: float) -> None:
+        # The field commits only a value that differs from the one it shows,
+        # which is the project's.
+        self._document.push(SetAttribute(self._document.project, "bpm", bpm))
+
+    def signature_menu(self) -> QMenu:
+        """The signature chip's menu: the common ones, the project's checked,
+        each one command. Any other is set in the pane."""
+        menu = self._signature_chip.menu()
+        menu.clear()
+        project = self._document.project
+        for signature in COMMON_SIGNATURES:
+            action = menu.addAction("{}/{}".format(*signature))
+            action.setCheckable(True)
+            action.setChecked(signature == project.time_signature)
+            action.triggered.connect(
+                lambda _checked=False, chosen=signature: self._set_signature(chosen)
+            )
+        return menu
+
+    def _set_signature(self, signature: tuple[int, int]) -> None:
+        project = self._document.project
+        if signature != project.time_signature:
+            self._document.push(SetAttribute(project, "time_signature", signature))
+
+    def set_ruler_unit(self, unit: Unit) -> None:
+        """What the ruler counts in, and so what the pane's positions read."""
+        self._timeline.set_unit(unit)
+        self._parameters.refresh()
+        self._position.refresh()
+
+    def parameters(self) -> ParametersPane:
+        return self._parameters
+
+    def split_clips(self) -> None:
+        """S: every selected clip under the playhead in two, as one edit;
+        the tails join the selection beside their heads."""
+        selection = self._document.selection
+        split = SplitClips(
+            self._document.project, selection.clips(), self._timeline.playhead()
+        )
+        if split.changes:
+            self._document.push(split)
+            selection.add(Kind.CLIPS, split.tails)
+
+    def duplicate_clips(self) -> None:
+        """Ctrl+D: the selection copied to just after itself, and the copies
+        selected, so pressing it again carries the run on."""
+        selection = self._document.selection
+        duplicate = DuplicateClips(self._document.project, selection.clips())
+        if duplicate.changes:
+            self._document.push(duplicate)
+            selection.select(Kind.CLIPS, duplicate.copies)
+
+    def delete_clips(self) -> None:
+        """Delete: every selected clip, as one edit."""
+        remove = RemoveClips(self._document.project, self._document.selection.clips())
+        if remove.changes:
+            self._document.push(remove)
+
+    def copy_clips(self) -> None:
+        """Ctrl+C: copies of the selected clips onto the clipboard (D-99).
+        Not an edit - the project is as it was, and nothing is unsaved."""
+        clips = self._document.selection.clips()
+        if not clips:
+            return
+        self._document.clipboard.hold(self._document.project, clips)
+        self._clipboard_changed()
+
+    def cut_clips(self) -> None:
+        """Ctrl+X: Copy, and then Delete as one edit. Undo puts the clips
+        back and leaves the clipboard as it is."""
+        clips = self._document.selection.clips()
+        if not clips:
+            return
+        self._document.clipboard.hold(self._document.project, clips)
+        self._document.push(RemoveClips(self._document.project, clips))
+
+    def paste_clips(self) -> None:
+        """Ctrl+V: the clipboard at the playhead on the focused channel, as
+        one edit (D-100); what was pasted becomes the selection, so it can
+        be moved at once."""
+        document = self._document
+        clipboard = document.clipboard
+        if not clipboard.pastable(document.project):
+            return
+        paste = PasteClips(
+            document.project,
+            clipboard.held(),
+            clipboard.lane(document.project, self._timeline.view.focused()),
+            self._timeline.playhead(),
+            theme.active().channels,
+        )
+        document.push(paste)
+        document.selection.select(Kind.CLIPS, paste.copies)
+
+    def _clipboard_changed(self) -> None:
+        """Paste is enabled exactly when the clipboard can be pasted - after
+        a Copy, and after any edit, since an Undo can take a copied clip's
+        sample out of the pool (D-99)."""
+        document = self._document
+        able = document.clipboard.pastable(document.project)
+        if able:
+            why = ""
+        elif document.clipboard:
+            why = "\nA copied clip's sample is no longer in the pool."
+        else:
+            why = "\nCut or copy a clip first."
+        summary = self._paste.toolTip().partition("\n")[0]
+        self._paste.setEnabled(able)
+        self._paste.setToolTip(summary + why)
+
+    def _selection_changed(self) -> None:
+        """What acts on the selection is enabled exactly when it can act."""
+        kind = self._document.selection.kind
+        for action, able, wanted in (
+            (self._bypass, kind is Kind.CHANNELS, "a channel"),
+            (self._cut, kind is Kind.CLIPS, "a clip"),
+            (self._copy, kind is Kind.CLIPS, "a clip"),
+            (self._split, kind is Kind.CLIPS, "a clip"),
+            (self._duplicate, kind is Kind.CLIPS, "a clip"),
+            (self._delete, kind is Kind.CLIPS, "a clip"),
+        ):
+            action.setEnabled(able)
+            summary = action.toolTip().partition("\n")[0]
+            action.setToolTip(summary if able else f"{summary}\nSelect {wanted} first.")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Esc clears the selection while the transport is stopped (04,
+        *Selection*). With an output, Transport > Stop owns Esc and does it
+        itself (D-110); without one, Stop is disabled, a disabled action's
+        shortcut lets the key through, and it arrives here."""
+        if event.key() == Qt.Key.Key_Escape:
+            self._document.selection.clear()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    # ---------------------------------------------------------- transport
+
+    def playing(self) -> bool:
+        return self._playing
+
+    def play_pause(self) -> None:
+        """Space: play from the playhead, or pause where it is (D-110)."""
+        if self._player is None:
+            return
+        if self._playing:
+            self._player.pause()
+            self._set_playing(False)
+            return
+        self._started_at = self._timeline.playhead()
+        if self._player.play():
+            self._set_playing(True)
+
+    def stop(self) -> None:
+        """Esc: silence. An audition stops, and the transport stops with the
+        playhead back where playback last started. With nothing sounding,
+        clear the selection (D-110, D-115)."""
+        auditioning = self._player is not None and self._player.auditioning
+        if self._player is not None and auditioning:
+            self._player.stop_audition()
+        if self._player is None or not self._playing:
+            if not auditioning:
+                self._document.selection.clear()
+            return
+        self._player.pause()
+        self._set_playing(False)
+        self.seek(self._started_at)
+
+    def return_to_start(self) -> None:
+        """Enter: the playhead to 0, playing or not - and, playing, 0 is
+        where Stop goes back to."""
+        if self._playing:
+            self._started_at = 0
+        self.seek(0)
+
+    def seek(self, sample: int) -> None:
+        """Put the playhead at `sample`, and the engine there too."""
+        sample = max(sample, 0)
+        self._timeline.set_playhead(sample)
+        self._position.set_value(sample)
+        if self._player is not None:
+            self._player.seek(sample)
+            self._seek_mark = self._player.engine.sent()
+
+    def set_looping(self, on: bool) -> None:
+        """L, or a region just drawn: loop over the region, or not."""
+        self._timeline.set_looping(on and self._document.project.loop is not None)
+        self._send_loop()
+
+    def _send_loop(self) -> None:
+        if self._player is None:
+            return
+        region = self._document.project.loop
+        if region is None:
+            self._player.set_loop(0, 0, False)
+        else:
+            self._player.set_loop(region.start, region.end, self._loop.isChecked())
+
+    def _send_repeat(self) -> None:
+        """The project's end, which every edit may move, and whether to go
+        back to 0 there."""
+        if self._player is not None:
+            self._player.set_repeat(
+                self._document.project.length, self._repeat.isChecked()
+            )
+
+    def _set_playing(self, on: bool) -> None:
+        self._playing = on
+        self._play.setIcon(icons.icon("pause" if on else "play"))
+
+    def _feed_update(self) -> None:
+        if self._feed is not None:
+            self._feed.update(self._document.project)
+
+    def _ruler_unit(self) -> Unit:
+        """What the ruler counts in - bars while the window is still being
+        built, which is what the ruler starts in."""
+        timeline = self.__dict__.get("_timeline")
+        return timeline.unit() if timeline is not None else Unit.BARS
+
+    def _tempo_now(self) -> tuple[float, tuple[int, int]]:
+        project = self._document.project
+        return project.bpm, project.time_signature
+
+    def _turn_page(self, sample: int) -> None:
+        """A playhead that has left the view brings the view to it, a tenth
+        of the way in (D-110)."""
+        first, last = self._axis.visible()
+        if not first <= sample < last:
+            self._axis.scroll_to(
+                round(sample / self._axis.scale - self._axis.width / 10)
+            )
+
+    def _show_xruns(self) -> None:
+        """Quiet at none, and `error` from the first (04, *Accessibility and
+        feel*)."""
+        count = self._player.engine.xruns if self._player is not None else 0
+        self._xruns.setText(f"xruns {count}")
+        token = "error" if count else "text.disabled"
+        self._xruns.setStyleSheet(f"color: {theme.color(token)};")
+
+    def stop_work(self) -> None:
+        """Ask everything on a worker to stop at its next chunk: imports,
+        loads, and preparing the HRTF set. A close does this, and so does
+        `app.run` when the loop ends by other means."""
+        self._importer.cancel()
+        self._loader.cancel()
+        self._hrtf.cancel()
+        if self._hrtf_activity is not None:
+            self._hrtf_activity.finish()
+            self._hrtf_activity = None
+
+    # ------------------------------------------------------------- hrtf
+
+    def prepare_hrtf(self) -> bool:
+        """Prepare the project's HRTF set on a worker, at the output's block
+        size (D-120), showing it in the info box. Asked for by `app.run` and
+        by an open once it has been - never by building a window, so no test
+        pays for a set it did not ask for. Without an output there is nothing
+        to hear a set through, and nothing is prepared."""
+        if self._player is None:
+            return False
+        wanted = (self._document.project.hrtf.id, self._player.engine.block)
+        if wanted == self._hrtf_wanted and (self._bank is not None or self._hrtf.busy):
+            return False
+        self._hrtf_wanted = wanted
+        self._hrtf.start(*wanted)
+        if self._hrtf_activity is None:
+            self._hrtf_activity = self._activities.begin(
+                "Preparing the HRTF set", maximum=1000
+            )
+        return True
+
+    def bank(self) -> Bank | None:
+        """The prepared HRTF set, once it is."""
+        return self._bank
+
+    def _hrtf_progressed(self, thousandths: int) -> None:
+        if self._hrtf_activity is not None:
+            self._hrtf_activity.update(thousandths)
+
+    def _hrtf_prepared(self, bank: Bank) -> None:
+        self._bank = bank
+        self._end_hrtf_activity()
+        if self._feed is not None:
+            self._feed.set_bank(bank)  # heard where each channel is, from now
+
+    def _hrtf_refused(self, refused: Refused) -> None:
+        self._end_hrtf_activity()
+        self._notices.add(
+            Severity.WARN,
+            f"{refused.path} {refused.reason}",
+            ["Sounds cannot be placed around the listener until it is there."],
+        )
+
+    def _end_hrtf_activity(self) -> None:
+        if self._hrtf_activity is not None:
+            self._hrtf_activity.finish()
+            self._hrtf_activity = None
+
+    def activities(self) -> Activities:
+        """Anything slow begins an activity here, and the info box shows it
+        (D-116): the import and the load today, render at M7."""
+        return self._activities
+
+    def info_box(self) -> InfoBox:
+        return self._info
 
     def notices(self) -> NoticeLog:
         """This session's notice log, for anything that needs to report.
@@ -519,3 +1653,13 @@ class MainWindow(QMainWindow):
         if (latest := self._notices.latest()) is not None:
             self.statusBar().showMessage(latest.message)
         self._notice_count.refresh()
+
+
+def _counted(doing: str, done: int, of: int, thing: str) -> str:
+    """*Importing 7 of 22 files*: what the info box says of a batch."""
+    return f"{doing} {done} of {of} {thing}{'s' if of != 1 else ''}"
+
+
+def _reason(error: OSError) -> str:
+    """What the filesystem said, without Python's `[Errno 2]` wrapping."""
+    return error.strerror or str(error)

@@ -23,6 +23,7 @@ file and the undo stack needs to refuse an edit before applying it.
 
 from __future__ import annotations
 
+import math
 import random
 import re
 from collections.abc import Collection, Sequence
@@ -40,6 +41,14 @@ from immersive.core.time import SAMPLE_RATE, Division
 MEDIA_PREFIX = "m"
 CHANNEL_PREFIX = "c"
 CLIP_PREFIX = "k"
+
+#: The shortest a trim or a split leaves a clip: two of D-42's implicit
+#: 32-sample fades end to end, so the two never overlap (D-98).
+MIN_CLIP_LENGTH = 64
+
+#: The shortest loop region (D-108): the engine wraps a block at most
+#: `block // MIN_LOOP_LENGTH + 1` times, and needs that bounded.
+MIN_LOOP_LENGTH = 64
 
 _ID_PATTERN = re.compile(r"^[mck]-[0-9a-f]{8}$")
 _HEX_COLOUR = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -62,6 +71,20 @@ class Interpolatable(StrEnum):
 class FadeShape(StrEnum):
     LINEAR = "linear"
     EQUAL_POWER = "equal_power"
+
+    def gain(self, t: float) -> float:
+        """The gain a fade-in of this shape has `t` of the way through it,
+        0 to 1; a fade-out is the same curve read backwards, `gain(1 - t)`.
+
+        One function for what the clip draws and what the engine plays, so
+        the two cannot disagree. Equal power is a quarter sine: two of them
+        crossed have powers summing to one, which is what keeps a crossfade
+        from dipping in the middle.
+        """
+        t = min(max(t, 0.0), 1.0)
+        if self is FadeShape.EQUAL_POWER:
+            return math.sin(t * math.pi / 2)
+        return t
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +127,19 @@ class Distance:
     rolloff: float = 1.0
     min_distance: float = 0.2
     ref_distance: float = 1.0
+
+
+@dataclass
+class LoopRegion:
+    """The stretch of the timeline the transport loops over while looping
+    is on (D-108): from `start`, up to but not including `end`."""
+
+    start: int
+    end: int
+
+    @property
+    def length(self) -> int:
+        return self.end - self.start
 
 
 @dataclass
@@ -194,6 +230,9 @@ class Project:
     hrtf: HrtfRef = field(default_factory=HrtfRef)
     distance: Distance = field(default_factory=Distance)
     master: Master = field(default_factory=Master)
+    #: Where the transport loops, or nowhere. Saved with the project; whether
+    #: it is looping is the transport's, and off when a project opens (D-108).
+    loop: LoopRegion | None = None
     media_pool: list[MediaFile] = field(default_factory=list)
     channels: list[Channel] = field(default_factory=list)
 
@@ -253,6 +292,36 @@ def new_channel_id(project: Project, rng: random.Random | None = None) -> str:
 
 def new_clip_id(project: Project, rng: random.Random | None = None) -> str:
     return mint_id(CLIP_PREFIX, all_ids(project), rng)
+
+
+def new_channel(
+    project: Project, palette: Sequence[str], rng: random.Random | None = None
+) -> Channel:
+    """The channel Add Channel makes: named and coloured in turn.
+
+    Its colour is the palette colour after the last channel's own, wrapping
+    after the end, so the turn follows the project rather than a counter kept
+    beside it that Undo would also have to put back. A last colour not in the
+    palette - picked by hand, or from another theme's palette - starts the
+    turn at the channel count instead. The palette is the active theme's
+    (D-75), passed in, so nothing here knows about themes.
+
+    The name is `Channel N`, N one more than the count and raised past any
+    name already taken.
+    """
+    if not palette:
+        raise ValueError("a palette needs at least one colour")
+    taken = {channel.name for channel in project.channels}
+    number = len(project.channels) + 1
+    while f"Channel {number}" in taken:
+        number += 1
+
+    colours = [colour.upper() for colour in palette]
+    last = project.channels[-1].color.upper() if project.channels else None
+    turn = (
+        colours.index(last) + 1 if last in colours else len(project.channels)
+    ) % len(palette)
+    return Channel(new_channel_id(project, rng), f"Channel {number}", palette[turn])
 
 
 # --------------------------------------------------------------------------- #
@@ -322,6 +391,15 @@ def validate(project: Project) -> list[Problem]:
         found.append(Problem("project", f"bpm is {project.bpm}"))
     if any(part <= 0 for part in project.time_signature):
         found.append(Problem("project", f"time_signature is {project.time_signature}"))
+    loop = project.loop
+    if loop is not None and (loop.start < 0 or loop.length < MIN_LOOP_LENGTH):
+        found.append(
+            Problem(
+                "project.loop",
+                f"runs from {loop.start} to {loop.end}; a loop starts at 0 or "
+                f"later and is at least {MIN_LOOP_LENGTH} samples long",
+            )
+        )
 
     seen: dict[str, str] = {}
 
@@ -386,6 +464,19 @@ def validate(project: Project) -> list[Problem]:
                 found.append(Problem(clip_where, f"length is {clip.length}"))
             if clip.start < 0:
                 found.append(Problem(clip_where, f"start is {clip.start}"))
+            # D-101: a gain curve rising and falling over the same samples
+            # has no one meaning, so the two fades may meet but not cross.
+            fades = (clip.fade_in.length, clip.fade_out.length)
+            if min(fades) < 0:
+                found.append(Problem(clip_where, f"fade lengths are {fades}"))
+            elif sum(fades) > clip.length:
+                found.append(
+                    Problem(
+                        clip_where,
+                        f"fades of {fades[0]} and {fades[1]} overlap in a clip "
+                        f"{clip.length} long",
+                    )
+                )
 
             if previous_end is not None and clip.start < previous_end:
                 found.append(

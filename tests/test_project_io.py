@@ -51,6 +51,7 @@ from immersive.core.model import (
     FadeShape,
     HrtfRef,
     Interpolatable,
+    LoopRegion,
     Master,
     MediaFile,
     Position,
@@ -1788,3 +1789,51 @@ def test_the_milestone_acceptance(tmp_path: Path) -> None:
     assert result.project == project
     assert result.problems == []
     assert result.project.channels[1].automation["pos.x"].value_at(24_000) == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# the loop region (D-108)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_loop_region_survives_a_save_and_a_reopen(tmp_path: Path) -> None:
+    project = a_project(tmp_path)
+    project.loop = LoopRegion(96_000, 192_000)
+    path = tmp_path / "a.3dim"
+    save(project, path)
+
+    assert json.loads(path.read_text("utf-8"))["loop"] == {
+        "start": 96_000,
+        "end": 192_000,
+    }
+    assert load(path).project.loop == LoopRegion(96_000, 192_000)
+
+
+@pytest.mark.parametrize("stored", ["absent", "null"])
+def test_a_file_with_no_loop_region_opens_with_none(
+    tmp_path: Path, stored: str
+) -> None:
+    """A file from before loop regions has none, and null says the same."""
+    path = tmp_path / "a.3dim"
+    save(a_project(tmp_path), path)
+    document = json.loads(path.read_text("utf-8"))
+    if stored == "absent":
+        del document["loop"]
+    else:
+        assert document["loop"] is None
+    path.write_text(json.dumps(document), "utf-8")
+    assert load(path).project.loop is None
+
+
+@pytest.mark.parametrize(
+    ("start", "end"), [(1_000, 1_063), (2_000, 1_000), (-10, 1_000)]
+)
+def test_a_region_too_short_backwards_or_before_zero_is_refused(
+    tmp_path: Path, start: int, end: int
+) -> None:
+    project = a_project(tmp_path)
+    project.loop = LoopRegion(start, end)
+    [problem] = validate(project)
+    assert problem.where == "project.loop"
+    with pytest.raises(ProjectFileError):
+        save(project, tmp_path / "a.3dim")

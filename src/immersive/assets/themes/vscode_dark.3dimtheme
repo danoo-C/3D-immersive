@@ -22,9 +22,78 @@
       "pressed.background": "accent.pressed",
       "text": "text.primary"
     },
+    "channel": {
+      "background": "surface.raised",
+      "border": "border",
+      "bypass.background": "text.secondary",
+      "bypass.text": "surface.window",
+      "mute.background": "warn",
+      "mute.text": "surface.window",
+      "name": "text.primary",
+      "quiet": "text.disabled",
+      "selected.background": "surface.hover",
+      "selected.marker": "accent",
+      "solo.background": "accent.text",
+      "solo.text": "surface.window"
+    },
+    "check": {
+      "background": "surface.window",
+      "box": "text.disabled",
+      "checked": "accent",
+      "disabled": "text.disabled",
+      "focus": "accent",
+      "text": "text.primary",
+      "tick": "text.primary"
+    },
+    "clip": {
+      "body": "channel",
+      "fade": "text.primary",
+      "fade.handle": "text.secondary",
+      "missing": "text.disabled",
+      "selected.border": "accent",
+      "text": "text.primary",
+      "waveform": "channel"
+    },
+    "combo": {
+      "background": "surface.window",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "focus.border": "accent",
+      "list.background": "surface.raised",
+      "list.border": "border",
+      "list.selected.background": "surface.hover",
+      "list.text": "text.primary",
+      "text": "text.primary"
+    },
+    "filter": {
+      "background": "surface.window",
+      "border": "border",
+      "focus.border": "accent",
+      "text": "text.primary"
+    },
     "focus": {
       "menu.background": "surface.hover",
       "ring": "accent"
+    },
+    "header": {
+      "background": "surface.raised",
+      "border": "border",
+      "text": "text.secondary"
+    },
+    "info": {
+      "background": "surface.raised",
+      "bar": "accent",
+      "border": "border",
+      "more": "text.secondary",
+      "text": "text.primary",
+      "track": "surface.hover"
+    },
+    "input": {
+      "background": "surface.window",
+      "border": "border",
+      "disabled.text": "text.disabled",
+      "focus.border": "accent",
+      "text": "text.primary"
     },
     "menu": {
       "background": "surface.raised",
@@ -37,9 +106,26 @@
       "selected.text": "text.primary",
       "separator": "border"
     },
+    "meter": {
+      "background": "surface.hover",
+      "clip": "warn",
+      "clip.text": "surface.window",
+      "hold": "text.primary",
+      "hot": "warn",
+      "level": "accent"
+    },
+    "pane": {
+      "heading": "text.primary",
+      "label": "text.secondary"
+    },
     "panel": {
       "background": "surface.panel",
       "text": "text.primary"
+    },
+    "ruler": {
+      "background": "surface.raised",
+      "text": "text.secondary",
+      "tick": "text.disabled"
     },
     "scrollbar": {
       "background": "surface.panel",
@@ -66,6 +152,17 @@
       "selected.text": "text.primary",
       "text": "text.secondary"
     },
+    "timeline": {
+      "background": "surface.panel",
+      "band": "accent",
+      "drop": "accent",
+      "grid": "border",
+      "grid.beat": "surface.hover",
+      "grid.division": "surface.raised",
+      "loop.region": "accent.pressed",
+      "playhead": "accent",
+      "separator": "border"
+    },
     "toolbar": {
       "background": "surface.raised",
       "border": "border",
@@ -75,6 +172,19 @@
       "background": "surface.raised",
       "border": "accent.pressed",
       "text": "text.primary"
+    },
+    "tree": {
+      "background": "surface.panel",
+      "hover.background": "surface.raised",
+      "selected.background": "surface.hover",
+      "selected.text": "text.primary",
+      "text": "text.primary"
+    },
+    "waveform": {
+      "background": "surface.panel",
+      "centre": "border",
+      "fill": "text.secondary",
+      "missing": "warn"
     },
     "window": {
       "background": "surface.window"

@@ -97,6 +97,7 @@ Project
 ├── hrtf             HrtfRef
 ├── distance         { rolloff, min_distance, ref_distance }
 ├── master           { gain_db, limiter_on }
+├── loop             { start, end } or null  where the transport loops (D-108)
 ├── media_pool       [MediaFile]
 └── channels         [Channel]              ordered, top to bottom
 
@@ -196,7 +197,43 @@ another's time is a collision to resolve, not a reordering.
   order and index fields disagreed had no defined meaning.
 - Clips on one channel never overlap. Dropping onto an occupied span trims the
   existing clip (magnetic behaviour); a modifier opts out and rejects the drop.
+  A clip the drop covers entirely is removed, and one reaching past both ends
+  of the drop is split around it, both outer parts staying where they were
+  (D-95).
+- **A move lands as a drop does** (D-97). The moved clips are lifted first,
+  so none of them trims another, and then overwrite what they cover by the
+  rule above. Every one moves by the same time and the same number of
+  channels, stopping together at the first and last channel and at 0.
+- **A trim stops at the neighbour** (D-98): an edge goes out no further than
+  its sample reaches or than the next clip on its channel, and in no shorter
+  than `MIN_CLIP_LENGTH`, 64 samples. Moving the start moves the offset with
+  it, so the clip still plays the samples it played.
+- **A split** leaves the head as the clip and makes the tail a new one;
+  together they play exactly the samples the clip did. It is not made where
+  either part would be shorter than `MIN_CLIP_LENGTH`.
+- **A paste lands as a drop does** (D-100). The pasted clips are new ones,
+  with fresh ids, copied from what Copy or Cut took (D-99). They keep their
+  distances from each other in time and in channels, and they overwrite what
+  they cover by the rule above. Channels a paste needs past the last are
+  made in the same edit.
+- A fade stays on its edge through a trim or a split, cut to fit what is
+  left, and an edge a split or a drop made has none of its own.
+- **A fade's shape is its gain curve**, `t` of the way through it: linear
+  is `t`, and equal power `sin(t·π/2)`, so two equal-power fades crossed
+  keep the power constant. A fade-out is the same curve read backwards.
+  `FadeShape.gain` is the one definition, which the clip draws and the
+  engine plays.
+- **Two fades never overlap** (D-101): a clip's fade-in and fade-out
+  together are no longer than the clip, and may meet. A trim that leaves
+  too little room shortens the fade on the edge it moves first, and the
+  other only if that is not enough.
+- **A slip** changes which samples a clip plays and nothing else: its
+  offset moves within its sample and stops at the sample's ends, while its
+  start, length and fades stay (D-102).
 - `offset + length` must not exceed `MediaFile.frames`.
+- **A loop region** starts at 0 or later and is at least 64 samples long
+  (D-108). `null` means there is none, and so does the key's absence, which
+  is how a file from before loop regions reads.
 - A channel with no keyframes for an axis uses its static `position` component.
   With one keyframe, that value holds for the whole timeline.
 - Before the first keyframe and after the last, the curve holds flat.
@@ -278,6 +315,7 @@ git-friendliness D-13 was for. The filesystem already knows.
   "hrtf": { "kind": "builtin", "id": "sadie-d1" },
   "distance": { "rolloff": 1.0, "min_distance": 0.2, "ref_distance": 1.0 },
   "master": { "gain_db": 0.0, "limiter_on": true },
+  "loop": { "start": 0, "end": 384000 },
   "media_pool": [
     {
       "id": "m-3f2a91c7", "path": "samples/kick.wav", "name": "kick.wav",
@@ -344,6 +382,25 @@ it.
 > entry has been added. `tests/test_project_io.py` now loads this block
 > directly, so the example cannot drift away from the format again.
 
+### What decoding decides
+
+`frames` is the file's length **at 48 kHz**: its own frame count times 48 000
+over its rate, rounded half up. That is what `soxr` produces, and the rule is
+kept in integers because a float product of two large counts can land either
+side of an exact half. A 48 kHz file is not passed through `soxr` at all.
+That is a saving, not a safeguard: `soxr` returns equal-rate audio exactly —
+measured — so skipping it saves a copy of the whole file rather than
+protecting a single sample.
+
+Integer formats arrive within ±1 by construction. **Float formats arrive
+unchanged, overs included**: a float file may legitimately hold 2.0, and
+clipping it on import would change the audio before anyone heard it. Overs
+are the master limiter's business (D-54).
+
+`name` is the file's whole name, suffix included — `kick.wav` and `kick.mp3`
+are two samples and should look it. A file with more than two channels is
+refused rather than folded down (D-87).
+
 ## Caches, not project data
 
 One **user-level** cache directory, safe to delete at any time, never
@@ -354,6 +411,10 @@ committed and never beside the project (D-59):
 | Linux | `$XDG_CACHE_HOME/3dimmersive`, default `~/.cache/3dimmersive` |
 | macOS | `~/Library/Caches/3dimmersive` |
 | Windows | `%LOCALAPPDATA%\3dImmersive\Cache` |
+
+`core` works this out itself from those variables rather than asking Qt
+(D-91), which is also what lets the test suite point it somewhere harmless on
+every platform.
 
 - Peak pyramids per media file, keyed by content hash.
 - Decoded + resampled audio, if we later decide re-decoding on load is too slow.

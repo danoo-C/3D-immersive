@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from immersive.audio.hrtf import sofa
 from immersive.ui import theme, theme_io
 
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -59,6 +60,7 @@ def test_stylesheet_substitutes_every_placeholder() -> None:
     assert theme.color("surface.window") in qss
 
 
+@pytest.mark.gui
 def test_stylesheet_parses(capfd: pytest.CaptureFixture[str]) -> None:
     """Qt must accept the QSS, not merely receive it.
 
@@ -451,24 +453,6 @@ def test_every_group_value_on_a_built_theme_is_resolvable() -> None:
 # the stylesheet is built from groups, and changed no pixels doing it
 # --------------------------------------------------------------------------- #
 
-BEFORE_M9 = Path(__file__).resolve().parent / "fixtures" / "stylesheet_before_m9.qss"
-
-
-def test_the_stylesheet_is_unchanged_by_the_indirection() -> None:
-    """The cheapest possible proof that this phase changed no pixels.
-
-    The fixture was captured and committed before a line of M9 was written,
-    and the whole point is that it is *asserted* rather than regenerated. A
-    regenerated golden file records whatever the code now does, which is not
-    a test of anything.
-
-    It is a migration check with an expiry. It retires the first time a
-    milestone legitimately changes a colour in the sheet — in a commit that
-    says which colour and why, which is exactly the conversation this is
-    meant to force.
-    """
-    assert theme.stylesheet() == BEFORE_M9.read_text(encoding="utf-8")
-
 
 def test_every_group_key_fills_exactly_one_placeholder() -> None:
     """The sheet and the vocabulary cover each other, with nothing spare.
@@ -483,9 +467,54 @@ def test_every_group_key_fills_exactly_one_placeholder() -> None:
     keys = {
         f"{group}.{key}".replace(".", "_")
         for group, values in theme_io.builtin().groups.items()
+        if group not in theme.PAINTED
         for key in values
     }
     assert placeholders == keys
+
+
+def painted_reads() -> set[tuple[str, str]]:
+    """Every literal `group_color("group", "key")` under `ui/`."""
+    ui = Path(theme.__file__).parent
+    found: set[tuple[str, str]] = set()
+    for source in sorted(ui.rglob("*.py")):
+        text = source.read_text(encoding="utf-8")
+        found |= set(re.findall(r'group_color\(\s*"([a-z.]+)",\s*"([a-z.]+)"', text))
+    return found
+
+
+def test_every_painted_key_is_read_by_something_that_paints() -> None:
+    """D-92: the other half of the rule above, for groups no sheet draws.
+
+    A widget that paints itself reads its colours with `group_color()`, so
+    every key of a painted group has to appear in such a call - otherwise it
+    is a role that looks themeable and is not, the same silent failure the
+    placeholder test catches for the sheet.
+    """
+    reads = painted_reads()
+    declared = {
+        (group, key)
+        for group, values in theme_io.builtin().groups.items()
+        if group in theme.PAINTED
+        for key in values
+    }
+    assert declared, "no painted group in the built-in theme"
+    assert declared <= reads, f"read by nothing: {sorted(declared - reads)}"
+
+
+def test_every_painted_read_names_a_key_that_exists() -> None:
+    """And the reverse: a call naming a key the theme lacks raises at paint
+    time, in front of somebody, rather than here."""
+    groups = theme_io.builtin().groups
+    unknown = sorted(
+        (group, key)
+        for group, key in painted_reads()
+        if key not in groups.get(group, {})
+    )
+    assert not unknown, unknown
+    assert {group for group, _ in painted_reads()} <= theme.PAINTED, (
+        "a group read by painting is missing from theme.PAINTED"
+    )
 
 
 def test_the_stylesheet_names_no_colour() -> None:
@@ -573,10 +602,10 @@ def test_no_hex_appears_in_the_theme_module_at_all() -> None:
     )
 
 
-#: Every module that reaches a bundled resource. `theme.py` reads `app.qss`
-#: and `theme_io.py` reads the built-in `.3dimtheme`; both are inside the
-#: package and both are subject to D-30.
-RESOURCE_READERS = (theme, theme_io)
+#: Every module that reaches a bundled resource. `theme.py` reads `app.qss`,
+#: `theme_io.py` the built-in `.3dimtheme`, and `sofa.py` the built-in HRTF
+#: set (M4); all are inside the package and all are subject to D-30.
+RESOURCE_READERS = (theme, theme_io, sofa)
 
 
 @pytest.mark.parametrize("module", RESOURCE_READERS, ids=lambda m: m.__name__)

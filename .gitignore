@@ -103,3 +103,6 @@ launch.local.json
 
 # Claude Code local state
 .claude/settings.local.json
+
+#test samples imported by me for testing purposes, not part of the repo
+/test-samples/

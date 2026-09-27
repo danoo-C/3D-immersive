@@ -118,3 +118,135 @@ QToolTip {
     border: 1px solid $tooltip_border;
     padding: 4px 6px;
 }
+
+/* The media pool (M2): its tree, the tree's header, and its filter. The
+   filter is styled by its object name, because a generic QLineEdit is the
+   "input field" group 04 leaves to M8. */
+QTreeView {
+    background-color: $tree_background;
+    color: $tree_text;
+    border: none;
+    outline: none;
+}
+QTreeView::item { padding: 1px 0; }
+QTreeView::item:hover { background-color: $tree_hover_background; }
+QTreeView::item:selected {
+    background-color: $tree_selected_background;
+    color: $tree_selected_text;
+}
+QHeaderView::section {
+    background-color: $header_background;
+    color: $header_text;
+    border: none;
+    border-bottom: 1px solid $header_border;
+    padding: 3px 6px;
+}
+QLineEdit#PoolFilter {
+    background-color: $filter_background;
+    color: $filter_text;
+    border: 1px solid $filter_border;
+    border-radius: 4px;
+    padding: 3px 6px;
+    margin: 6px;
+}
+QLineEdit#PoolFilter:focus { border-color: $filter_focus_border; }
+
+/* Typed input (M3): the numeric field, dragged or typed, first used for a
+   channel's gain. 04 listed the input-field group under M8, for whichever
+   milestone first drew one; this is it. */
+QLineEdit#NumericField, QLineEdit#ChannelRename, QLineEdit#PaneText {
+    background-color: $input_background;
+    color: $input_text;
+    border: 1px solid $input_border;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+QLineEdit#NumericField:focus, QLineEdit#ChannelRename:focus,
+QLineEdit#PaneText:focus {
+    border-color: $input_focus_border;
+}
+QLineEdit#NumericField:disabled, QLineEdit#PaneText:disabled {
+    color: $input_disabled_text;
+}
+
+/* The parameters pane (M3): a view's heading, and its fields' labels, which
+   support the fields rather than compete with them. */
+QLabel#PaneHeading { color: $pane_heading; font-weight: 600; }
+QLabel#FieldLabel { color: $pane_label; }
+
+/* Combo boxes (M3): the parameters pane is the first to draw one. 04 listed
+   them under M8, for whichever milestone drew one first. The arrow is the
+   style's own. The check box paints itself, from the painted `check` group:
+   a sheet that styles its indicator loses the tick. */
+QComboBox {
+    background-color: $combo_background;
+    color: $combo_text;
+    border: 1px solid $combo_border;
+    border-radius: 3px;
+    padding: 1px 6px;
+}
+QComboBox:focus { border-color: $combo_focus_border; }
+QComboBox:disabled { color: $combo_disabled_text; }
+QComboBox QAbstractItemView {
+    background-color: $combo_list_background;
+    color: $combo_list_text;
+    border: 1px solid $combo_list_border;
+    selection-background-color: $combo_list_selected_background;
+}
+
+/* Channel headers (M3). Every "on" carries a letter as well as a colour, and
+   a channel silenced by another's solo says so in words (04, Accessibility
+   and feel). The chip is the channel's own colour and painted, not here. */
+QFrame#ChannelHeader {
+    background-color: $channel_background;
+    border-bottom: 1px solid $channel_border;
+    border-left: 3px solid transparent;
+}
+QFrame#ChannelHeader[selected="true"] {
+    background-color: $channel_selected_background;
+    border-left-color: $channel_selected_marker;
+}
+QLabel#ChannelName, QToolButton#ChannelSnap[overriding="true"] { color: $channel_name; }
+QLabel#ChannelQuiet, QToolButton#ChannelSnap[overriding="false"] {
+    color: $channel_quiet;
+    font-size: 11px;
+}
+QFrame#ChannelHeader QToolButton { padding: 1px 6px; }
+/* The snap indicator reads as text in the header, and is a button only to
+   the pointer and the keyboard: no frame, no arrow, its focus ring kept. */
+QFrame#ChannelHeader QToolButton#ChannelSnap { background: transparent; padding: 0 2px; }
+QFrame#ChannelHeader QToolButton#ChannelSnap:!focus { border: 1px solid transparent; }
+QToolButton#ChannelSnap::menu-indicator { image: none; width: 0; }
+QToolButton#AddChannel { border-radius: 0; border-width: 0 0 1px 0; padding: 0 8px; }
+QToolButton#Mute:checked {
+    background-color: $channel_mute_background;
+    color: $channel_mute_text;
+}
+QToolButton#Solo:checked {
+    background-color: $channel_solo_background;
+    color: $channel_solo_text;
+}
+QToolButton#Bypass:checked {
+    background-color: $channel_bypass_background;
+    color: $channel_bypass_text;
+}
+
+/* The info box (D-116): at the right end of the transport toolbar, what is
+   under way - a label, a thin bar, and a ✕ for work that can be stopped. */
+QFrame#InfoBox {
+    background-color: $info_background;
+    border: 1px solid $info_border;
+    border-radius: 4px;
+}
+QLabel#InfoLabel { background: transparent; color: $info_text; font-size: 12px; }
+QLabel#InfoMore { background: transparent; color: $info_more; font-size: 12px; }
+QProgressBar#InfoBar {
+    background-color: $info_track;
+    border: none;
+    border-radius: 2px;
+}
+QProgressBar#InfoBar::chunk { background-color: $info_bar; border-radius: 2px; }
+/* The ✕ is 20 px, to fit the toolbar's row: the buttons' padding would
+   leave it no room for its icon. */
+QToolButton#InfoCancel { padding: 0px; }
+QWidget#ToolbarSpacer { background: transparent; }

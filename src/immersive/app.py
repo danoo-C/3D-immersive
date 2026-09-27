@@ -12,8 +12,11 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from immersive import __version__
+from immersive.audio.device import load_backend, settle
+from immersive.audio.player import Player
 from immersive.ui import theme, theme_menu
 from immersive.ui.main_window import MainWindow
+from immersive.ui.notices import Severity
 
 
 def build_application(argv: list[str] | None = None) -> QApplication:
@@ -31,7 +34,12 @@ def build_application(argv: list[str] | None = None) -> QApplication:
     return app
 
 
-def run(argv: list[str] | None = None) -> int:
+def run(
+    argv: list[str] | None = None,
+    *,
+    device: str | None = None,
+    block: str | None = None,
+) -> int:
     """Start the GUI and block until it closes."""
     app = build_application(argv)
     # M9 phase 4: make the theme directory on a real launch, so there is
@@ -39,6 +47,27 @@ def run(argv: list[str] | None = None) -> int:
     # a test reaches - building a window must not make directories on
     # somebody's machine.
     theme_menu.user_theme_directory()
-    window = MainWindow()
+
+    # The audio stack is looked at on a real launch too, and only here: a
+    # window built by a test must not go looking for a sound card.
+    backend = load_backend()
+    player: Player | None = None
+    if isinstance(backend, str):
+        unavailable, problems = backend, [backend]
+    else:
+        settled = settle(backend, device, block)
+        problems = settled.problems
+        unavailable = "" if settled.usable else problems[-1]
+        if settled.usable:
+            player = Player(backend, settled.output)
+
+    window = MainWindow(player=player, unavailable=unavailable)
+    for problem in problems:
+        window.notices().add(Severity.WARN, problem)
     window.show()
-    return app.exec()
+    # The HRTF set, on a worker (D-120): here, where a real launch is, and
+    # never in the window's constructor, where every test is.
+    window.prepare_hrtf()
+    code = app.exec()
+    window.stop_work()
+    return code

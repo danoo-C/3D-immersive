@@ -43,15 +43,17 @@ written down here rather than discovered at M8.
 
 | Component | Licence | Status |
 |---|---|---|
-| HRTF dataset (SOFA) | depends on the set chosen | **Not yet bundled.** |
+| [SADIE II D1](https://www.york.ac.uk/sadie-project/) HRTF set (SOFA) | Apache-2.0 | **Fetched at install**, from sofacoustics.org, and checked by SHA-256 (M4 phase 1). Never committed; shipped in the wheel and the bundle |
 
-The default dataset is chosen at M4 (QA-30), and the choice is constrained by
-licence as much as by how it sounds. The leading candidate is **SADIE II D1**
-(KEMAR), which carries *"Copyright 2018, University of York, Licensed under the
-Apache License, Version 2.0"* in its own `GLOBAL_License` field — permissive
+The default dataset is SADIE II D1 until M4's listening test settles QA-30,
+and the choice is constrained by licence as much as by how it sounds. It
+carries *"Copyright 2018, University of York, Licensed under the Apache
+License, Version 2.0"* in its own `GLOBAL_License` field. That is permissive
 enough to bundle, which is the constraint several other candidate sets fail.
 See [`docs/s0_listening_spike/phase_1_sofa_load.md`](docs/s0_listening_spike/phase_1_sofa_load.md).
 
 Apache 2.0 requires the licence text and any `NOTICE` file to travel with the
-redistributed work. When M4 settles the dataset, add its row above and its
-licence text to the bundle.
+redistributed work. The set has no `NOTICE`, and its licence statement
+travels inside the file itself. The full Apache 2.0 text joins the bundle at
+M8, alongside the LGPL texts above. If QA-30's listening chooses another
+set, its row replaces this one.

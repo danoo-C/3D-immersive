@@ -33,6 +33,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-qt>=4.4",
+    # Parallel runs: `pytest -n 8 --dist worksteal`. worksteal arrived in 3.2,
+    # and measured fastest here (docs/user-issues/tests-speeds.md).
+    "pytest-xdist>=3.2",
     "ruff>=0.6",
     "mypy>=1.11",
 ]

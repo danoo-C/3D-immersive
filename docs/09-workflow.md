@@ -66,9 +66,9 @@ milestone nobody has opened yet:
 | `m0_scaffolding/` | complete — built before this system existed, no phase docs |
 | `s0_listening_spike/` | complete — the throwaway spike; got a directory like anything else |
 | `m1_core_model/` | complete |
-| `m2_media/` | |
-| `m3_timeline/` | |
-| `m4_binaural_engine/` | |
+| `m2_media/` | **in progress** |
+| `m3_timeline/` | **in progress** |
+| `m4_binaural_engine/` | **in progress** |
 | `m5_spatial_workspace/` | |
 | `m6_automation/` | |
 | `m7_render/` | |
@@ -97,8 +97,11 @@ It is in every plan and was in no document, so: the shape of it.
 
 1. **Name them in the plan**, before the tests exist. A list written afterwards
    is written to flatter the tests that got written.
-2. Apply each one, run the phase's tests, restore, and record caught or
-   survived.
+2. Apply each one, run the whole suite — in parallel, `pytest -n 8 --dist
+   worksteal`, which makes that affordable — restore, and record caught or
+   survived. The whole suite rather than the phase's own tests, because a
+   phase's code is exercised from other files too, and a sweep that ran only
+   one file would call a mutation a survivor that another file catches.
 3. A survivor is one of two things, and saying which is the point. Either a
    **missing test** — write it — or an **equivalent mutation**, one the code's
    own invariants make unreachable. Pin an equivalent one with a test that

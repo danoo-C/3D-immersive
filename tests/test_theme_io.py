@@ -625,20 +625,16 @@ def test_the_specifications_own_example_is_the_built_in_theme() -> None:
     assert theme_io.loads(spec_example()).theme == theme_io.builtin()
 
 
-def test_the_example_only_reports_groups_no_milestone_has_built_yet() -> None:
-    """The example is forward-looking, and that is allowed - but say which.
-
-    `timeline` and `clip` belong to M3 by 04's own ownership table. If a
-    *third* group shows up here, either the example grew a group nobody owns
-    or M9 dropped one it was supposed to build.
+def test_the_example_reports_nothing_now_every_group_it_names_is_built() -> None:
+    """The example was forward-looking, and said which: `timeline` and
+    `clip` belong to M3 by 04's own ownership table, and M3 built them a key
+    at a time - the grid and playhead at phase 1, the clip's body at phase
+    3, its selected border at phase 4, its fade handle at phase 7 and the
+    loop region at phase 9. Each left this test's list as it arrived, and
+    the last has. Anything here now means the example grew a key nobody
+    built.
     """
-    problems = theme_io.loads(spec_example()).problems
-
-    assert [problem.where for problem in problems] == [
-        "groups.timeline",
-        "groups.clip",
-    ]
-    assert all(p.severity is theme_io.Severity.WARN for p in problems)
+    assert theme_io.loads(spec_example()).problems == []
 
 
 # --------------------------------------------------------------------------- #

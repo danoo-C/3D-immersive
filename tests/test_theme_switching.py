@@ -125,7 +125,8 @@ def test_the_icon_cache_is_dropped_on_a_switch(window: MainWindow) -> None:
 
     window.apply_theme(loud())
 
-    assert icons.icon.cache_info().currsize <= len(window._icon_actions) + 1
+    # The actions' icons, ARM's, and the info box's ✕.
+    assert icons.icon.cache_info().currsize <= len(window._icon_actions) + 2
     before = icons.icon("play")
     window.apply_theme(theme_io.builtin())
     assert icons.icon("play") is not before, "a re-render, not the cached one"
@@ -183,6 +184,66 @@ def test_the_order_itself_is_use_then_clear_then_sheet_then_walk(
     window.apply_theme(loud())
 
     assert calls == ["use", "icons", "app icon", "sheet", "walk"]
+
+
+# --------------------------------------------------------------------------- #
+# not repainting what is already painted
+# --------------------------------------------------------------------------- #
+
+
+def sheets_set(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every stylesheet given to the application from here on."""
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    real = app.setStyleSheet
+    calls: list[str] = []
+
+    def record(sheet: str) -> None:
+        calls.append(sheet)
+        real(sheet)
+
+    monkeypatch.setattr(app, "setStyleSheet", record)
+    return calls
+
+
+def test_a_new_window_does_not_repaint_the_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-applying the theme `build_application()` had just applied was half
+    of what building a window cost - Qt re-polishes every widget on every
+    `setStyleSheet`, identical or not. Found by the suite's speed plan."""
+    calls = sheets_set(monkeypatch)
+
+    made = MainWindow()
+
+    assert calls == []
+    made.deleteLater()
+
+
+def test_applying_the_theme_already_applied_does_nothing(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = sheets_set(monkeypatch)
+
+    window.apply_theme(theme.active())
+
+    assert calls == []
+
+
+def test_the_same_theme_over_another_sheet_is_still_painted(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both halves of the check: the active theme can be right while the
+    application still wears another theme's sheet, and then skipping would
+    leave it wrong on screen."""
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    app.setStyleSheet(theme.stylesheet(loud()))
+    calls = sheets_set(monkeypatch)
+
+    window.apply_theme(theme.active())
+
+    assert calls == [theme.stylesheet(theme.active())]
 
 
 # --------------------------------------------------------------------------- #
@@ -495,3 +556,31 @@ def test_the_accent_reaches_actual_pixels(window: MainWindow) -> None:
     }
 
     assert "#00FF00" in colours, sorted(colours)
+
+
+def test_the_info_box_cancel_is_rendered_again_on_a_switch(
+    window: MainWindow,
+) -> None:
+    """Its ✕ is a memoised icon too, and the window's walk reaches it."""
+    cancel = window.info_box()._cancel
+    before = cancel.icon().cacheKey()
+    window.apply_theme(loud())
+    assert cancel.icon().cacheKey() != before
+
+
+def test_the_meters_paint_in_the_new_theme(window: MainWindow) -> None:
+    """A painted group: read when it paints, so the walk's repaint is enough."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor
+
+    meter = window.meter()
+    window.apply_theme(loud())
+    image = meter.grab().toImage()
+    bars = meter.bars()
+    corner = QPoint(int(bars.left()) + 1, int(bars.top()))
+    assert QColor(image.pixelColor(corner)).name() == (
+        QColor(theme.group_color("meter", "background")).name()
+    )
+    assert theme.group_color("meter", "background").upper() != (
+        theme_io.builtin().tokens["surface.hover"].upper()
+    ), "the loud theme's, not the built-in's"

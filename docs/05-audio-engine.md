@@ -48,15 +48,29 @@ triangle and take **barycentric weights** over its three vertices.
 - Minimum-phase HRIRs: weighted sum in the frequency domain.
 - ITD: weighted sum of the three scalar delays.
 
-Triangle lookup is accelerated by a `cKDTree` over face centroids — nearest few
-candidates, then an exact barycentric test.
+Triangle lookup runs on the audio thread, every block, so it may not allocate
+(D-106). The `cKDTree` over face centroids, which returns new arrays on every
+query, only builds the index (D-119). That index is a cube map of 64 × 64
+cells a face, each listing the faces that contain points sampled inside it.
+A query tests its cell's few candidates exactly, by barycentric
+coordinates. One that none of them contains walks across shared edges, and
+the walk ends because the hull of points on a sphere is their Delaunay
+triangulation. For SADIE II D1: 4.2 candidates a cell, and 3.5 µs a
+direction.
 
 ### 4. Prepare the bank
 
 Each minimum-phase HRIR is zero-padded to `nfft` and forward-transformed once.
-The whole bank lives in memory as `[M, 2, nfft//2 + 1]` complex64, and is
-cached to disk keyed by SOFA hash and block size, so project load does not pay
-for it twice.
+The whole bank lives in memory as `[M, 2, nfft//2 + 1]` complex64: 72 MB for
+SADIE II D1 at 512 frames, and 289 MB at 2048.
+
+What is cached is what is slow to make (D-120): the decomposition and the
+direction index, keyed by the set's content hash alone. They take 6.5 s for
+SADIE II D1 and are the same at every block size; the entry is 21 MB. The
+bank is transformed from them on every load, 0.11 s at 512 frames. A
+project therefore opens in 0.23 s once the set has been prepared once.
+Preparing runs on a worker, shown in the info box, and a closed window
+stops it at its next chunk (`ui/hrtf.py`).
 
 #### Buffer length must account for the ITD
 
@@ -163,13 +177,43 @@ them outward; it is tuned by ear, not derived.
   *Parameter smoothing* below; it is not an optimisation to skip when a source
   is "barely moving".
 
+As built (M4, `audio/spatial.py`), the code above is followed in what is
+heard, and differs in four places:
+
+- **Positions** are the snapshot's, changed by `POSITION` commands through
+  the ring (D-121). `automation.eval` arrives with automation, at M6.
+- **The windowed copies** are ordered all fading-out, then all fading-in,
+  rather than interleaved as `0::2` and `1::2`. Each half is then one
+  contiguous block of rows, and numpy makes a buffer for a strided operand
+  (D-122).
+- **The transforms** are float32 into complex64 with `norm="ortho"`, the
+  only way numpy 2's `rfft` keeps to its float32 loop. The two scalings
+  cancel (D-122).
+- **The overlap-add accumulator** is `nfft` long, not a separate `tail`.
+  Each block's inverse is added into it, its first `block` samples go to
+  the bus, and the rest moves up. It drains the same way while the
+  transport is stopped, so a pause decays rather than cuts, and a resume
+  does not replay it.
+
+A seek sets `H_prev = H` for the block after it, and so does a new
+snapshot's first block. The accumulator carries across a new snapshot when
+it is the same size, because it is sound already begun.
+
 ### Cost estimate
 
 At 512 frames, `nfft` = 1024, 32 sources: one batched 64×1024 rFFT (two
 windowed copies per source), a [32, 3, 2, 513] gather-and-weight, two complex
 multiply-accumulates, and two 1024-point inverse transforms over a 2-row array
-— four iFFTs of work. That is well under a millisecond against a 10.7 ms
-budget.
+— four iFFTs of work. That was estimated at well under a millisecond against
+a 10.7 ms budget.
+
+Measured as built (M4 phase 5, SADIE II D1, 512 frames), it is not: one
+source takes 0.13 ms, 16 take 0.72 ms, and 32 take 1.47 ms on average and
+2.61 ms at the 99th percentile. The transforms are constant in source count
+as above, but the filter's blend, the ITD ramp and the windows are numpy
+calls for each channel, and Python's overhead per call grows with the
+channels. The margin is still wide. If it ever narrows, the filters can be
+built for every channel at once, with gathers into one buffer.
 
 The crossfade roughly doubles the FFT work versus a naive uncrossfaded design.
 It is still constant in source count, and the margin is still large — which is
@@ -209,6 +253,15 @@ Stereo source: balance rather than pan. `p > 0` attenuates the left channel by
 `1 - p` and leaves the right untouched, and vice versa, so a centred setting is
 bit-transparent. Folding a stereo image with a pan law instead would quietly
 damage exactly the material bypass was meant to protect.
+
+As built (M4, D-125), the law is the clip's, not the channel's: a channel can
+hold mono clips and stereo clips at once, so the lane keeps its mono clips in a
+row of their own until the gain. A channel's gain is then four factors, worked
+out on the UI thread with its gain, mute and solo folded in: a mono clip to the
+left and to the right, and a stereo clip's left and right. Each ramps across a
+block like any gain. Pan belongs to a bypassed channel. For every other
+channel the four factors are its gain, so a placed channel's mono point, and a
+channel played flat for want of a bank, are untouched by it.
 
 ### It is cheaper, not just different
 
@@ -250,7 +303,7 @@ boolean, and there are no controls to set:
 |---|---|
 | Type | brickwall peak limiter |
 | Ceiling | −0.3 dBFS |
-| Lookahead | 1.5 ms (72 samples at 48 kHz), **internally compensated** |
+| Lookahead | 1.5 ms (72 samples at 48 kHz), **compensated as a latency the engine states** (D-124) |
 | Attack | the lookahead |
 | Release | 50 ms, smoothed |
 | Knee | 2 dB soft |
@@ -260,15 +313,43 @@ things to get wrong in a mix whose point is somewhere else entirely. The
 ceiling sits below 0 dBFS because an inter-sample peak in a 24-bit file that
 measures exactly 0 will still clip somebody's converter.
 
-⚠️ **The lookahead is compensated inside the limiter**, and that is
-load-bearing rather than tidy. Lookahead is what separates a limiter from a
-clipper — it needs to see the peak before deciding — but it delays whatever
-passes through it. Stems skip the limiter (D-41), so an *uncompensated*
-lookahead would leave the master 72 samples later than the stems that are
-supposed to sum to it, and M7's exactness test would fail against a constant
-offset nobody had written down. Compensating it also keeps preview and render
-time-aligned, which is the property the whole offline-reuses-`process` design
-exists for.
+⚠️ **The lookahead is compensated**, and that is load-bearing rather than
+tidy. Lookahead is what separates a limiter from a clipper — it needs to see
+the peak before deciding — but it delays whatever passes through it. Stems
+skip the limiter (D-41), so an *uncompensated* lookahead would leave the master
+72 samples later than the stems that are supposed to sum to it, and M7's
+exactness test would fail against a constant offset nobody had written down.
+
+This section first said *inside* the limiter. Built, it cannot be: to output
+a sample undelayed, the limiter would need the graph to render 72 samples
+ahead of the output, and the spatial path's transform renders a whole block
+at a time, so at every seek and start it would have 72 samples it could not
+make. The compensation is therefore a latency the engine states (D-124).
+The delay runs whether the limiter is on or off, so `Engine.latency` is
+always 72 frames and a switch moves nothing in time. A render drops the
+first 72 frames and plays 72 more at its end, master and stems alike, and
+that keeps preview and render time-aligned, which is the property the whole
+offline-reuses-`process` design exists for.
+
+**As built (D-123).** The gain is computed in decibels of reduction, a
+block at a time, with no per-sample loop and no array made:
+
+1. each sample's need, from the soft knee, on the louder of the two sides,
+   so a peak on one side turns both down alike and the image does not move;
+2. held forward over the lookahead, a sliding maximum of 73 samples;
+3. released with a 50 ms time constant, `r = max(h, a·r_prev)`, computed as a
+   running maximum of `h·a^-n` and carried across blocks;
+4. averaged over the 72 samples of the lookahead, which is the attack;
+5. applied to the audio delayed by 72 samples.
+
+The hold and the average together make it brickwall by construction. The
+average at a peak's sample is of 72 values, each at least that peak's need.
+The knee is centred on the ceiling, so reduction starts at −1.3 dBFS and the
+knee's top, at +0.7 dBFS in, comes out at the ceiling. The ceiling is aimed
+10⁻⁵ dB low: without that, float32 rounding put samples one step past it.
+The limiter's switch fades across a block, like a gain. A block costs 31 to
+59 µs on average, from 256 frames to 2048, and under 0.2 ms at the 99th
+percentile.
 
 Nothing in it is stochastic, so F-36's determinism survives it. It is the only
 nonlinear block in the graph, which makes it the one place where "deterministic
@@ -276,15 +357,31 @@ per machine and build" (D-40) is worth re-checking after a numpy upgrade.
 
 ### Metering
 
-The bus also publishes a peak per channel pair, with a decay, for the master
-meter (F-54). It is read by the UI at frame rate and written by the audio
-thread as two floats — no history, no allocation, no lock: a stale read is one
-frame of a meter, which nobody can see.
+The bus also publishes a peak per side for the master meter (F-54): the
+highest level each side has reached since the UI last took them. It is read
+after the limiter, so it shows what leaves the engine: with the limiter on,
+nothing passes −0.3 dBFS and the clip light stays dark. The audio
+thread raises two floats in a preallocated array; the UI reads both and sets
+them back to zero at frame rate (`Engine.take_peaks`). No history, no
+allocation, no lock: a block that lands between the read and the reset is one
+frame of a meter, which nobody can see. The hold and decay a meter shows are
+the meter's own, drawn on the UI thread.
 
-Per-channel meters are deliberately absent (D-55). What the master meter is
-*for* is the thing that is genuinely hard to predict here: 32 sources summing
-in the frequency domain, each already scaled by a distance attenuation that
-moves while it plays. A fader position does not tell you what reaches the bus.
+What the master meter is *for* is the thing that is genuinely hard to
+predict here: 32 sources summing in the frequency domain, each already
+scaled by a distance attenuation that moves while it plays. A fader
+position does not tell you what reaches the bus.
+
+**Each channel publishes its peaks too** (D-117, superseding D-55's "no
+per-channel meters"). The snapshot carries a `(channels, 2)` array, made on
+the UI thread. Once a channel's lane has had its gain, mute and solo applied,
+the engine raises that channel's pair with the same `abs` and `max` it uses
+for the bus. `Engine.take_channel_peaks` reads them, zeroes them and pairs
+each with its channel's id, so a reorder cannot hand one channel another's
+level. From M4 the tap stays before the HRTF. The sources are summed in the
+frequency domain, so a channel's own post-HRTF signal never exists, and
+making one would cost an inverse FFT per source per block. Before the HRTF
+it is within the few dB a direction's filter adds or takes away.
 
 ## Parameter smoothing
 
@@ -293,9 +390,14 @@ graph steps discontinuously ~94 times a second. Two separate mechanisms.
 
 ### Gains: a per-sample ramp
 
-Channel, distance, pan and master gains are smoothed per sample with a one-pole
-ramp across the block. Cheap, and scalar gains have no memory, so nothing more
-is needed.
+Channel, distance, pan and master gains are smoothed per sample with a linear
+ramp across one block: each sample moves an equal step from where the last
+block left the gain, and the block's last sample lands on the new value. Cheap,
+and scalar gains have no memory, so nothing more is needed. Linear rather than
+the one-pole this section first named, because a one-pole never arrives: a
+gain that has reached its target costs one multiply per sample, or none at
+0 dB, which is what keeps a whole-sample clip bit-transparent (D-42). Mute and
+solo are gains of nothing (D-105), so they ramp too, and do not click.
 
 ### Filters: an unconditional per-block crossfade
 
@@ -370,10 +472,24 @@ Bookkeeping:
 
 Given a block `[t, t+block)`, for each channel find the clips overlapping it.
 Clips are kept sorted and non-overlapping (see
-[03-data-model.md](03-data-model.md)), so this is a cursor advance, not a search.
-Clip reads are `numpy` slices out of the resident decoded array at
-`offset + (t - start)`, with fade envelopes multiplied in from precomputed
-tables.
+[03-data-model.md](03-data-model.md)), so their ends are sorted too, and the
+first clip a block needs is one binary search on them. This section first
+named a cursor advanced along the clips; at tens of clips a channel the search
+costs as little, and it keeps no state, so a seek or a snapshot swap has no
+cursor to reset. Clip reads are `numpy` slices out of the resident decoded
+array at `offset + (t - start)`, with fade envelopes multiplied in from
+precomputed tables.
+
+**What plays is a snapshot** (D-105): each channel's clips with their samples,
+their gain as a factor, and their head and tail tables, built on the UI thread
+and never written after. A channel's gain, mute and solo arrive separately,
+through the command ring, as one linear gain each.
+
+**A fade is sampled from `FadeShape.gain`**, the curve the clip draws. A
+fade-in `L` samples long is `gain(k / L)` at its `k`th sample, so its first
+sample is silent and the one after it whole; a fade-out is the same table
+backwards, so its last sample is silent. Tables are shared between clips with
+the same fade, and read-only.
 
 ### Implicit edge fades
 
@@ -388,13 +504,28 @@ full-length stem placed at 0 therefore stays bit-transparent, which matters
 because that is exactly the bypassed-backing-track case (D-32).
 
 The implicit fade is not stored in the project and not drawn in the UI. An
-explicit fade replaces it rather than adding to it. See the Rules in
-[03-data-model.md](03-data-model.md).
+explicit fade replaces it rather than adding to it, and it is never more than
+half the clip. See the Rules in [03-data-model.md](03-data-model.md).
 
-Seeking resets cursors, zeroes the overlap-add tails, and sets
-`H_prev = H_cur`.
+Seeking moves the playhead, through the command ring so it cannot race a swap.
+From M4 it also zeroes the overlap-add tails and sets `H_prev = H_cur`; the
+flat engine has neither.
 
 ## The output stream
+
+**There is one stream, the transport's** (D-107), and everything heard goes
+through it: the arrangement, and an audition summed into the same bus over
+it. It opens the first time anything is to be heard and stays open until the
+window closes, so the command ring is drained while the transport is stopped.
+Before it has ever opened there is no audio thread, and the player applies
+the ring's commands itself. `audio/player.py` owns it.
+
+An audition plays from its first frame to its last unless it is stopped -
+by Stop, which silences it along with the transport - or replaced by
+another. Either way a voice still sounding plays one block more, multiplied
+by a ramp falling to 0, so it ends without a click (D-115). The engine holds
+that voice until the falling block is played, as it holds a snapshot, so
+the UI thread never frees an array the audio thread is reading.
 
 The stream is always opened at **48 kHz** (D-11, D-63). There is no output
 resampler: putting a second rate converter inside the callback to paper over a
@@ -407,14 +538,23 @@ the shared-mode backends — WASAPI, CoreAudio, PipeWire — accept 48 kHz and
 convert behind their own mixer, so this bites mainly on exclusive-mode and
 fixed-rate hardware, which is exactly where the user wants to know.
 
+**No output device is asked first**, before the rate: PortAudio's word for
+a missing default is "Error querying device -1", and asked for 48 kHz from
+nothing it read as a refusal of the rate. With no device at all the window
+says so and where the fix is (on WSL, ALSA reaching WSLg's sound server,
+[08](08-environment.md)); with devices but no default it names them and
+`--device`, rather than choosing one - which is right is the user's to say.
+
 Device and block size are selectable (F-55). The preferences UI for them is
 M8, and the first audio is M2, so in between they are command-line flags —
 `--device` and `--block` — rather than five milestones in which a wrong
 default device makes the application look broken with no way out.
 
 A device that disappears mid-session (headphones unplugged, an interface
-powered off) stops the stream. The playhead holds position, the failure is
-reported, and reopening is a user action — silently migrating a mix to the
+powered off) stops the stream. PortAudio says so on its own thread, where
+only a flag is set; the UI thread's next look, thirty times a second, closes
+what is left, stops the transport, and reports it once. The playhead holds
+position, and reopening is a user action - the next Play or double-click — silently migrating a mix to the
 laptop speakers mid-audition is a worse outcome than stopping.
 
 ## Offline render
@@ -422,7 +562,12 @@ laptop speakers mid-audition is a worse outcome than stopping.
 `render.py` runs the **same** `Engine.process` in a loop with no device, which
 is what keeps preview and export from diverging. Differences, all opt-in:
 
-- Smaller block (64) for finer automation resolution.
+- The first `Engine.latency` frames dropped, and as many more rendered past
+  the end: the limiter's lookahead (D-124). Master and stems carry the same
+  latency, so they stay aligned.
+- Smaller block (64) for finer automation resolution. It is shorter than the
+  lookahead, which the limiter handles correctly, though numpy then copies
+  through a buffer, which is fine offline.
 - Longer HRIRs if the dataset offers them.
 - Optional 2× oversampling of the limiter.
 - Per-channel stems by rendering with all but one channel muted, reusing the
@@ -467,13 +612,21 @@ dispatch legitimately differ in the last bits.
 ## Realtime safety checklist
 
 Enforced by review and by a test that runs `process()` under
-`tracemalloc` asserting zero allocation:
+`tracemalloc` asserting zero allocation. In Python that means what D-106 says:
+no memory kept from one block to the next, and no numpy array made inside a
+block. A slice is a view and an integer past 256 is an object, and those few
+dozen bytes are not what the rule is for. The test runs 500 blocks of 2048
+frames through every path, and fails on anything kept or on any block raising
+traced memory's peak by 2 KiB:
 
 - No allocation, no `append`, no f-strings, no `logging` inside `process()`.
 - No locks. UI→audio is the command ring; structural changes are an atomic
   snapshot swap.
 - `gc.freeze()` after load; explicit collection on the UI thread only.
 - Every numpy op writes into a preallocated buffer via `out=`.
+- **No ufunc broadcasts.** A `(B, 1)` ramp over a `(B, 2)` block allocates
+  17 KiB behind `out=`, measured. Buffers are planar, one contiguous row per
+  ear, and a ramp is applied a row at a time.
 - **numpy ≥ 2.0 is required, not merely preferred.** The rule above is only
   achievable because `np.fft.rfft` and `np.fft.irfft` accept `out=` and operate
   on float32 without silently upcasting to float64. Both arrived in numpy 2.0.

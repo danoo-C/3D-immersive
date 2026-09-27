@@ -44,14 +44,68 @@ through the current working directory. See *Imports and packaging* in
 
 On Windows the interpreter is `.venv\Scripts\python.exe`.
 
+**On Linux, install PortAudio as well:** `sudo apt install libportaudio2` (or
+your distribution's equivalent). `sounddevice`'s Windows and macOS wheels
+bundle it; the Linux wheel does not, and without it `import sounddevice`
+raises. The application still starts without it — audio output is simply
+unavailable, and the window says so and names this package (M2 phase 7) —
+but nothing can be heard. WSL counts as Linux here.
+
+**The HRTF set is fetched, not committed** (02, QA-30). `--install` downloads
+SADIE II D1, 36.6 MB, from sofacoustics.org, checks it against the SHA-256
+recorded in `src/immersive/assets/hrtf/__init__.py`, and keeps it beside
+that file, gitignored. It is written beside its final name and moved there
+only once its digest matches, so nothing ever finds half a file. A failed
+download says so, and leaves the rest of the install in place; running
+`--install` again retries it. `--check` reports whether it is there.
+Offline, a copy of the same file placed in that folder is accepted if its
+digest matches.
+
+**No output device found - on WSL, route ALSA to WSLg's sound server.**
+PortAudio reaches the sound server through ALSA. A desktop distribution
+routes ALSA's default there already (through `pipewire-alsa` or the
+PulseAudio packages); WSL does not, so PortAudio lists no device at all and
+the window says *No audio output device was found*. WSLg runs a PulseAudio
+server (`$PULSE_SERVER`), and two steps reach it:
+
+```bash
+sudo apt install libasound2-plugins
+printf 'pcm.!default { type pulse }\nctl.!default { type pulse }\n' > ~/.asoundrc
+```
+
+Then start the application again. `.venv/bin/python -m sounddevice` lists
+what PortAudio sees: `pulse` and `default` among the outputs mean it worked.
+
 ### Checks
 
 ```bash
 .venv/bin/ruff check .           # lint, including the no-relative-imports rule
 .venv/bin/ruff format --check .  # formatting
 .venv/bin/mypy                   # types
-QT_QPA_PLATFORM=offscreen .venv/bin/pytest
+QT_QPA_PLATFORM=offscreen .venv/bin/pytest -n 8 --dist worksteal   # everything, in parallel
+.venv/bin/pytest -m "not gui"    # the fast lane: nothing that needs Qt
 ```
+
+**Run the whole suite in parallel.** Eight workers with work-stealing took
+it from 11.3 s to under 6 s where it was measured. More workers than that was
+slower, because each pays about two seconds to start. A plain `pytest` still
+runs serially — deliberately not in `addopts` — so a single test under a
+debugger behaves as it always has. CI runs `-n auto`, sized to the runner.
+
+**The fast lane is for work in `core/` and `audio/`.** `-m "not gui"` runs
+every test that needs no Qt — the model, curves, time and undo, both file
+formats, decoding, hashing and peaks, the theme system, and audition against
+its stand-in — in about four seconds, serially. It leaves out every test
+marked `gui`: anything that builds a `QApplication`, a widget or a window,
+which is the main window, the pool, the waveform, theme switching, the notice
+surface and the real launches. That is a fifth of the tests and most of the
+time, so run everything before trusting a change under `ui/`. The mark is
+enforced rather than remembered: `tests/test_markers.py` fails any test that
+reaches Qt without it, whether directly or through a helper, a fixture or an
+import. It also decides what is tidied up after a test. A `gui` test has its
+windows freed and its settings and themes wiped. Any other test is not
+tidied; instead it fails if it built the `QApplication`, left a window, or
+left a setting or a config directory behind.
 
 `QT_QPA_PLATFORM=offscreen` is set automatically by `tests/conftest.py`; it is
 shown here because you will want it for any ad-hoc Qt script on a headless
