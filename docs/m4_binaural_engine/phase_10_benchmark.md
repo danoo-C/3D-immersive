@@ -15,7 +15,9 @@ difference and proves nothing.
 ## Scope
 
 **In:** a benchmark script and a test that runs a short form of it; `p50`,
-`p99` and worst per-block times for 1, 8, 16 and 32 sources; a stand-in
+`p99` and worst per-block times for 1, 8, 16 and 32 sources, a source
+being a slot, so a paired channel counts two (phase 9), and for 32 paired
+channels, 64 sources, recorded beside them; a stand-in
 audio thread calling `process` on a real-time schedule while the window
 repaints offscreen, counting missed deadlines with and without the switch
 interval; the switch interval itself; what the live count must be, written

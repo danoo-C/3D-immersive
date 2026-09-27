@@ -1,6 +1,6 @@
 # Stereo placement: a stereo channel as two sources
 
-**Status:** agreed, and being built as [M4 phase 9](../../m4_binaural_engine/phase_9_stereo_placement.md) · **Written:** 2026-09-27 · **Asked for:** by
+**Status:** built in the engine and the parameters pane as [M4 phase 9](../../m4_binaural_engine/phase_9_stereo_placement.md), to be heard; the views draw it at M5 · **Written:** 2026-09-27 · **Asked for:** by
 the user, after hearing M4 phase 8
 
 **Asked:** can a stereo stem's left and right each have their own 3D
@@ -34,6 +34,8 @@ channel is heard in one of three modes.
 | **Single point** | Today's behaviour: the sides folded to one point, keeping their loudness. |
 | **Independent** | The left and right sides are two sources, each with its own X, Y and Z, positioned and animated on its own. |
 | **Linked** | Two sources, and moving either one moves the other in symmetry about a pivot point. |
+
+As built, the pane names them *One point*, *Free* and *Linked*.
 
 ### The link
 
@@ -97,32 +99,48 @@ spread**: left is left, and right is right.
    before the graphical side, the head and the points in the views (M5), is
    built on them.
 
-## Open, to settle when it is planned
+## Settled when it was built
 
-- **What a split side sounds like at the listener.** Inside the minimum
-  distance a source fades to its flat self (D-130), which today is the
-  signal to both ears. For a split pair, the left side's flat self could be
-  the left ear alone, and the right side's the right ear alone. Then a
-  linked pair at the listener is exactly the stem as mixed, as bypass plays
-  it, and moving the sides outward places it. That would also give the
-  default its "left is left, right is right" at (0, 0, 0) without a
-  position of its own. Recommended.
-- **The level of a mono stem made into two sources.** Two copies of one
-  signal add up differently depending on how close their points are. The
-  rule should keep level as mixed: the pair as loud as the stem played flat.
-  The likely answer is each copy at half amplitude, so the pair collapsed
-  to one point is exactly the single point. It is to be measured when
-  built.
-- **The default spread**, in metres: set by ear.
-- **The fold correction** (D-129) does not apply to a split channel, since
-  nothing is folded. Each side is calibrated as a source of its own.
-- **Cost.** A split channel is two sources. From the measured 44 µs per
-  source, 32 split stereo channels would take about 2.8 ms a block, against
-  10.67 ms. The benchmark's "32 sources" should then count sources, not
-  channels.
-- **Where it goes.** Since the engine comes first, it fits as an M4 phase
-  before the benchmark, so the benchmark measures it. The other place is
-  the first phase of M5. The views then draw two linked points per channel
-  (M5), and automation animates the leading position and the link (M6).
-- **The pane**: both sides' X, Y and Z, the mode, the three axis choices
-  and the pivot, following the pane's rules for several channels.
+Each open point from the design, and what M4 phase 9 did with it:
+
+- **What a split side sounds like at the listener**: its own ear, as
+  recommended (D-134). A pair at the listener is the stem as mixed, to
+  within float32, and moving its sides out places them.
+- **The level of a mono stem made into two sources**: the same rule as a
+  stereo pair (D-133). Its sides are one signal, so together they are the
+  single point, and apart the pair is still as loud as the stem. With level
+  as mixed off, each copy is at `1/√2`.
+- **The level of any pair.** A pair's loudness is read with the stem's own
+  spectra, so widening an image keeps its level: four real stems stay within
+  0.3 dB of themselves from together to 180° apart. The first plan, pink
+  noise and one number for how alike the sides are, missed the drums by
+  1.3 dB, and was replaced before it shipped.
+- **The default spread**: none. A new channel is linked with its left at
+  the listener, so both sides are there and it plays as the stem as mixed,
+  left as left and right as right. Moving the left side out spreads it, and
+  the right follows. How far is subtle is for the ear, and for M5's views to
+  make easy.
+- **Which side leads**: the left, stored as the channel's position (D-132).
+  Typing a linked right side moves the left through the mirror, which comes
+  to the same thing, since the mirror is its own inverse. Switching from
+  free to linked keeps the left and brings the right to its mirror, not the
+  side moved last, since nothing records which that was. When M5's views
+  drag a side, the side grabbed can lead in the same way.
+- **The fold correction** (D-129) does not apply to a pair, as expected.
+- **Cost**: 32 paired stereo channels, 64 sources, take 3.2 ms a block on
+  average and 5.2 ms at the 99th percentile, against 10.67 ms. The design's
+  2.8 ms estimate did not include the pair's own gain, about 0.6 ms. Phase
+  10's benchmark counts sources, and records 32 pairs beside them.
+- **Where it went**: M4 phase 9, before the benchmark.
+- **The pane**: a *Placement* section in the channel view, described with
+  the table of where every spatial setting lives in
+  [04-ui-spec](../../04-ui-spec.md#placement) (D-135).
+
+## Still to come
+
+- **Hearing it** (M4 phase 11), by the user who asked for it.
+- **The views** (M5): each pair drawn as two linked points, dragged, and the
+  pivot with them.
+- **Automation** (M6): the leading side, the free right side and the pivot
+  animated. Today's automation keys are the channel's `pos.*`, `gain` and
+  `pan` (03), so the right side's and the pivot's are added then.

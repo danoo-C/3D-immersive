@@ -21,7 +21,7 @@ channel and project views of the *Parameters pane* in
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | ✅ |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
 | [8 — Level as mixed](phase_8_level_as_mixed.md) | ✅ |
-| [9 — Stereo placement](phase_9_stereo_placement.md) | planned |
+| [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
 | [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | not started |
 | [11 — Heard](phase_11_heard.md) | not started |
 
@@ -181,3 +181,15 @@ through the middle, not a flip between the ears (D-130). A project switch,
 on by default, removes the near boost and evens every direction (D-131).
 The drum stem that distorted at the default position now plays within half
 a decibel of itself.
+
+**Phase 9.** A placed stereo channel can be two sources, its left side and
+its right: one point as before, free, or linked in symmetry about a pivot
+with each axis mirrored or kept (D-132). A new channel is linked, mirroring
+X about the listener, and there it is the stem as mixed, each side to its
+own ear (D-134). A pair keeps the stem's level at any separation, read with
+the stem's own spectra: four real stems stay within 0.3 dB of themselves,
+where the planned pink-noise rule missed the drums by 1.3 dB (D-133). A mono
+channel can ask to be two sources. Every spatial setting now has one home in
+the pane, the project's in the project view and the channel's in its view's
+Placement section, and the views and automation will move the same values
+(D-135). 32 pairs, 64 sources, take 3.2 ms a block.

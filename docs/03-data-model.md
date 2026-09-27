@@ -263,6 +263,17 @@ another's time is a collision to resolve, not a reordering.
 - `pan` is meaningful only under bypass. On a mono source it is a
   constant-power pan; on a stereo source it is a balance, attenuating the
   opposite side rather than folding the image.
+- **A channel's placement** (D-132) says how its sides are heard. `point`
+  folds a stereo clip to `position`, as before M4 phase 9. `free` and
+  `linked` make it two sources, its left at `position`: `free` puts its
+  right at `right`, and `linked` derives it as
+  `pivot + S · (position − pivot)`, `S` being −1 on each `mirrored` axis and
+  +1 on the others, so a linked pair's `right` is stored but not heard.
+  `mono` makes a mono clip a pair of the same signal; otherwise a channel
+  holding only mono clips is one point whatever its mode. A new channel is
+  `linked`, mirroring X about the listener. A file without `placement`
+  reads as `point`, which is how every file before M4 phase 9 sounded. Like
+  `position`, it is inactive but preserved under bypass.
 - **Solo is additive** (D-62): several channels can be soloed at once, and
   while any of them is, every non-soloed channel is silent. A channel that is
   both soloed and muted stays muted — mute is the more deliberate gesture, and
@@ -347,6 +358,9 @@ git-friendliness D-13 was for. The filesystem already knows.
       "hrtf_bypass": false, "pan": 0.0,
       "snap_override": null,
       "position": { "x": 0.0, "y": 1.5, "z": 0.0 },
+      "placement": { "mode": "point", "right": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                     "pivot": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                     "mirrored": [true, false, false], "mono": false },
       "automation": {
         "pos.x": { "keyframes": [
           { "t": 0,      "value": -2.0, "interp": "ease",
@@ -369,7 +383,10 @@ git-friendliness D-13 was for. The filesystem already knows.
       "gain_db": 0.0, "mute": false, "solo": false,
       "hrtf_bypass": true, "pan": 0.0,
       "snap_override": null,
-      "position": { "x": 0.0, "y": 1.0, "z": 0.0 },
+      "position": { "x": -0.5, "y": 1.0, "z": 0.0 },
+      "placement": { "mode": "linked", "right": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                     "pivot": { "x": 0.0, "y": 1.0, "z": 0.0 },
+                     "mirrored": [true, false, false], "mono": false },
       "automation": {},
       "clips": [
         {

@@ -12,7 +12,7 @@ here stays as the record of how it came up.
 | Issue | Status | Progress |
 |---|---|---|
 | [3D sensitivity](3d-sensitivity/README.md): a centimetre swings a sound from ear to ear, and a stem at the listener distorts | **Confirmed.** Fixed by [M4 phase 8](../m4_binaural_engine/phase_8_level_as_mixed.md), and heard: "exactly what I imagined" | `██████████` 100 % |
-| [Stereo placement](stereo-placement/README.md): a stereo channel as two sources, independent or linked in symmetry | **Designed and agreed.** Engine first, then the views | `██████░░░░` 60 % |
+| [Stereo placement](stereo-placement/README.md): a stereo channel as two sources, independent or linked in symmetry | **Built** in the engine and the pane by [M4 phase 9](../m4_binaural_engine/phase_9_stereo_placement.md), to be heard. The views draw it at M5 | `████████░░` 80 % |
 | [Test speed](tests-speeds.md): making the suite faster | **Steps 1–6 done.** Four follow-ups open, one of them blocked while CI cannot run | `████████░░` 81 % |
 
 ## How progress is counted
@@ -44,7 +44,8 @@ instead: 17 of 21 there.
 **Stereo placement**, [stereo-placement/](stereo-placement/README.md):
 
 - [A stereo channel as two sources](stereo-placement/README.md): the modes,
-  the symmetry link, what was agreed on 2026-09-27, and what is still open.
+  the symmetry link, what was agreed on 2026-09-27, and how each open point
+  was settled when it was built as M4 phase 9 (D-132 to D-135).
 
 **Test speed**:
 

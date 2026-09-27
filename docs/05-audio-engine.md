@@ -225,6 +225,41 @@ channel's level is, not what it is heard from:
   through the whole transform and wraps, where the measured responses fall
   away up there and stay compact.
 
+**A pair** (M4 phase 9, D-132 to D-134) is a placed channel heard as two
+sources, its left side and its right. It takes two slots, left then right:
+the mix copies the lane's left row into the first and its right row into
+the second, where one point averages them, and a mono clip asked to be two
+fills both with the same signal. Each slot has its own position, sent as
+`POSITION` with the side in the ring's seventh column, so moving one side is
+one command. `render` goes over the slots twice:
+
+1. directions, distances and the lookup; the filters; then each pair's gain
+   into both its targets;
+2. the ramped gains onto the rows, and the meters, a pair's left slot being
+   its channel's left meter and its right slot the right.
+
+- **The centre** fades each side to flat on its **own ear** only, the far
+  ear reaching silence, so a pair at the listener is the stem as mixed,
+  its left to the left ear and its right to the right, as bypass plays it
+  (D-134).
+- **The pair's gain** keeps it as loud as the stem as mixed at any
+  separation (D-133). Two sides apart add like unrelated signals and
+  together like the stem's own sides, so no one number is right. With
+  level as mixed on, the gain is `1 / √P`, `P` being the pair's K-weighted
+  power at the two ears read with the **stem's own spectra**: its left
+  power `S_LL`, its right `S_RR` and their cross spectrum `S_LR`, per bin,
+  over each ear's two filters `A` (left side) and `B` (right side):
+  `Σ S_LL|A|² + S_RR|B|² + 2 Re(S_LR · A · B̄)`. The spectra are measured
+  when a file is decoded, in the pass that measures its fold, and averaged
+  into the bank's bins over the channel's clips by length. The gain is
+  capped at +6 dB. Off, each side is at `1/√2`. A pair's clips are not
+  given their fold (D-129), since nothing of a pair is folded.
+
+32 paired stereo channels, 64 sources, take 3.2 ms a block on average and
+5.2 ms at the 99th percentile with level as mixed on (2.6 ms and 4.3 ms
+off), against 1.4 ms for the same 32 as points. Their pair gains are the
+0.6 ms between on and off.
+
 ### Cost estimate
 
 At 512 frames, `nfft` = 1024, 32 sources: one batched 64×1024 rFFT (two
@@ -262,7 +297,8 @@ What bypass switches off, and what it leaves alone:
 | Master gain and limiter | Everything positional |
 
 Stereo handling inverts: a spatialised stereo source is downmixed to a mono
-point (D-16), because a stereo file has no single position. A **bypassed**
+point (D-16), because a stereo file has no single position, unless its
+channel places its two sides as a pair (D-132). A **bypassed**
 stereo source keeps left and right intact — preserving that image is the whole
 reason the switch exists.
 

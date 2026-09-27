@@ -506,9 +506,9 @@ click will go.
 | Selection | Shows |
 |---|---|
 | **Media file** | path, source rate, channels, duration, full waveform, audition button |
-| **Channel** | name, colour swatch, gain, mute/solo, **HRTF bypass**, snap override, position X/Y/Z fields (greyed when bypassed), pan (only when bypassed) |
+| **Channel** | name, colour swatch, gain, mute/solo, **HRTF bypass**, snap override, pan (only when bypassed), then the **Placement** section: mode, position X/Y/Z or the left and right sides, pivot, mirror X/Y/Z, mono as two sources (greyed when bypassed) |
 | **Clip** | source, start, length, crop offset, gain, fade-in/out length and shape |
-| **Nothing** | project settings: BPM, time signature, HRTF set, distance rolloff, master gain, limiter |
+| **Nothing** | project settings: BPM, time signature, HRTF set, distance rolloff, master gain, limiter, level as mixed |
 
 Numeric fields are drag-scrubbable and accept typed values with units.
 
@@ -549,10 +549,49 @@ and no clip (D-52).
 **A field a later milestone brings** is drawn with the project's value,
 disabled, and names that milestone in its tooltip. Since M4 that is only
 the HRTF set: it shows the built-in set every channel is heard through, and
-choosing another arrives at M8. Position, pan, distance rolloff, master
-gain and the limiter are live, one edit each, and heard at the next block. The
-sample view's Audition button is disabled, saying why, with several
-selected, with the file missing, or with no audio output.
+choosing another arrives at M8. The placement, pan, distance rolloff,
+master gain, the limiter and level as mixed are live, one edit each, and
+heard at the next block. The sample view's Audition button is disabled,
+saying why, with several selected, with the file missing, or with no audio
+output.
+
+### Placement
+
+The channel view's last section, where a channel is heard from (D-132). A
+field shows only where it means something:
+
+| Field | Shown | What it sets |
+|---|---|---|
+| **Mode** | always | *One point*: a stereo clip folded to one place. *Free*: its left and right placed apart, each where it is put. *Linked*: the right mirrors the left about the pivot |
+| **Position X, Y, Z** | one point, or a mono channel that is not two sources | the channel's point |
+| **Left X, Y, Z** | a pair | the same fields, renamed: the left side is the channel's position |
+| **Right X, Y, Z** | a pair | free, its own; linked, derived, and a value typed there moves the left side through the mirror |
+| **Pivot X, Y, Z** | a linked pair | the point the pair mirrors about, the listener by default |
+| **Mirror X, Y, Z** | a linked pair | which axes are mirrored about the pivot; the others are kept |
+| **Mono as two sources** | not one point | a mono clip heard as a pair of the same signal |
+
+A channel is a pair when its mode is not one point and it holds a stereo
+clip, or asks for mono as two. A new channel is linked, mirroring X about
+the listener, so a stereo clip is left and right of the head; a mono one
+stays one point until it asks. Several channels follow the pane's rules:
+`—` where they differ, a value typed goes to all, and the section is greyed
+with its reason when every one is bypassed.
+
+### Where each spatial setting is set
+
+One home for each (D-135). The views and automation are other ways to move
+the same values, not other places they live, so the pane always shows what
+they do.
+
+| Setting | Set in the pane | Also moved by |
+|---|---|---|
+| HRTF set | project view: shown, chosen at M8 | — |
+| Distance rolloff, master gain, limiter, level as mixed | project view | — |
+| Gain, mute, solo, HRTF bypass | channel view | gain by automation (M6) |
+| Pan | channel view, while bypassed | automation (M6) |
+| Mode, mono as two sources | channel view, Placement | — |
+| Position, or the left and right sides | channel view, Placement | dragging in the views (M5); automation (M6) |
+| Pivot, mirrored axes | channel view, Placement | the pivot dragged in the views (M5); automation (M6) |
 
 ## Workspace (centre)
 

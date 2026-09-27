@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 9 — Stereo placement
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ built
 
 ## Approach
 
@@ -154,4 +154,29 @@ the centre's own ear
 
 ## Outcome
 
-Filled in at the end.
+Built as planned in its model, file, feed, engine and pane, with one change
+the measurement asked for:
+
+- **The pair's gain reads the stem's own spectra**, not pink noise and `c`.
+  Measured in step 4 as the risks asked, pink and `c` left real stems up to
+  1.3 dB too loud apart. The stem's K-weighted left, right and cross spectra
+  are now measured at decode, beside the fold, and D-133 was rewritten
+  before the phase closed. Four real stems stay within 0.3 dB of themselves
+  from together to 180° apart. Mutation 12 became *the stem's spectra
+  ignored*, and the tests gained a lopsided stem, bass on one side and
+  treble on the other, which pink and `c` could not have held.
+
+Smaller things: the mirror boxes needed a lambda, not a `partial`; a
+switch from free to linked keeps the left rather than the side moved last;
+and a heard test types a linked right side and then one point into a
+playing window.
+
+Sixteen named mutations and six more were run: all caught but *a side
+weighed by the other's spectrum*, shown equivalent to under 0.01 dB. 32
+pairs, 64 sources, take 3.2 ms a block on average and 5.2 ms at the 99th
+percentile.
+
+What the benchmark, phase 10, needs: count sources, not channels, and
+record 32 pairs beside 32 sources. The 99th percentile for 32 pairs sits
+just under half the budget, which phase 10's acceptance asks of 32 sources,
+not of 64.
