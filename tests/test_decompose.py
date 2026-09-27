@@ -8,11 +8,13 @@ not the stimulus. The real set is checked where it has been fetched.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 import pytest
+from scipy import signal
 
 from immersive.audio.hrtf import decompose as module
 from immersive.audio.hrtf.decompose import (
@@ -24,6 +26,7 @@ from immersive.audio.hrtf.decompose import (
     onset_itd,
 )
 from immersive.audio.hrtf.sofa import HrirSet, builtin
+from immersive.core.io.loudness import pink_power, pink_weights, weighted_power
 from immersive.core.io.media import Refused
 
 TAPS = 256
@@ -241,3 +244,26 @@ def test_sadie_ii_d1_decomposes_as_s0_heard_it() -> None:
         )
         assert error[depth > -AUDIBLE_DB].max() < 0.1
         assert (depth[error > 1.0] < -50.0).all(), "only at the notches' floors"
+
+    # Calibrated to flat (D-128): SADIE's front, scaled as the bank scales
+    # it, makes pink noise as loud as played flat - measured in time, not
+    # from the spectra the scale was read from. The scale is the +5.0 dB the
+    # user issue measured.
+    front = nearest((0, 1, 0))
+    weights = pink_weights(1024)
+    spectra = np.fft.rfft(sadie.minimum[front], n=1024)
+    scale = math.sqrt(2 * weights.sum() / pink_power(spectra, weights).sum())
+    assert 20 * math.log10(scale) == pytest.approx(5.0, abs=0.1)
+    rng = np.random.default_rng(0)
+    white = np.fft.rfft(rng.standard_normal(4 * 48_000))
+    frequencies = np.fft.rfftfreq(4 * 48_000, 1 / 48_000)
+    white[1:] /= np.sqrt(frequencies[1:])
+    white[0] = 0.0
+    noise = np.fft.irfft(white)
+    heard = sum(
+        weighted_power(scale * signal.fftconvolve(noise, sadie.minimum[front, ear]))
+        for ear in (0, 1)
+    )
+    assert 10 * math.log10(heard / (2 * weighted_power(noise))) == pytest.approx(
+        0.0, abs=0.1
+    )
