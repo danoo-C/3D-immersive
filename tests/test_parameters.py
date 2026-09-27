@@ -634,10 +634,19 @@ def test_a_channel_shows_what_its_header_edits_and_what_comes_later() -> None:
         "",
         "",
         "Snap",
+        "Pan",
+        "Mode",
         "Position X",
         "Position Y",
         "Position Z",
-        "Pan",
+        "Right X",
+        "Right Y",
+        "Right Z",
+        "Pivot X",
+        "Pivot Y",
+        "Pivot Z",
+        "Mirror",
+        "",
     ]
     channel = window.document().project.channels[1]
     assert view.heading() == "Channel" and view.name.text() == channel.name
