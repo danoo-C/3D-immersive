@@ -92,6 +92,19 @@ def test_opposite_sides_are_given_back_no_more_than_6_db() -> None:
     assert fold(nearly) == FOLD_CAP
 
 
+def test_the_fold_read_from_spectra_is_the_fold_filtered() -> None:
+    """Sides that share some of themselves, and a length that is not whole
+    segments: the spectra agree with filtering in time."""
+    rng = np.random.default_rng(7)
+    shared, own = rng.standard_normal((2, 10 * 48_000 + 1234))
+    audio = stereo(shared + 0.5 * own, shared - 0.8 * own)
+    left, right = (weighted_power(audio[:, side].astype(np.float64)) for side in (0, 1))
+    middle = weighted_power(audio.astype(np.float64).mean(axis=1))
+    assert fold(audio) == pytest.approx(
+        math.sqrt((left + right) / 2 / middle), rel=1e-3
+    )
+
+
 def test_a_mono_file_or_a_silent_one_loses_nothing() -> None:
     mono = np.random.default_rng(6).standard_normal((48_000, 1)).astype(np.float32)
     assert fold(mono) == 1.0

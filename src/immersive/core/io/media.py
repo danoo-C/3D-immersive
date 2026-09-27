@@ -30,6 +30,7 @@ import numpy.typing as npt
 import soundfile
 import soxr
 
+from immersive.core.io.loudness import fold
 from immersive.core.model import MediaFile
 from immersive.core.progress import Cancelled, Part
 from immersive.core.time import SAMPLE_RATE
@@ -78,10 +79,15 @@ class Decoded:
     `audio` is float32, `(frames, channels)`, C-contiguous and **read-only**:
     every clip that plays this sample shares the one array, and one that
     wrote to it would be editing all of them.
+
+    `fold` is what a stereo sample loses folded to the average of its sides,
+    as the factor that gives it back (D-129): measured when it is decoded,
+    and 1 for a mono one.
     """
 
     audio: Audio
     source_rate: int
+    fold: float = 1.0
 
     @property
     def frames(self) -> int:
@@ -177,9 +183,10 @@ def decode(
         audio = soxr.resample(audio, rate, SAMPLE_RATE, quality=QUALITY)
     audio = np.ascontiguousarray(audio, dtype=np.float32)
     audio.flags.writeable = False
+    folded = fold(audio)
     if progress is not None:
         progress.at(1.0)
-    return Decoded(audio, int(rate))
+    return Decoded(audio, int(rate), folded)
 
 
 def _read(

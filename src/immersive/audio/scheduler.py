@@ -179,19 +179,29 @@ def build(
     `audio`. With a `bank`, every channel not bypassed is spatial. On the UI
     thread only: it allocates freely."""
     frames = {media.id: media.frames for media in project.media_pool}
+    spatial = tuple(
+        index
+        for index, channel in enumerate(project.channels)
+        if bank is not None and not channel.hrtf_bypass
+    )
     lanes = []
-    for channel in project.channels:
+    for index, channel in enumerate(project.channels):
         placed = []
         for clip in channel.clips:
             decoded = audio(clip.media_id)
             head, tail = edges(clip, frames.get(clip.media_id, 0))
+            gain = db_to_gain(clip.gain_db)
+            if decoded is not None and index in spatial:
+                # Folded to a point, a stereo clip gets back what the
+                # folding loses (D-129); a mono one's fold is 1.
+                gain *= decoded.fold
             placed.append(
                 Placed(
                     start=clip.start,
                     end=clip.end,
                     offset=clip.offset,
                     audio=decoded.audio if decoded is not None else None,
-                    gain=db_to_gain(clip.gain_db),
+                    gain=gain,
                     head=head,
                     tail=tail,
                 )
@@ -209,11 +219,6 @@ def build(
         [(c.position.x, c.position.y, c.position.z) for c in project.channels],
         dtype=np.float64,
     ).reshape(len(lanes), 3)
-    spatial = tuple(
-        index
-        for index, channel in enumerate(project.channels)
-        if bank is not None and not channel.hrtf_bypass
-    )
     slot_of = {index: slot for slot, index in enumerate(spatial)}
     return Snapshot(
         generation=previous.generation + 1 if previous is not None else 1,
