@@ -120,7 +120,7 @@ The heard tests needed no new machinery: `test_hrtf_in_the_window`'s way of
 preparing a stand-in set, `test_spatial`'s head, and phase 6's
 `tests/hearing.py` to read the stand-in stream through the latency.
 
-What phase 9, the benchmark, needs: nothing from the pane. The benchmark measures the
+What phase 10, the benchmark, needs: nothing from the pane. The benchmark measures the
 finished graph, 32 placed sources and the master stage, with the UI
 repainting, and decides what "zero xruns" can mean on WSL (the README's
 open question).

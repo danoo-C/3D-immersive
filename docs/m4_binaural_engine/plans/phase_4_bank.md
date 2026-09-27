@@ -114,7 +114,7 @@ progress
 | Not here | Where |
 |---|---|
 | Convolving with the bank | phase 5 |
-| A second built-in set, or the person's own | phase 10's candidates; M8 |
+| A second built-in set, or the person's own | phase 11's candidates; M8 |
 
 ## Outcome
 

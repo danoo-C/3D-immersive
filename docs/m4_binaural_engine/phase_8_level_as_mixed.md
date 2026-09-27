@@ -29,7 +29,7 @@ project view, and in the project file, on unless a project says otherwise.
 
 **Out:** a pan law with 0 dB at centre (D-125 stands). Choosing the
 full-level distance in the pane: it is `ref_distance`, in the file. The
-benchmark → phase 9.
+benchmark → phase 10.
 
 ## Acceptance
 

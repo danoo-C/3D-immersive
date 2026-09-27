@@ -1,6 +1,6 @@
 # Stereo placement: a stereo channel as two sources
 
-**Status:** agreed, not built · **Written:** 2026-09-27 · **Asked for:** by
+**Status:** agreed, and being built as [M4 phase 9](../../m4_binaural_engine/phase_9_stereo_placement.md) · **Written:** 2026-09-27 · **Asked for:** by
 the user, after hearing M4 phase 8
 
 **Asked:** can a stereo stem's left and right each have their own 3D

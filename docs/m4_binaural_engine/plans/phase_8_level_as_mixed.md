@@ -143,7 +143,7 @@ calibration moves an expected number
 | A 0 dB-centre pan law | D-125 stands |
 | The full-level distance as a field | `ref_distance`, in the file, until asked for |
 | The pane warning about a stem that folds badly | the design's note; not yet asked for |
-| The benchmark | phase 9 |
+| The benchmark | phase 10 |
 
 ## Outcome
 
@@ -165,6 +165,6 @@ All sixteen named mutations were caught, the third only once the
 front-heavy head was there to catch it. The drum stem that distorted at (0, 0, 0) now plays within half
 a decibel of its own loudness, and does not reach the limiter there.
 
-What phase 9 needs: the graph as it ships. With the switch on, a block
+What the benchmark, now phase 10, needs: the graph as it ships. With the switch on, a block
 costs what it did at phase 5, and the benchmark should run with it on,
 since that is what a project has.
