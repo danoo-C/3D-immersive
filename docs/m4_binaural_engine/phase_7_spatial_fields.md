@@ -1,6 +1,6 @@
 # M4 · Phase 7 — The spatial fields
 
-**Status:** not started · **Plan:** not written yet
+**Status:** planned · **Plan:** [plans/phase_7_spatial_fields.md](plans/phase_7_spatial_fields.md)
 
 ## Goal
 
