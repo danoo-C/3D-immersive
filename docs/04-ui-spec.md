@@ -525,7 +525,7 @@ other begins (D-101). A value that changes nothing is put back.
 where it differs, and a value set there goes to all of them in one edit. A
 field reading `—` is typed into rather than dragged, since a drag has no
 value to start from, and a check box reading `—` holds a dash that a click
-turns on for all. Three exceptions:
+turns on for all. Four exceptions:
 
 - **A clip's start is the selection's**, the earliest, and a typed one moves
   every selected clip by the same amount, as a drag does (D-102).
@@ -533,6 +533,10 @@ turns on for all. Three exceptions:
   them**, so the selection may end up with different values.
 - **A channel's name** reads `—` and is disabled with several selected:
   one name for several channels is never wanted.
+- **A channel's position** is live while any selected channel is placed,
+  and greyed only when every one is bypassed; pan shows only then. A value
+  typed there goes to each channel on the axis typed, its other two axes
+  its own (D-127).
 
 A clip's source is shown, not edited.
 
@@ -542,9 +546,11 @@ signature a button whose menu offers 2/4, 3/4, 4/4, 5/4, 6/8, 7/8 and 12/8.
 Any other signature is set in the pane. Changing the tempo moves the grid
 and no clip (D-52).
 
-**Fields a later milestone brings** — position, pan, the HRTF set,
-distance rolloff, master gain and the limiter — are drawn with the
-project's values, disabled, and name that milestone in their tooltips. The
+**A field a later milestone brings** is drawn with the project's value,
+disabled, and names that milestone in its tooltip. Since M4 that is only
+the HRTF set: it shows the built-in set every channel is heard through, and
+choosing another arrives at M8. Position, pan, distance rolloff, master
+gain and the limiter are live, one edit each, and heard at the next block. The
 sample view's Audition button is disabled, saying why, with several
 selected, with the file missing, or with no audio output.
 

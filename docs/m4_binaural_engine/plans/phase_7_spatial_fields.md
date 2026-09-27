@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 7 — The spatial fields
 
-**Written:** 2026-09-27 · **Status:** planned
+**Written:** 2026-09-27 · **Status:** ✅ complete
 
 ## Approach
 
@@ -106,4 +106,21 @@ tooltips
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, in two steps and a look. D-127 held. The named mutations
+were all caught, though two by other tests than the ones named for them:
+
+- **An axis written to another (1)** passes the one-channel test, which types
+  X, the axis such a mutation gets right. The several-channels test types Y,
+  and caught it.
+- **The master gain written to every channel's gain (9)** cannot be heard:
+  every channel 6 dB down sounds as the master 6 dB down. The pane test, which
+  reads `project.master`, caught it.
+
+The heard tests needed no new machinery: `test_hrtf_in_the_window`'s way of
+preparing a stand-in set, `test_spatial`'s head, and phase 6's
+`tests/hearing.py` to read the stand-in stream through the latency.
+
+What phase 8 needs: nothing from the pane. The benchmark measures the
+finished graph, 32 placed sources and the master stage, with the UI
+repainting, and decides what "zero xruns" can mean on WSL (the README's
+open question).

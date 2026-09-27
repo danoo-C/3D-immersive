@@ -19,7 +19,7 @@ channel and project views of the *Parameters pane* in
 | [4 — The bank, and its cache](phase_4_bank.md) | ✅ |
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | ✅ |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | ✅ |
-| [7 — The spatial fields](phase_7_spatial_fields.md) | planned |
+| [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
 | [8 — The benchmark, and the switch interval](phase_8_benchmark.md) | not started |
 | [9 — Heard](phase_9_heard.md) | not started |
 
@@ -147,3 +147,9 @@ travel as channel gains do (D-126). The lookahead is a latency the engine
 states, 72 frames whether the limiter is on or off, which a render drops
 (D-124). That was the one acceptance line amended: "not delayed" could not
 be had without the graph rendering ahead of itself.
+
+**Phase 7.** The pane's position, pan, rolloff, master gain and limiter are
+live, one edit each, and heard at the next block. The tests type into the
+pane of a window playing through a synthetic head, and listen. With several
+channels, position is live while any is placed and goes to all of them on
+the axis typed (D-127). Only the HRTF set is still drawn dead, naming M8.
