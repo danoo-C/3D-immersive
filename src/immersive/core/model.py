@@ -68,6 +68,17 @@ class Interpolatable(StrEnum):
     PAN = "pan"
 
 
+class Pairing(StrEnum):
+    """How a channel with two sides to hear is placed (D-132)."""
+
+    #: One point: its sides folded together (D-16), as before M4 phase 9.
+    POINT = "point"
+    #: Two sources, each side where it is put.
+    FREE = "free"
+    #: Two sources, the right the left mirrored about a pivot.
+    LINKED = "linked"
+
+
 class FadeShape(StrEnum):
     LINEAR = "linear"
     EQUAL_POWER = "equal_power"
@@ -99,6 +110,23 @@ class Position:
     x: float = 0.0
     y: float = 0.0
     z: float = 0.0
+
+
+@dataclass
+class Placement:
+    """A channel's stereo placement (D-132).
+
+    `Channel.position` is the channel's point, and in a pair its left side.
+    Free, `right` is the right side. Linked, the right side is the left
+    mirrored about `pivot` on each of the `mirrored` axes, X, Y and Z, and
+    kept on the others. `mono` hears a mono clip as two sources of the same
+    signal."""
+
+    mode: Pairing = Pairing.POINT
+    right: Position = field(default_factory=Position)
+    pivot: Position = field(default_factory=Position)
+    mirrored: tuple[bool, bool, bool] = (True, False, False)
+    mono: bool = False
 
 
 @dataclass
@@ -220,6 +248,7 @@ class Channel:
     pan: float = 0.0
     snap_override: SnapSetting | None = None
     position: Position = field(default_factory=Position)
+    placement: Placement = field(default_factory=Placement)
     automation: dict[str, Curve] = field(default_factory=dict)
     clips: list[Clip] = field(default_factory=list)
 
@@ -324,7 +353,14 @@ def new_channel(
     turn = (
         colours.index(last) + 1 if last in colours else len(project.channels)
     ) % len(palette)
-    return Channel(new_channel_id(project, rng), f"Channel {number}", palette[turn])
+    return Channel(
+        new_channel_id(project, rng),
+        f"Channel {number}",
+        palette[turn],
+        # A linked pair mirroring X about the listener (D-132): a stereo clip
+        # on it is heard as mixed until its sides are moved apart (D-134).
+        placement=Placement(mode=Pairing.LINKED),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -340,6 +376,49 @@ def effective_snap(project: Project, channel: Channel) -> SnapSetting:
     disagree about which one is in force.
     """
     return channel.snap_override if channel.snap_override is not None else project.snap
+
+
+def mirror(
+    point: Position, pivot: Position, mirrored: tuple[bool, bool, bool]
+) -> Position:
+    """`point` mirrored about `pivot` on each mirrored axis and kept on the
+    others (D-132). Its own inverse: the right side of a linked pair is the
+    mirror of its left, and the left the mirror of its right."""
+    x, y, z = (
+        centre - (value - centre) if flipped else value
+        for value, centre, flipped in zip(
+            (point.x, point.y, point.z),
+            (pivot.x, pivot.y, pivot.z),
+            mirrored,
+            strict=True,
+        )
+    )
+    return Position(x, y, z)
+
+
+def paired(project: Project, channel: Channel) -> bool:
+    """Whether `channel` is heard as two sources: its mode is not one point,
+    and it holds a stereo clip or asks for mono as two (D-132)."""
+    placement = channel.placement
+    if placement.mode is Pairing.POINT:
+        return False
+    if placement.mono:
+        return True
+    stereo = {media.id for media in project.media_pool if media.channels == 2}
+    return any(clip.media_id in stereo for clip in channel.clips)
+
+
+def sides(channel: Channel) -> tuple[Position, Position]:
+    """A channel's left side and right side, as its placement puts them: the
+    one point twice, when it is one point (D-132)."""
+    placement = channel.placement
+    if placement.mode is Pairing.FREE:
+        return channel.position, placement.right
+    if placement.mode is Pairing.LINKED:
+        return channel.position, mirror(
+            channel.position, placement.pivot, placement.mirrored
+        )
+    return channel.position, channel.position
 
 
 def audible(channels: Sequence[Channel]) -> list[bool]:

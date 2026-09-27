@@ -295,7 +295,7 @@ def test_a_position_edit_sends_a_command_and_no_snapshot(bank: object) -> None:
 
     assert len(engine.installed) == installed and engine.sent() == sent + 1
     block(engine)
-    np.testing.assert_array_equal(engine.installed[-1].positions[0], [2.0, 0.0, 0.0])
+    np.testing.assert_array_equal(engine.installed[-1].positions[0, 0], [2.0, 0.0, 0.0])
 
 
 def test_the_bank_and_bypass_rebuild_the_snapshot(bank: object) -> None:

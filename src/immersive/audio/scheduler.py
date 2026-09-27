@@ -43,7 +43,17 @@ from immersive.audio.dsp import (
 from immersive.audio.hrtf.bank import Bank
 from immersive.audio.spatial import Space
 from immersive.core.io.media import Decoded
-from immersive.core.model import Clip, Fade, FadeShape, Project, audible
+from immersive.core.model import (
+    Channel,
+    Clip,
+    Fade,
+    FadeShape,
+    Position,
+    Project,
+    audible,
+    paired,
+    sides,
+)
 
 Audio = npt.NDArray[np.float32]
 
@@ -97,8 +107,9 @@ class Snapshot:
     #: them, `(channels, 2)`: what it adds to the bus, for its meter (D-117).
     #: Raised by the engine, read and zeroed by `Engine.take_channel_peaks`.
     peaks: npt.NDArray[np.float64] = field(repr=False)
-    #: `(channels, 3)` each channel's position, metres; written by the
-    #: engine from `POSITION` commands after handover (D-121).
+    #: `(channels, 2, 3)` each channel's left and right side, metres - its
+    #: point twice when it is one (D-132); written by the engine from
+    #: `POSITION` commands after handover (D-121).
     positions: npt.NDArray[np.float64] = field(repr=False)
     #: Each channel's row in `space`, or -1 for a channel played flat.
     slots: tuple[int, ...] = ()
@@ -114,6 +125,14 @@ class Snapshot:
     master: npt.NDArray[np.float64] = field(
         default_factory=lambda: np.array([1.0, 1.0]), repr=False
     )
+
+
+def positioned(project: Project, channel: Channel) -> tuple[Position, Position]:
+    """Where a channel's two sides are heard from: its placement's, when it
+    is a pair, and its one point twice when it is not (D-132)."""
+    if paired(project, channel):
+        return sides(channel)
+    return channel.position, channel.position
 
 
 def even(gain: float) -> Sides:
@@ -216,9 +235,12 @@ def build(
     )
     targets = np.array(gains(project), dtype=np.float64).reshape(len(lanes), 4)
     positions = np.array(
-        [(c.position.x, c.position.y, c.position.z) for c in project.channels],
+        [
+            [(side.x, side.y, side.z) for side in positioned(project, channel)]
+            for channel in project.channels
+        ],
         dtype=np.float64,
-    ).reshape(len(lanes), 3)
+    ).reshape(len(lanes), 2, 3)
     slot_of = {index: slot for slot, index in enumerate(spatial)}
     return Snapshot(
         generation=previous.generation + 1 if previous is not None else 1,
@@ -248,7 +270,7 @@ def empty() -> Snapshot:
         targets=none,
         levels=none.copy(),
         peaks=np.zeros((0, 2), dtype=np.float64),
-        positions=np.zeros((0, 3), dtype=np.float64),
+        positions=np.zeros((0, 2, 3), dtype=np.float64),
     )
 
 

@@ -67,7 +67,7 @@ class Space:
     """One snapshot's spatial channels, and everything a block writes."""
 
     bank: Bank
-    #: Each spatial channel's index among the snapshot's lanes.
+    #: Each source's channel, its index among the snapshot's lanes.
     channels: tuple[int, ...]
     rolloff: float
     min_distance: float
@@ -183,7 +183,7 @@ class Space:
             gather=np.zeros(bins, dtype=np.complex64),
         )
         for slot, channel in enumerate(channels):
-            _, gain, _ = space._placed(positions, channel)
+            _, gain, _ = space._placed(positions, channel, 0)
             space.distance[slot] = gain
         return space
 
@@ -201,7 +201,7 @@ class Space:
         src = self.src
         for slot in range(count):
             channel = self.channels[slot]
-            (x, y, z), gain, reach = self._placed(positions, channel)
+            (x, y, z), gain, reach = self._placed(positions, channel, 0)
             self.directions[slot, 0] = x
             self.directions[slot, 1] = y
             self.directions[slot, 2] = z
@@ -275,13 +275,13 @@ class Space:
     # ------------------------------------------------------------ internal
 
     def _placed(
-        self, positions: npt.NDArray[np.float64], channel: int
+        self, positions: npt.NDArray[np.float64], channel: int, side: int
     ) -> tuple[tuple[float, float, float], float, float]:
-        """A channel's direction, a unit vector; its distance gain; and how
+        """A source's direction, a unit vector; its distance gain; and how
         far out of the centre it is, 0 to 1 (D-130)."""
-        x = float(positions[channel, 0])
-        y = float(positions[channel, 1])
-        z = float(positions[channel, 2])
+        x = float(positions[channel, side, 0])
+        y = float(positions[channel, side, 1])
+        z = float(positions[channel, side, 2])
         r = math.sqrt(x * x + y * y + z * z)
         direction = AHEAD if r == 0.0 else (x / r, y / r, z / r)
         nearest = self.min_distance

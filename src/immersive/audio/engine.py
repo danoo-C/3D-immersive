@@ -77,7 +77,8 @@ RING: Final = 4096
 #: (D-125); for a seek, the sample, third; for playing, 1 or 0, third; for
 #: the loop, its start, its end, and 1 or 0 for whether it is on; for
 #: repeating, the project's end, first, and 1 or 0, third; for a position,
-#: its snapshot's generation, the channel, and x, y and z (D-121); for the
+#: its snapshot's generation, the channel, x, y and z, and the side, 0 or 1
+#: (D-121, D-132); for the
 #: master, its snapshot's generation, the gain, and 1 or 0 for the limiter
 #: (D-126).
 GAIN: Final = 0.0
@@ -195,11 +196,18 @@ class Engine:
         return self._send(MASTER, generation, gain, 1.0 if limiter else 0.0)
 
     def send_position(
-        self, generation: int, channel: int, x: float, y: float, z: float
+        self,
+        generation: int,
+        channel: int,
+        x: float,
+        y: float,
+        z: float,
+        side: int = 0,
     ) -> bool:
-        """Place channel `channel` of snapshot `generation` at `(x, y, z)`,
-        metres, from the next block (D-121). False when the ring is full."""
-        return self._send(POSITION, generation, channel, x, y, z)
+        """Place side `side` - 0 the left, or the only point; 1 the right - of
+        channel `channel` of snapshot `generation` at `(x, y, z)`, metres, from
+        the next block (D-121, D-132). False when the ring is full."""
+        return self._send(POSITION, generation, channel, x, y, z, side)
 
     def seek(self, sample: int) -> bool:
         """Play the next block from `sample`. False when the ring is full."""
@@ -589,13 +597,15 @@ class Engine:
                     snapshot.space.fresh = True  # no crossfade from before it
             elif kind == POSITION:
                 positions = snapshot.positions
-                if command[1] == snapshot.generation and 0 <= command[2] < len(
-                    positions
+                if (
+                    command[1] == snapshot.generation
+                    and 0 <= command[2] < len(positions)
+                    and 0 <= command[6] <= 1
                 ):
-                    row = int(command[2])
-                    positions[row, 0] = command[3]
-                    positions[row, 1] = command[4]
-                    positions[row, 2] = command[5]
+                    at = positions[int(command[2]), int(command[6])]
+                    at[0] = command[3]
+                    at[1] = command[4]
+                    at[2] = command[5]
             elif kind == PLAY:
                 self._playing = bool(command[3])
             elif kind == LOOP:

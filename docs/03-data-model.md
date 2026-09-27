@@ -127,7 +127,11 @@ Channel
 ├── hrtf_bypass      bool   true → straight to the stereo bus, unprocessed
 ├── pan              float  -1 left … 0 centre … +1 right; bypass only
 ├── snap_override    null → inherit Project.snap
-├── position         { x, y, z }            used where no automation exists
+├── position         { x, y, z }            used where no automation exists;
+│                                           a pair's left side (D-132)
+├── placement        { mode, right, pivot, mirrored, mono }
+│                      point, free or linked: how a stereo channel's two
+│                      sides are placed (D-132)
 ├── automation       { "pos.x": Curve, "pos.y": Curve, "pos.z": Curve,
 │                      "gain": Curve, "pan": Curve }   any key may be absent
 └── clips            [Clip]                 sorted by start, never overlapping

@@ -47,6 +47,8 @@ from immersive.core.model import (
     LoopRegion,
     Master,
     MediaFile,
+    Pairing,
+    Placement,
     Position,
     Problem,
     Project,
@@ -212,6 +214,16 @@ def _clip(clip: Clip) -> dict[str, Any]:
     }
 
 
+def _placement(placement: Placement) -> dict[str, Any]:
+    return {
+        "mode": placement.mode.value,
+        "right": _position(placement.right),
+        "pivot": _position(placement.pivot),
+        "mirrored": list(placement.mirrored),
+        "mono": placement.mono,
+    }
+
+
 def _channel(channel: Channel) -> dict[str, Any]:
     # No `index`: a channel's place in the list is its order (D-61).
     return {
@@ -227,6 +239,7 @@ def _channel(channel: Channel) -> dict[str, Any]:
             None if channel.snap_override is None else _snap(channel.snap_override)
         ),
         "position": _position(channel.position),
+        "placement": _placement(channel.placement),
         "automation": {
             name: _curve(curve) for name, curve in channel.automation.items()
         },
@@ -563,7 +576,7 @@ class _Reading:
         node: dict[str, Any],
         key: str,
         where: str,
-        kind: type[Division] | type[Interp] | type[FadeShape],
+        kind: type[Division] | type[Interp] | type[FadeShape] | type[Pairing],
         default: Any,
     ) -> Any:
         """A `StrEnum`, back from the value it was written as."""
@@ -609,6 +622,30 @@ def _read_position(reading: _Reading, node: dict[str, Any], where: str) -> Posit
         x=reading.number(node, "x", where, 0.0),
         y=reading.number(node, "y", where, 0.0),
         z=reading.number(node, "z", where, 0.0),
+    )
+
+
+def _read_placement(reading: _Reading, node: dict[str, Any], where: str) -> Placement:
+    """A channel's placement; absent, one point, as the file was made (D-132)."""
+    if not node:
+        return Placement()
+    mirrored = reading.sequence(node, "mirrored", where)
+    axes = Placement().mirrored
+    if "mirrored" in node:
+        if len(mirrored) == 3 and all(isinstance(axis, bool) for axis in mirrored):
+            axes = (mirrored[0], mirrored[1], mirrored[2])
+        else:
+            reading.note(where, f"mirrored is {mirrored!r}, not three true or false")
+    return Placement(
+        mode=reading.member(node, "mode", where, Pairing, Pairing.POINT),
+        right=_read_position(
+            reading, reading.mapping(node, "right", where), f"{where}.right"
+        ),
+        pivot=_read_position(
+            reading, reading.mapping(node, "pivot", where), f"{where}.pivot"
+        ),
+        mirrored=axes,
+        mono=reading.flag(node, "mono", where, False),
     )
 
 
@@ -778,6 +815,9 @@ def _read_channel(reading: _Reading, node: dict[str, Any], where: str) -> Channe
         snap_override=override,
         position=_read_position(
             reading, reading.mapping(node, "position", where), f"{where}.position"
+        ),
+        placement=_read_placement(
+            reading, reading.mapping(node, "placement", where), f"{where}.placement"
         ),
         automation=automation,
         clips=[

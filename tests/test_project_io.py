@@ -54,6 +54,8 @@ from immersive.core.model import (
     LoopRegion,
     Master,
     MediaFile,
+    Pairing,
+    Placement,
     Position,
     Problem,
     Project,
@@ -668,6 +670,13 @@ def every_field_project(media_root: Path) -> Project:
             "#3B82F6",
             hrtf_bypass=True,
             pan=-0.25,
+            placement=Placement(
+                mode=Pairing.FREE,
+                right=Position(1.5, 2.0, -0.25),
+                pivot=Position(0.5, 0.0, 0.0),
+                mirrored=(True, False, True),
+                mono=True,
+            ),
             snap_override=None,  # inherits the project's
             automation={},  # empty, not absent
             clips=[Clip("k-00000003", STEM, start=0, offset=0, length=5_760_000)],
@@ -1307,6 +1316,21 @@ def test_a_file_that_does_not_say_its_schema_is_refused(
 
     with pytest.raises(ProjectFileError, match="which schema"):
         load(path)
+
+
+def test_a_channel_without_a_placement_opens_as_one_point(tmp_path: Path) -> None:
+    """Made before placement existed, so made as one point (D-132)."""
+    path = tmp_path / "a.3dim"
+    channel = Channel("c-00000001", "C", "#A855F7")
+    channel.placement = Placement(mode=Pairing.LINKED, mirrored=(False, True, False))
+    save(Project(channels=[channel]), path)
+    assert load(path).project.channels[0].placement == channel.placement
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    del document["channels"][0]["placement"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert load(path).project.channels[0].placement == Placement()
+    assert Placement().mode is Pairing.POINT
 
 
 def test_level_as_mixed_is_kept_and_on_where_a_file_does_not_say(

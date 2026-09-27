@@ -296,7 +296,7 @@ def test_a_position_sent_is_heard_at_the_next_block(bank: Bank) -> None:
     engine.send_position(snapshot.generation, 0, 2.0, 0.0, 0.0)
     engine.send_position(snapshot.generation + 5, 0, 9.0, 9.0, 9.0)  # stale: dropped
     engine.process(out)
-    np.testing.assert_array_equal(snapshot.positions[0], [2.0, 0.0, 0.0])
+    np.testing.assert_array_equal(snapshot.positions[0, 0], [2.0, 0.0, 0.0])
 
 
 def after_moving_and_seeking(
