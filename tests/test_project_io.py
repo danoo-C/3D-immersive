@@ -679,7 +679,9 @@ def every_field_project(media_root: Path) -> Project:
         time_signature=(7, 8),
         snap=SnapSetting(True, divisions[0], triplet=False),
         hrtf=HrtfRef(kind="file", id="ari-nh2"),
-        distance=Distance(rolloff=1.75, min_distance=0.15, ref_distance=2.5),
+        distance=Distance(
+            rolloff=1.75, min_distance=0.15, ref_distance=2.5, keep_level=False
+        ),
         master=Master(gain_db=-2.25, limiter_on=False),
         media_pool=pool,
         channels=channels,
@@ -1305,6 +1307,22 @@ def test_a_file_that_does_not_say_its_schema_is_refused(
 
     with pytest.raises(ProjectFileError, match="which schema"):
         load(path)
+
+
+def test_level_as_mixed_is_kept_and_on_where_a_file_does_not_say(
+    tmp_path: Path,
+) -> None:
+    """Off is kept. A file from before the switch, whose distance has the
+    other three settings and not this one, opens with it on (D-131)."""
+    path = tmp_path / "a.3dim"
+    save(Project(distance=Distance(rolloff=1.5, keep_level=False)), path)
+    assert load(path).project.distance.keep_level is False
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    del document["distance"]["keep_level"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    distance = load(path).project.distance
+    assert distance.keep_level is True and distance.rolloff == 1.5
 
 
 def test_a_field_the_file_omits_loads_with_its_default(tmp_path: Path) -> None:

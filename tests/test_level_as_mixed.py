@@ -218,3 +218,145 @@ def test_a_bypassed_stereo_channel_is_untouched_by_its_fold(bank: Bank) -> None:
         bypass=True,
     )
     np.testing.assert_array_equal(out, sides[: len(out)])
+
+
+# --------------------------------------------------------------------------- #
+# the centre (D-130)
+# --------------------------------------------------------------------------- #
+
+
+def ears(out: Audio) -> tuple[float, int]:
+    """The difference between the ears, right over left in dB, and the lag
+    of the right ear behind the left, in samples, by cross-correlation."""
+    left, right = out[:, 0].astype(np.float64), out[:, 1].astype(np.float64)
+    difference = 10 * math.log10(weighted_power(right) / weighted_power(left))
+    lags = range(-40, 41)
+    trimmed = slice(40, len(left) - 40)
+    lag = max(
+        lags, key=lambda k: float(np.dot(left[trimmed], np.roll(right, -k)[trimmed]))
+    )
+    return difference, lag
+
+
+def test_at_the_listener_a_placed_channel_is_played_flat(bank: Bank) -> None:
+    """No filter, no delay between the ears: the channel as it is (D-130)."""
+    noise = pink(1.0, seed=8)
+    out = placed(bank, noise, Position(), len(noise) // BLOCK - 1)
+    np.testing.assert_allclose(out[:, 0], noise[: len(out), 0], atol=1e-5)
+    np.testing.assert_allclose(out[:, 1], noise[: len(out), 0], atol=1e-5)
+
+
+@pytest.mark.parametrize("side", [1.0, -1.0])
+def test_a_centimetre_either_side_of_the_listener_is_nearly_the_middle(
+    bank: Bank, side: float
+) -> None:
+    """Where it flipped from ear to ear (the first report), it now passes
+    through the middle; at the minimum distance it is fully placed."""
+    noise = pink(1.0, seed=9)
+    blocks = len(noise) // BLOCK - 1
+    near_difference, near_lag = ears(
+        placed(bank, noise, Position(0.01 * side, 0, 0), blocks)
+    )
+    assert abs(near_difference) < 1.0 and abs(near_lag) <= 2
+    at_edge = ears(placed(bank, noise, Position(0.2 * side, 0, 0), blocks))
+    at_a_metre = ears(placed(bank, noise, Position(1.0 * side, 0, 0), blocks))
+    assert at_edge[0] == pytest.approx(at_a_metre[0], abs=0.01)
+    assert at_edge[1] == at_a_metre[1] and abs(at_edge[1]) > 20
+    assert math.copysign(1.0, at_edge[0]) == side, "louder on its own side"
+
+
+def test_moving_out_of_the_centre_steps_no_more_than_standing_still(bank: Bank) -> None:
+    """A 200 Hz tone carried from the listener to 0.3 m, a centimetre a block:
+    no sample jumps further than it does from a source that stays put."""
+    tone = (0.25 * np.sin(2 * np.pi * 200 * np.arange(48_000) / 48_000)).astype(
+        np.float32
+    )[:, None]
+    media = MediaFile("m-00000001", "/t.wav", "t.wav", 48_000, 1, len(tone))
+    project = Project(
+        media_pool=[media],
+        master=Master(limiter_on=False),
+        channels=[
+            Channel(
+                "c-00000001",
+                "C",
+                "#A855F7",
+                clips=[Clip("k-00000001", media.id, 0, 0, len(tone))],
+            )
+        ],
+    )
+    engine = Engine(BLOCK)
+    snapshot = build(project, {media.id: Decoded(tone, 48_000)}.get, None, bank)
+    engine.install(snapshot)
+    engine.set_playing(True)
+    from hearing import Tape
+
+    tape = Tape(engine)
+    for n in range(40):
+        engine.send_position(snapshot.generation, 0, min(n * 0.01, 0.3), 0.0, 0.0)
+        tape.play()
+    moving = tape.heard(1, 38)
+    still = placed(bank, tone, Position(0.3, 0.0, 0.0), 40)[BLOCK:]
+    worst = max(float(np.abs(np.diff(moving[:, side])).max()) for side in (0, 1))
+    steady = max(float(np.abs(np.diff(still[:, side])).max()) for side in (0, 1))
+    assert worst <= 1.1 * max(steady, 2 * np.pi * 200 / 48_000 * 0.25)
+
+
+# --------------------------------------------------------------------------- #
+# the switch (D-131)
+# --------------------------------------------------------------------------- #
+
+
+def measured(bank: Bank, towards: tuple[float, float, float]) -> Position:
+    """The measured direction nearest `towards`, as a position one metre out."""
+    index = int(np.argmax(bank.directions @ np.array(towards)))
+    x, y, z = (float(v) for v in bank.directions[index])
+    return Position(x, y, z)
+
+
+DIRECTIONS = [(1, 0, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (0.7, 0.7, 0)]
+
+
+@pytest.mark.parametrize("towards", DIRECTIONS)
+def test_on_every_measured_direction_nearer_than_a_metre_is_as_loud_as_flat(
+    bank: Bank, towards: tuple[float, float, float]
+) -> None:
+    noise = pink(2.0, seed=10)
+    blocks = len(noise) // BLOCK - 1
+    where = measured(bank, towards)
+    half = Position(where.x / 2, where.y / 2, where.z / 2)  # 0.5 m: no boost
+    out = placed(bank, noise, half, blocks)
+    assert loudness(out) - flat(noise, len(out)) == pytest.approx(0.0, abs=0.1)
+
+
+def test_on_only_the_level_changes_not_the_delay_or_the_spectrum(bank: Bank) -> None:
+    """Switched on, a measured direction's output is its switched-off output
+    times one number: its evening gain."""
+    noise = pink(1.0, seed=11)
+    blocks = len(noise) // BLOCK - 1
+    where = measured(bank, (1, 0, 0))
+    index = int(np.argmax(bank.directions @ np.array((where.x, where.y, where.z))))
+    on = placed(bank, noise, where, blocks)
+    off = placed(bank, noise, where, blocks, keep_level=False)
+    np.testing.assert_allclose(on, bank.evening[index] * off, atol=2e-6)
+    assert bank.evening[index] < 0.95
+
+
+@pytest.mark.parametrize(("distance", "down"), [(2.0, 6.02), (4.0, 12.04)])
+def test_on_past_a_metre_distance_takes_it_down(
+    bank: Bank, distance: float, down: float
+) -> None:
+    noise = pink(2.0, seed=12)
+    blocks = len(noise) // BLOCK - 1
+    near = placed(bank, noise, Position(0.0, 1.0, 0.0), blocks)
+    far = placed(bank, noise, Position(0.0, distance, 0.0), blocks)
+    assert loudness(near) - loudness(far) == pytest.approx(down, abs=0.01)
+
+
+def test_off_nearer_is_louder_and_the_side_as_the_head_has_it(bank: Bank) -> None:
+    noise = pink(2.0, seed=13)
+    blocks = len(noise) // BLOCK - 1
+    ahead_half = placed(bank, noise, Position(0.0, 0.5, 0.0), blocks, keep_level=False)
+    ahead_one = placed(bank, noise, Position(0.0, 1.0, 0.0), blocks, keep_level=False)
+    assert loudness(ahead_half) - loudness(ahead_one) == pytest.approx(6.02, abs=0.01)
+    side = placed(bank, noise, measured(bank, (1, 0, 0)), blocks, keep_level=False)
+    assert loudness(side) - flat(noise, len(side)) > 0.4, "the head's side is louder"

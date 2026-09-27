@@ -122,11 +122,14 @@ class HrtfRef:
 
 @dataclass
 class Distance:
-    """`(ref_distance / max(r, min_distance)) ** rolloff` (D-21)."""
+    """`(ref_distance / max(r, min_distance)) ** rolloff` (D-21) - or, keeping
+    the level as mixed, never above 1: nothing nearer than `ref_distance` is
+    louder for it, and every direction is as loud as the front (D-131)."""
 
     rolloff: float = 1.0
     min_distance: float = 0.2
     ref_distance: float = 1.0
+    keep_level: bool = True
 
 
 @dataclass

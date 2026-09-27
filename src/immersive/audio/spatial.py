@@ -9,11 +9,18 @@ array (D-106). Per block, for each spatial channel:
 1. its **mono point** (D-16) has already been written into `src` by the
    engine, after the channel's gain;
 2. **distance** (D-21): `(ref / max(r, min)) ** rolloff`, ramped across the
-   block from the last block's value. The channel's meter is read here,
-   before the HRTF (D-117);
+   block from the last block's value - or, keeping the level as mixed, never
+   above 1: `(ref / max(r, ref)) ** rolloff` (D-131). The channel's meter is
+   read here, before the HRTF (D-117);
 3. **its filter**: the direction weighed by the lookup, the three nearest
    measurements' spectra blended per ear, and the far ear delayed by the
-   blended ITD as a phase ramp, so both delays are non-negative (05);
+   blended ITD as a phase ramp, so both delays are non-negative (05).
+   Keeping the level as mixed, each measurement is scaled as it is blended
+   by the gain that makes it as loud as straight ahead; the ITD is blended
+   with the plain weights, so where it is heard from does not move (D-131).
+   Inside the minimum distance the filter fades towards flat and the ITD
+   towards none, so at the listener's own position the channel is heard as
+   it is (D-130);
 4. **the crossfade** (D-37): the source windowed twice - fading out against
    last block's filter, in against this block's.
 
@@ -46,7 +53,9 @@ from immersive.audio.hrtf.bank import Bank
 from immersive.audio.hrtf.lookup import Lookup
 from immersive.core.model import Distance
 
-#: Where a source at the listener's own position is heard from.
+#: The direction given a source at the listener's own position. It is heard
+#: from nowhere there - the centre has faded it to flat (D-130) - but the
+#: lookup needs a direction to weigh.
 AHEAD: Final = (0.0, 1.0, 0.0)
 
 Samples = npt.NDArray[np.float32]
@@ -90,6 +99,13 @@ class Space:
     itds: npt.NDArray[np.float64]
     #: Each channel's distance gain as the last block ended.
     distance: npt.NDArray[np.float64]
+    #: Each channel's reach out of the centre this block: 0 at the listener,
+    #: 1 at the minimum distance and beyond (D-130).
+    reach: npt.NDArray[np.float64]
+    #: The lookup's weights scaled by each measurement's evening gain, and
+    #: the gains gathered to scale them, when the level is kept (D-131).
+    loudness: npt.NDArray[np.float64]
+    evening: npt.NDArray[np.float64]
     #: The crossfade's windows, and the gain ramp's steps.
     fade_in: Samples
     fade_out: Samples
@@ -101,6 +117,9 @@ class Space:
     angle: Samples
     delay: Spectra
     gather: Spectra
+    #: Level as mixed (D-131): no boost nearer than the reference distance,
+    #: and every direction as loud as the front.
+    keep_level: bool = False
     #: The first block after a seek or a swap crossfades from nothing stale.
     fresh: bool = True
     #: Off only in a test: this block's filter on both halves, which is the
@@ -149,6 +168,10 @@ class Space:
             weights=np.zeros((count, 3)),
             itds=np.zeros(count),
             distance=np.zeros(count),
+            reach=np.ones(count),
+            loudness=np.zeros((count, 3)),
+            evening=np.zeros((count, 3)),
+            keep_level=distance.keep_level,
             fade_in=np.linspace(0.0, 1.0, block, dtype=np.float32),
             fade_out=np.linspace(1.0, 0.0, block, dtype=np.float32),
             steps=steps,
@@ -160,7 +183,7 @@ class Space:
             gather=np.zeros(bins, dtype=np.complex64),
         )
         for slot, channel in enumerate(channels):
-            _, gain = space._placed(positions, channel)
+            _, gain, _ = space._placed(positions, channel)
             space.distance[slot] = gain
         return space
 
@@ -178,10 +201,11 @@ class Space:
         src = self.src
         for slot in range(count):
             channel = self.channels[slot]
-            (x, y, z), gain = self._placed(positions, channel)
+            (x, y, z), gain, reach = self._placed(positions, channel)
             self.directions[slot, 0] = x
             self.directions[slot, 1] = y
             self.directions[slot, 2] = z
+            self.reach[slot] = reach
             row = src[slot]
             level = float(self.distance[slot])
             if level != gain:
@@ -201,6 +225,9 @@ class Space:
         bank = self.bank
         bank.lookup.weigh(self.directions, self.vertices, self.weights, count)
         Lookup.blend(bank.itd, self.vertices, self.weights, self.itds, count)
+        if self.keep_level:
+            np.take(bank.evening, self.vertices, out=self.evening)
+            np.multiply(self.weights, self.evening, out=self.loudness)
         for slot in range(count):
             self._filter(slot)
         if self.fresh or not self.crossfade:
@@ -249,23 +276,31 @@ class Space:
 
     def _placed(
         self, positions: npt.NDArray[np.float64], channel: int
-    ) -> tuple[tuple[float, float, float], float]:
-        """A channel's direction, a unit vector, and its distance gain."""
+    ) -> tuple[tuple[float, float, float], float, float]:
+        """A channel's direction, a unit vector; its distance gain; and how
+        far out of the centre it is, 0 to 1 (D-130)."""
         x = float(positions[channel, 0])
         y = float(positions[channel, 1])
         z = float(positions[channel, 2])
         r = math.sqrt(x * x + y * y + z * z)
         direction = AHEAD if r == 0.0 else (x / r, y / r, z / r)
-        gain = (self.ref_distance / max(r, self.min_distance)) ** self.rolloff
-        return direction, gain
+        nearest = self.min_distance
+        if self.keep_level:
+            nearest = max(nearest, self.ref_distance)  # never above 1 (D-131)
+        gain = (self.ref_distance / max(r, nearest)) ** self.rolloff
+        reach = min(r / self.min_distance, 1.0) if self.min_distance > 0.0 else 1.0
+        return direction, gain, reach
 
     def _filter(self, slot: int) -> None:
         """This block's filter for one channel: three measurements blended per
-        ear, and the far ear delayed by the ITD."""
+        ear, and the far ear delayed by the ITD - and in the centre, faded
+        towards flat (D-130)."""
         filters = self.bank.filters
         vertices = self.vertices
-        weights = self.weights
-        for ear, out in ((0, self.left[slot]), (1, self.right[slot])):
+        weights = self.loudness if self.keep_level else self.weights
+        reach = float(self.reach[slot])
+        left, right = self.left[slot], self.right[slot]
+        for ear, out in ((0, left), (1, right)):
             np.multiply(
                 filters[vertices[slot, 0], ear], float(weights[slot, 0]), out=out
             )
@@ -276,13 +311,35 @@ class Space:
                     out=self.gather,
                 )
                 np.add(out, self.gather, out=out)
-        itd = float(self.itds[slot])
+            if reach < 1.0:
+                np.multiply(out, reach, out=out)
+        itd = float(self.itds[slot]) * reach
+        # Positive: the left ear is the later, far one (phase 2).
+        far, near = (left, right) if itd > 0.0 else (right, left)
         if itd != 0.0:
-            # Positive: the left ear is the later, far one (phase 2).
-            far = self.left[slot] if itd > 0.0 else self.right[slot]
-            np.multiply(
-                self.bins_, -2.0 * math.pi * abs(itd) / self.bank.nfft, out=self.angle
-            )
-            np.cos(self.angle, out=self.delay.real)
-            np.sin(self.angle, out=self.delay.imag)
+            self._delay(abs(itd))
             np.multiply(far, self.delay, out=far)
+        if reach < 1.0:
+            # The centre (D-130): the rest of the way to flat, a response of
+            # 1. Its share of the delay is to the nearest whole sample: a
+            # fractional delay of a response reaching up to Nyquist rings
+            # through the whole transform and wraps, where the measured
+            # responses, which fall away up there, stay compact. The two
+            # shares differ by half a sample at most.
+            flat = 1.0 - reach
+            np.add(near, flat, out=near)
+            whole = round(abs(itd))
+            if whole == 0:
+                np.add(far, flat, out=far)
+            else:
+                self._delay(whole)
+                np.multiply(self.delay, flat, out=self.gather)
+                np.add(far, self.gather, out=far)
+
+    def _delay(self, samples: float) -> None:
+        """`self.delay`: a delay of `samples` as a phase ramp over the bins."""
+        np.multiply(
+            self.bins_, -2.0 * math.pi * samples / self.bank.nfft, out=self.angle
+        )
+        np.cos(self.angle, out=self.delay.real)
+        np.sin(self.angle, out=self.delay.imag)

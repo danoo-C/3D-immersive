@@ -236,7 +236,8 @@ def run() -> tuple[int, int]:
 def run_spatial() -> tuple[int, int]:
     """The spatial path (M4): 32 channels, every one moving by a `POSITION`
     every block - N-1's load - through a synthetic head's bank, with one
-    bypassed channel beside them. The same measure as `run`."""
+    bypassed channel beside them. One orbits inside the centre (D-130), and
+    the level is kept as mixed (D-131). The same measure as `run`."""
     import tempfile
 
     from immersive.audio.hrtf import lookup
@@ -279,8 +280,15 @@ def run_spatial() -> tuple[int, int]:
         engine.take_channel_peaks()
         for channel in range(32):
             angle = float(turns[channel]) + n * 0.07
+            # Channel 0 orbits inside the centre, a tenth of the way out, so
+            # its filter fades part way to flat every block (D-130).
+            reach = 0.1 if channel == 0 else 1.0
             engine.send_position(
-                generation, channel, math.sin(angle), math.cos(angle), 0.3
+                generation,
+                channel,
+                reach * math.sin(angle),
+                reach * math.cos(angle),
+                reach * 0.3,
             )
         if n == 50:
             engine.seek(24_000)

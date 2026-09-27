@@ -205,3 +205,16 @@ def test_the_limiter_switched_off_is_heard(window: MainWindow) -> None:
     assert not window.document().project.master.limiter_on
     tape.play(3)
     assert (tape.heard(6, 1) == np.float32(1.5)).all(), "past full scale, untouched"
+
+
+def test_level_as_mixed_switched_off_is_heard(window: MainWindow) -> None:
+    """Half a metre ahead: level as mixed plays it as at a metre; off, nearer
+    is louder, by D-21's 6.02 dB for half the distance (D-131)."""
+    with_channel(window, 0.1, where=Position(0.0, 0.5, 0.0))
+    tape = playing(window)
+    project_view(window).keep_level.click()
+    assert not window.document().project.distance.keep_level
+    tape.play(3)
+    before, after = level(tape.heard(3, 1)), level(tape.heard(6, 1))
+    for was, now in zip(before, after, strict=True):
+        assert 20 * np.log10(now / was) == pytest.approx(6.02, abs=0.05)

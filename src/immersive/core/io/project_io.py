@@ -141,6 +141,7 @@ def _distance(distance: Distance) -> dict[str, Any]:
         "rolloff": _number(distance.rolloff),
         "min_distance": _number(distance.min_distance),
         "ref_distance": _number(distance.ref_distance),
+        "keep_level": distance.keep_level,
     }
 
 
@@ -638,6 +639,7 @@ def _read_distance(reading: _Reading, node: dict[str, Any], where: str) -> Dista
         rolloff=reading.number(node, "rolloff", where, 1.0),
         min_distance=reading.number(node, "min_distance", where, 0.2),
         ref_distance=reading.number(node, "ref_distance", where, 1.0),
+        keep_level=reading.flag(node, "keep_level", where, True),
     )
 
 

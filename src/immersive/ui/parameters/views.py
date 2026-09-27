@@ -354,6 +354,18 @@ class ProjectView(View):
             )
         )
         self.row("", self.limiter)
+        self.keep_level = CheckBox("Level as mixed")
+        self.keep_level.setToolTip(
+            "Level as mixed: a placed channel is as loud as the channel itself,\n"
+            "in every direction, until it is farther than 1 m - then it fades\n"
+            "with distance. Off: nearer is louder, and some directions quieter."
+        )
+        self.keep_level.clicked.connect(
+            lambda on: self._push(
+                set_on_all([self._document.project.distance], "keep_level", bool(on))
+            )
+        )
+        self.row("", self.keep_level)
 
     def show_values(self) -> None:
         project = self._document.project
@@ -369,6 +381,7 @@ class ProjectView(View):
         self.rolloff.set_value(project.distance.rolloff)
         self.master.set_value(project.master.gain_db)
         self.limiter.setChecked(project.master.limiter_on)
+        self.keep_level.setChecked(project.distance.keep_level)
 
     def _set_tempo(self, bpm: float) -> None:
         self._push(set_on_all([self._document.project], "bpm", bpm))

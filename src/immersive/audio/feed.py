@@ -65,6 +65,7 @@ def structure(project: Project, audio: Callable[[str], Decoded | None]) -> Hasha
             project.distance.rolloff,
             project.distance.min_distance,
             project.distance.ref_distance,
+            project.distance.keep_level,
         ),
         tuple(
             (media.id, media.frames, id(decoded) if decoded is not None else None)
