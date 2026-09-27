@@ -139,3 +139,7 @@ linked pairs and a third as free ones, their right sides moving too: nothing
 kept, 1692 bytes at worst, the interpreter's own.
 
 **Tests**: 2456 before the phase, 2512 after.
+
+**Heard (2026-09-27)**, by the user who asked for it, of the separate
+control of the two sides: "really trippy, I love it." Phase 11's listening
+still covers placement with the rest.

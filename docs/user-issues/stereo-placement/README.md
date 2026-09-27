@@ -1,6 +1,6 @@
 # Stereo placement: a stereo channel as two sources
 
-**Status:** built in the engine and the parameters pane as [M4 phase 9](../../m4_binaural_engine/phase_9_stereo_placement.md), to be heard; the views draw it at M5 · **Written:** 2026-09-27 · **Asked for:** by
+**Status:** built in the engine and the parameters pane as [M4 phase 9](../../m4_binaural_engine/phase_9_stereo_placement.md), and heard; the views draw it at M5 · **Written:** 2026-09-27 · **Asked for:** by
 the user, after hearing M4 phase 8
 
 **Asked:** can a stereo stem's left and right each have their own 3D
@@ -136,9 +136,13 @@ Each open point from the design, and what M4 phase 9 did with it:
   the table of where every spatial setting lives in
   [04-ui-spec](../../04-ui-spec.md#placement) (D-135).
 
+## Heard
+
+On 2026-09-27, by the user who asked for it, of the free mode's separate
+control of the two sides: "really trippy, I love it."
+
 ## Still to come
 
-- **Hearing it** (M4 phase 11), by the user who asked for it.
 - **The views** (M5): each pair drawn as two linked points, dragged, and the
   pivot with them.
 - **Automation** (M6): the leading side, the free right side and the pivot
