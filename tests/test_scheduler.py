@@ -7,8 +7,24 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
-from immersive.audio.dsp import IMPLICIT_FADE, db_to_gain, fade_in, fade_out
-from immersive.audio.scheduler import Snapshot, build, empty, fill, gains
+from immersive.audio.dsp import (
+    IMPLICIT_FADE,
+    balance,
+    db_to_gain,
+    fade_in,
+    fade_out,
+    pan_law,
+)
+from immersive.audio.scheduler import (
+    MONO,
+    STEREO,
+    Snapshot,
+    build,
+    empty,
+    even,
+    fill,
+    gains,
+)
 from immersive.core.io.media import Decoded
 from immersive.core.model import Channel, Clip, Fade, FadeShape, MediaFile, Project
 
@@ -46,15 +62,22 @@ def snapshot(project: Project, store: dict[str, Decoded]) -> Snapshot:
 
 
 def played(snap: Snapshot, lane: int, start: int, stop: int, block: int) -> Audio:
-    """The lane read block by block from `start`, `(stop - start, 2)`."""
+    """The lane read block by block from `start`, `(stop - start, 2)`: a
+    mono clip to both ears, as a channel nothing pans hears it."""
     out = np.zeros((stop - start, 2), dtype=np.float32)
     left = np.empty(block, dtype=np.float32)
     right = np.empty(block, dtype=np.float32)
+    mono = np.empty(block, dtype=np.float32)
     for t in range(start, stop, block):
-        if fill(snap.lanes[lane], t, left, right):
-            count = min(block, stop - t)
-            out[t - start : t - start + count, 0] = left[:count]
-            out[t - start : t - start + count, 1] = right[:count]
+        wrote = fill(snap.lanes[lane], t, left, right, mono)
+        count = min(block, stop - t)
+        into = out[t - start : t - start + count]
+        if wrote & STEREO:
+            into[:, 0] += left[:count]
+            into[:, 1] += right[:count]
+        if wrote & MONO:
+            into[:, 0] += mono[:count]
+            into[:, 1] += mono[:count]
     return out
 
 
@@ -137,9 +160,11 @@ def test_a_block_with_nothing_in_it_says_so() -> None:
     project, store = arrangement([clip(5_000, 0, 1_000)])
     left = np.full(512, np.nan, dtype=np.float32)
     right = left.copy()
-    assert not fill(snapshot(project, store).lanes[0], 0, left, right)
-    assert fill(snapshot(project, store).lanes[0], 4_800, left, right)
-    assert not left[:200].any(), "silence before the clip, not what was there"
+    mono = left.copy()
+    assert not fill(snapshot(project, store).lanes[0], 0, left, right, mono)
+    assert fill(snapshot(project, store).lanes[0], 4_800, left, right, mono) == MONO
+    assert not mono[:200].any(), "silence before the clip, not what was there"
+    assert np.isnan(left).all(), "and the stereo rows, which no clip wrote, untouched"
 
 
 # --------------------------------------------------------------------------- #
@@ -222,11 +247,36 @@ def test_a_channels_gain_folds_in_mute_and_solo() -> None:
     a, b, c, d = project.channels
     a.gain_db, b.solo, c.solo, c.mute = -6.0, True, True, True
     d.solo = False
-    assert gains(project) == [0.0, 1.0, 0.0, 0.0]
+    assert gains(project) == [even(0.0), even(1.0), even(0.0), even(0.0)]
     b.solo = False
     c.mute = False
     c.solo = False
-    assert gains(project) == [pytest.approx(db_to_gain(-6.0)), 1.0, 1.0, 1.0]
+    assert gains(project) == [even(db_to_gain(-6.0)), even(1.0), even(1.0), even(1.0)]
+
+
+def test_a_bypassed_channels_gain_is_its_pan_law_and_its_balance() -> None:
+    project, _ = arrangement([], [])
+    _, bypassed = project.channels
+    for channel in project.channels:
+        channel.gain_db, channel.pan = -6.0, 0.5
+    bypassed.hrtf_bypass = True
+    gain = db_to_gain(-6.0)
+    (mono_l, mono_r), (left, right) = pan_law(0.5), balance(0.5)
+    assert gains(project) == [
+        even(gain),
+        (gain * mono_l, gain * mono_r, gain * left, gain * right),
+    ]
+    bypassed.mute = True
+    assert gains(project)[1] == (0.0, 0.0, 0.0, 0.0)
+
+
+def test_the_pan_law_is_exact_at_its_ends_and_even_at_the_centre() -> None:
+    assert pan_law(-1.0) == (1.0, 0.0)
+    assert pan_law(1.0) == (0.0, 1.0)
+    left, right = pan_law(0.0)
+    assert left == right == pytest.approx(0.5**0.5)
+    assert balance(0.0) == (1.0, 1.0)
+    assert balance(-0.25) == (1.0, 0.75)
 
 
 # --------------------------------------------------------------------------- #
@@ -243,7 +293,7 @@ def test_a_snapshot_knows_its_generation_and_where_each_channel_was() -> None:
 
     assert (first.generation, second.generation) == (1, 2)
     assert second.carry == (2, 0, 1, -1)
-    assert second.levels.tolist() == second.targets.tolist() == [1.0] * 4
+    assert second.levels.tolist() == second.targets.tolist() == [[1.0] * 4] * 4
     assert empty().generation == 0 and empty().lanes == ()
 
 

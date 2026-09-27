@@ -6,10 +6,11 @@ feed looks at the project and tells the engine one of two things:
 - **the structure changed** - a clip placed, moved, trimmed or faded, a
   clip's gain, a sample decoded or gone, the channels' order - so it builds
   a new snapshot and hands it over;
-- **only how loud a channel is, or where it is, changed** - its gain, mute
-  or solo, or its position - so it sends each changed channel's new gain
-  or position through the ring, tagged with the snapshot it was worked out
-  against (D-105, D-121).
+- **only how loud a channel is, or where it is, changed** - its gain, mute,
+  solo or pan, or its position - or the master's gain or limiter, so it
+  sends each changed channel's new gain or position, and the master, through
+  the ring, tagged with the snapshot it was worked out against (D-105,
+  D-121, D-126).
 
 Whether a channel is bypassed, the distance settings and the HRTF bank are
 structure: they reshape what a block does, and change rarely. The bank
@@ -30,7 +31,7 @@ from collections.abc import Callable, Hashable
 
 from immersive.audio.engine import Engine
 from immersive.audio.hrtf.bank import Bank
-from immersive.audio.scheduler import Snapshot, build, gains
+from immersive.audio.scheduler import Sides, Snapshot, build, gains, master
 from immersive.core.io.media import Decoded
 from immersive.core.model import Project
 
@@ -88,8 +89,9 @@ class Feed:
         #: gains the engine has been sent since.
         self._snapshot: Snapshot | None = None
         self._structure: Hashable = None
-        self._gains: list[float] = []
+        self._gains: list[Sides] = []
         self._positions: list[tuple[float, float, float]] = []
+        self._master: tuple[float, float] = (1.0, 1.0)
         #: The HRTF bank, once the window has one (D-120).
         self._bank: Bank | None = None
         self._project: Project | None = None
@@ -102,15 +104,17 @@ class Feed:
         now = structure(project, self._audio)
         heard = gains(project)
         placed = positions(project)
+        overall = master(project)
         if self._snapshot is None or now != self._structure:
             self._structure = now
             self._install(project)
-        elif not self._sent(heard, placed):
+        elif not self._sent(heard, placed, overall):
             # The ring is full - nothing is playing to drain it. A snapshot
-            # carries every gain and position at once instead.
+            # carries every gain and position, and the master, at once.
             self._install(project)
         self._gains = heard
         self._positions = placed
+        self._master = overall
         self.release()
 
     def set_bank(self, bank: Bank | None) -> None:
@@ -123,10 +127,13 @@ class Feed:
             self.release()
 
     def _sent(
-        self, heard: list[float], placed: list[tuple[float, float, float]]
+        self,
+        heard: list[Sides],
+        placed: list[tuple[float, float, float]],
+        overall: tuple[float, float],
     ) -> bool:
-        """Each changed gain and position through the ring. False as soon
-        as the ring is full."""
+        """Each changed gain and position, and the master if it changed,
+        through the ring. False as soon as the ring is full."""
         assert self._snapshot is not None
         generation = self._snapshot.generation
         engine = self._engine
@@ -138,6 +145,9 @@ class Feed:
         ):
             if before != where and not engine.send_position(generation, index, *where):
                 return False
+        if overall != self._master:
+            level, limiter = overall
+            return engine.send_master(generation, level, bool(limiter))
         return True
 
     def release(self) -> None:

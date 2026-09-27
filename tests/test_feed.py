@@ -14,7 +14,7 @@ import pytest
 
 from immersive.audio.engine import RING, Engine
 from immersive.audio.feed import Feed
-from immersive.audio.scheduler import Snapshot
+from immersive.audio.scheduler import Snapshot, even
 from immersive.core.commands import Command
 from immersive.core.document import Document
 from immersive.core.edits import (
@@ -234,13 +234,30 @@ def test_a_full_ring_sends_the_gains_as_a_snapshot_instead() -> None:
     """Nothing drains the ring while nothing plays."""
     document, engine, _, _ = fed(0.5)
     for _ in range(RING - engine.sent()):
-        engine.send_gain(0, 0, 1.0)
+        engine.send_gain(0, 0, even(1.0))
     installed = len(engine.installed)
 
     document.push(SetAttribute(document.project.channels[0], "mute", True))
 
     assert len(engine.installed) == installed + 1
-    assert engine.installed[-1].targets.tolist() == [0.0]
+    assert engine.installed[-1].targets.tolist() == [[0.0] * 4]
+
+
+def test_a_pan_edit_and_a_master_edit_are_commands_not_snapshots() -> None:
+    """Pan is how loud a bypassed channel is on each side, and the master is
+    how loud everything is: gains, sent through the ring (D-125, D-126)."""
+    document, engine, _, _ = fed(0.5)
+    document.push(SetAttribute(document.project.channels[0], "hrtf_bypass", True))
+    installed, sent = len(engine.installed), engine.sent()
+
+    document.push(SetAttribute(document.project.channels[0], "pan", -1.0))
+    document.push(SetAttribute(document.project.master, "gain_db", -6.0))
+
+    assert len(engine.installed) == installed and engine.sent() == sent + 2
+    block(engine)  # the ramps
+    out = block(engine)
+    assert not out[:, 1].any(), "hard left"
+    np.testing.assert_allclose(out[:, 0], 0.5 * 10 ** (-6.0 / 20), rtol=1e-6)
 
 
 # --------------------------------------------------------------------------- #

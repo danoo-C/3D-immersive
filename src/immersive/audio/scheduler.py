@@ -13,9 +13,13 @@ and those are the engine's to write once the snapshot is handed over.
 cursor. At tens of clips a channel it costs as little, and it keeps no
 state, so a seek or a swap needs nothing reset.
 
-**`fill()` writes into a buffer that already exists**, one row per ear, and
-makes no array (D-106): every read is a view of the decoded sample, and
-every gain and fade a multiply into the row with `out=`.
+**`fill()` writes into a buffer that already exists**, one row per ear and
+one for mono clips, and makes no array (D-106): every read is a view of the
+decoded sample, and every gain and fade a multiply into the row with `out=`.
+
+**A channel's gain is four factors** (D-125): how much of a mono clip goes
+left and right, and how much of a stereo clip's left and right is kept. Pan
+is a bypassed channel's, so it is only there that they differ.
 """
 
 from __future__ import annotations
@@ -27,13 +31,29 @@ from dataclasses import dataclass, field
 import numpy as np
 import numpy.typing as npt
 
-from immersive.audio.dsp import IMPLICIT_FADE, Samples, db_to_gain, fade_in, fade_out
+from immersive.audio.dsp import (
+    IMPLICIT_FADE,
+    Samples,
+    balance,
+    db_to_gain,
+    fade_in,
+    fade_out,
+    pan_law,
+)
 from immersive.audio.hrtf.bank import Bank
 from immersive.audio.spatial import Space
 from immersive.core.io.media import Decoded
 from immersive.core.model import Clip, Fade, FadeShape, Project, audible
 
 Audio = npt.NDArray[np.float32]
+
+#: A channel's four factors (D-125): a mono clip to the left and to the
+#: right, and a stereo clip's left and right.
+Sides = tuple[float, float, float, float]
+
+#: What `fill()` wrote, as bits: the stereo rows, the mono row.
+STEREO = 1
+MONO = 2
 
 
 @dataclass(frozen=True, eq=False)
@@ -66,11 +86,12 @@ class Snapshot:
 
     generation: int
     lanes: tuple[Lane, ...]
-    #: Each channel's gain as a factor, mute and solo folded in (D-105):
-    #: what the next block ramps to. Written by the engine after handover.
+    #: `(channels, 4)` each channel's `Sides`, mute, solo and pan folded in
+    #: (D-105, D-125): what the next block ramps to. Written by the engine
+    #: after handover.
     targets: npt.NDArray[np.float64] = field(repr=False)
-    #: Each channel's gain at the end of the last block played. Filled from
-    #: the snapshot before, by `carry`, when this one is taken up.
+    #: The same, as the last block played left them. Filled from the
+    #: snapshot before, by `carry`, when this one is taken up.
     levels: npt.NDArray[np.float64] = field(repr=False)
     #: Each channel's highest sample per side since the UI thread last took
     #: them, `(channels, 2)`: what it adds to the bus, for its meter (D-117).
@@ -88,16 +109,39 @@ class Snapshot:
     carry: tuple[int, ...] = ()
     #: The generation `carry` counts in: the snapshot this was built from.
     based_on: int = 0
+    #: The master gain as a factor, and the limiter's switch as 1 or 0
+    #: (D-126); written by the engine from `MASTER` commands after handover.
+    master: npt.NDArray[np.float64] = field(
+        default_factory=lambda: np.array([1.0, 1.0]), repr=False
+    )
 
 
-def gains(project: Project) -> list[float]:
-    """Each channel's gain as a factor, silent where `audible()` says so
-    (D-62): what a command carries, and what a snapshot starts from."""
+def even(gain: float) -> Sides:
+    """A channel's four factors when nothing pans it: the gain four times."""
+    return gain, gain, gain, gain
+
+
+def gains(project: Project) -> list[Sides]:
+    """Each channel's four factors, silent where `audible()` says so (D-62):
+    what a command carries, and what a snapshot starts from. A bypassed
+    channel's are its gain through the pan law and the balance (D-125);
+    every other channel's are its gain four times."""
     heard = audible(project.channels)
-    return [
-        db_to_gain(channel.gain_db) if on else 0.0
-        for channel, on in zip(project.channels, heard, strict=True)
-    ]
+    sides: list[Sides] = []
+    for channel, on in zip(project.channels, heard, strict=True):
+        gain = db_to_gain(channel.gain_db) if on else 0.0
+        if channel.hrtf_bypass:
+            mono_l, mono_r = pan_law(channel.pan)
+            left, right = balance(channel.pan)
+            sides.append((gain * mono_l, gain * mono_r, gain * left, gain * right))
+        else:
+            sides.append(even(gain))
+    return sides
+
+
+def master(project: Project) -> tuple[float, float]:
+    """The master gain as a factor, and the limiter's switch as 1 or 0."""
+    return db_to_gain(project.master.gain_db), 1.0 if project.master.limiter_on else 0.0
 
 
 def edges(clip: Clip, frames: int) -> tuple[Samples | None, Samples | None]:
@@ -160,7 +204,7 @@ def build(
         if previous is not None
         else {}
     )
-    targets = np.array(gains(project), dtype=np.float64)
+    targets = np.array(gains(project), dtype=np.float64).reshape(len(lanes), 4)
     positions = np.array(
         [(c.position.x, c.position.y, c.position.z) for c in project.channels],
         dtype=np.float64,
@@ -186,12 +230,13 @@ def build(
         ),
         carry=tuple(before.get(channel.id, -1) for channel in project.channels),
         based_on=previous.generation if previous is not None else 0,
+        master=np.array(master(project), dtype=np.float64),
     )
 
 
 def empty() -> Snapshot:
     """Nothing to play: what an engine starts with."""
-    none = np.zeros(0, dtype=np.float64)
+    none = np.zeros((0, 4), dtype=np.float64)
     return Snapshot(
         generation=0,
         lanes=(),
@@ -202,65 +247,74 @@ def empty() -> Snapshot:
     )
 
 
-def fill(lane: Lane, t: int, left: Samples, right: Samples) -> bool:
-    """Write `lane`'s share of the block starting at sample `t` into `left`
-    and `right`, one row per ear, silence where no clip plays. Whether any
-    clip played at all, so a silent channel can be passed over.
-
-    A mono sample goes to both ears and a stereo one keeps its sides. A clip
-    whose sample is not here plays silence, and the rest of the lane plays.
-    """
+def fill(lane: Lane, t: int, left: Samples, right: Samples, mono: Samples) -> int:
+    """Write `lane`'s share of the block starting at sample `t`: a stereo
+    clip's sides into `left` and `right`, a mono clip into `mono`, silence
+    where no clip of that kind plays. Which rows were written, as `STEREO`
+    and `MONO` bits, so a silent channel can be passed over and a row no
+    clip wrote is not read. A clip whose sample is not here plays silence,
+    and the rest of the lane plays."""
     size = left.shape[0]
     stop = t + size
     clips = lane.clips
     index = bisect.bisect_right(lane.ends, t)
-    wrote = False
+    wrote = 0
     while index < len(clips):
         clip = clips[index]
         if clip.start >= stop:
             break
         index += 1
-        if clip.audio is None:
+        sample = clip.audio
+        if sample is None:
             continue
-        if not wrote:
-            left.fill(0)
-            right.fill(0)
-            wrote = True
         first = max(t, clip.start)
         last = min(stop, clip.end)
         read = clip.offset + (first - clip.start)
         count = last - first
         at = first - t
-        into_l = left[at : at + count]
-        into_r = right[at : at + count]
-        sample = clip.audio
-        np.copyto(into_l, sample[read : read + count, 0])
-        np.copyto(into_r, sample[read : read + count, sample.shape[1] - 1])
-        if clip.gain != 1.0:
-            np.multiply(into_l, clip.gain, out=into_l)
-            np.multiply(into_r, clip.gain, out=into_r)
-        if clip.head is not None:
-            _envelope(into_l, into_r, clip.head, first - clip.start, count)
-        if clip.tail is not None:
-            length = clip.tail.shape[0]
-            _envelope(into_l, into_r, clip.tail, first - (clip.end - length), count)
+        if sample.shape[1] == 1:
+            if not wrote & MONO:
+                mono.fill(0)
+                wrote |= MONO
+            _place(clip, mono[at : at + count], sample[read : read + count, 0], first)
+        else:
+            if not wrote & STEREO:
+                left.fill(0)
+                right.fill(0)
+                wrote |= STEREO
+            _place(clip, left[at : at + count], sample[read : read + count, 0], first)
+            _place(
+                clip,
+                right[at : at + count],
+                sample[read : read + count, sample.shape[1] - 1],
+                first,
+            )
     return wrote
 
 
-def _envelope(
-    left: Samples, right: Samples, table: Samples, into: int, count: int
-) -> None:
-    """Multiply the part of `left` and `right` that lies over `table` by it.
+def _place(clip: Placed, into: Samples, samples: Samples, first: int) -> None:
+    """One side of `clip` from timeline sample `first`: its samples, at its
+    gain, through its fades."""
+    np.copyto(into, samples)
+    if clip.gain != 1.0:
+        np.multiply(into, clip.gain, out=into)
+    count = into.shape[0]
+    if clip.head is not None:
+        _envelope(into, clip.head, first - clip.start, count)
+    if clip.tail is not None:
+        length = clip.tail.shape[0]
+        _envelope(into, clip.tail, first - (clip.end - length), count)
 
-    `into` is how far into the table the rows' first sample is - negative
-    when the rows begin before it - and `count` how long the rows are.
+
+def _envelope(row: Samples, table: Samples, into: int, count: int) -> None:
+    """Multiply the part of `row` that lies over `table` by it.
+
+    `into` is how far into the table the row's first sample is - negative
+    when the row begins before it - and `count` how long the row is.
     """
     begin = max(into, 0)
     end = min(into + count, table.shape[0])
     if begin >= end:
         return
-    part = table[begin:end]
-    row_l = left[begin - into : end - into]
-    row_r = right[begin - into : end - into]
-    np.multiply(row_l, part, out=row_l)
-    np.multiply(row_r, part, out=row_r)
+    part = row[begin - into : end - into]
+    np.multiply(part, table[begin:end], out=part)

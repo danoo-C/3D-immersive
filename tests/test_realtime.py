@@ -29,7 +29,7 @@ import numpy as np
 import numpy.typing as npt
 
 from immersive.audio.engine import Engine, Voice
-from immersive.audio.scheduler import Snapshot, build
+from immersive.audio.scheduler import Snapshot, build, even
 from immersive.core.io.media import Decoded
 from immersive.core.model import Channel, Clip, Fade, FadeShape, MediaFile, Project
 
@@ -144,11 +144,11 @@ def run() -> tuple[int, int]:
         engine.take_peaks()
         engine.take_channel_peaks()  # the meters' frame, outside what is measured
         if n % 7 == 0:
-            engine.send_gain(generation, 1, 0.25 + (n % 5) / 10)
+            engine.send_gain(generation, 1, even(0.25 + (n % 5) / 10))
         if n == 40:
-            engine.send_gain(generation, 0, 0.0)
+            engine.send_gain(generation, 0, even(0.0))
         if n == 45:
-            engine.send_gain(generation, 0, 1.0)
+            engine.send_gain(generation, 0, even(1.0))
         if n == 60:
             engine.seek(12_345)
         if n == 80:

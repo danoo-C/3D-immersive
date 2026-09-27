@@ -1,4 +1,4 @@
-"""Arithmetic on blocks: gains, fade tables, and the ramp a gain change is
+"""Arithmetic on blocks: gains, pan, fade tables, and the ramp a gain change is
 spread across.
 
 Device-free and Qt-free. What happens inside `process()` is only ever a
@@ -15,6 +15,7 @@ sample, so there is still one definition of a shape.
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 
 import numpy as np
@@ -31,6 +32,27 @@ IMPLICIT_FADE = 32
 def db_to_gain(db: float) -> float:
     """Decibels as a factor: 0 dB is exactly 1, and -6 dB about a half."""
     return 1.0 if db == 0 else float(10.0 ** (db / 20.0))
+
+
+def pan_law(pan: float) -> tuple[float, float]:
+    """A mono clip's left and right at `pan`, -1 to +1: constant power,
+    -3 dB each at the centre (05, *Pan law*). Written as two sines so the
+    far side is exactly 0 at either end and the centre exactly even."""
+    return (
+        math.sin((1.0 - pan) * math.pi / 4),
+        math.sin((1.0 + pan) * math.pi / 4),
+    )
+
+
+def balance(pan: float) -> tuple[float, float]:
+    """A stereo clip's left and right at `pan`: the side panned away from
+    turned down by `|pan|`, the other left alone, so the centre is exactly
+    1 on both and a stereo image passes untouched (05, *Pan law*)."""
+    if pan > 0:
+        return 1.0 - pan, 1.0
+    if pan < 0:
+        return 1.0, 1.0 + pan
+    return 1.0, 1.0
 
 
 def fade_curve(shape: FadeShape, positions: npt.NDArray[np.float64]) -> Samples:

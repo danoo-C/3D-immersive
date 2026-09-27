@@ -17,7 +17,7 @@ import pytest
 
 from immersive.audio.dsp import db_to_gain, ramp_steps
 from immersive.audio.engine import RING, Engine, Voice
-from immersive.audio.scheduler import Snapshot, build
+from immersive.audio.scheduler import Snapshot, build, even
 from immersive.core.io.media import Decoded
 from immersive.core.model import Channel, Clip, MediaFile, Project
 
@@ -142,7 +142,7 @@ def test_a_gain_change_ramps_across_one_block() -> None:
     engine, snap = playing(project, store)
     assert np.allclose(block(engine), 1.0)
 
-    assert engine.send_gain(snap.generation, 0, 0.5)
+    assert engine.send_gain(snap.generation, 0, even(0.5))
     ramped = block(engine)[:, 0]
     after = block(engine)[:, 0]
 
@@ -156,7 +156,7 @@ def test_a_mute_ramps_to_silence_rather_than_clicking() -> None:
     project, store = arrangement(1.0)
     engine, snap = playing(project, store)
     block(engine)
-    engine.send_gain(snap.generation, 0, 0.0)
+    engine.send_gain(snap.generation, 0, even(0.0))
     ramped = block(engine)[:, 0]
     assert ramped[0] > 0.99 and ramped[-1] == 0.0
     assert steps(ramped) <= 1.0 / BLOCK + 1e-6
@@ -169,7 +169,7 @@ def test_a_gain_changed_while_a_channel_is_silent_is_in_place_when_it_plays() ->
     project.channels[0].clips[0].start = 3 * BLOCK
     engine, snap = playing(project, store)
     block(engine)
-    engine.send_gain(snap.generation, 0, 0.5)
+    engine.send_gain(snap.generation, 0, even(0.5))
     assert not block(engine).any() and not block(engine).any()
 
     assert np.allclose(block(engine), 0.5)
@@ -185,7 +185,7 @@ def test_a_command_for_another_snapshot_is_dropped() -> None:
     engine.install(second)
     block(engine)
 
-    engine.send_gain(first.generation, 0, 0.0)
+    engine.send_gain(first.generation, 0, even(0.0))
 
     assert np.allclose(block(engine), 0.75)
 
@@ -193,8 +193,8 @@ def test_a_command_for_another_snapshot_is_dropped() -> None:
 def test_a_command_for_a_channel_that_is_not_there_is_dropped() -> None:
     project, store = arrangement(0.25)
     engine, snap = playing(project, store)
-    engine.send_gain(snap.generation, 3, 0.0)
-    engine.send_gain(snap.generation, -1, 0.0)
+    engine.send_gain(snap.generation, 3, even(0.0))
+    engine.send_gain(snap.generation, -1, even(0.0))
     assert np.allclose(block(engine), 0.25)
 
 
@@ -202,11 +202,11 @@ def test_a_full_ring_refuses_rather_than_overwriting() -> None:
     project, store = arrangement(0.25)
     engine, snap = playing(project, store)
     for _ in range(RING - 1):  # the first slot is the play command
-        assert engine.send_gain(snap.generation, 0, 0.5)
-    assert not engine.send_gain(snap.generation, 0, 0.0)
+        assert engine.send_gain(snap.generation, 0, even(0.5))
+    assert not engine.send_gain(snap.generation, 0, even(0.0))
     assert not engine.seek(0)
     block(engine)
-    assert engine.send_gain(snap.generation, 0, 1.0), "drained, so room again"
+    assert engine.send_gain(snap.generation, 0, even(1.0)), "drained, so room again"
 
 
 # --------------------------------------------------------------------------- #
@@ -307,7 +307,7 @@ def test_a_seek_and_a_gain_in_one_block_both_apply() -> None:
     project, store = arrangement(1.0)
     engine, snap = playing(project, store)
     engine.seek(5_000)
-    engine.send_gain(snap.generation, 0, 0.0)
+    engine.send_gain(snap.generation, 0, even(0.0))
     block(engine)
     assert engine.playhead == 5_000 + BLOCK
     assert not block(engine).any()
@@ -399,7 +399,7 @@ def test_a_gain_changed_while_stopped_is_in_place_when_playing_starts() -> None:
     snap = snapshot(project, store)
     engine.install(snap)
     block(engine)
-    engine.send_gain(snap.generation, 0, 0.5)
+    engine.send_gain(snap.generation, 0, even(0.5))
     block(engine)
     engine.set_playing(True)
     assert np.allclose(block(engine), 0.5), "not ramped from 1 on the first block"
@@ -476,7 +476,7 @@ def test_a_gain_ramps_smoothly_across_a_block_the_loop_wraps() -> None:
     engine, snap = playing(project, store)
     engine.set_loop(100, 300, True)
     block(engine)
-    engine.send_gain(snap.generation, 0, 0.5)
+    engine.send_gain(snap.generation, 0, even(0.5))
     ramped = block(engine)[:, 0]
     assert ramped[-1] == pytest.approx(0.5)
     assert steps(ramped) <= 0.5 / BLOCK + 1e-6
@@ -635,7 +635,7 @@ def test_a_gain_sent_before_the_stream_opens_reaches_the_snapshot_waiting() -> N
     engine = Engine(BLOCK)
     waiting = snapshot(project, store)
     engine.install(waiting)
-    engine.send_gain(waiting.generation, 0, 0.0)
+    engine.send_gain(waiting.generation, 0, even(0.0))
     engine.drain()
     engine.set_playing(True)
     assert not block(engine).any()
