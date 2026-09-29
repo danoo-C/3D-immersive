@@ -22,7 +22,7 @@ channel and project views of the *Parameters pane* in
 | [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
 | [8 — Level as mixed](phase_8_level_as_mixed.md) | ✅ |
 | [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
-| [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | not started |
+| [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | in progress |
 | [11 — Heard](phase_11_heard.md) | not started |
 
 The order is dependency order, and it is the spike's order. The spike

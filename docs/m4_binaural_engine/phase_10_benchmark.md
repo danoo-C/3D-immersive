@@ -1,6 +1,6 @@
 # M4 · Phase 10 — The benchmark, and the switch interval
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:** [plans/phase_10_benchmark.md](plans/phase_10_benchmark.md)
 
 ## Goal
 
