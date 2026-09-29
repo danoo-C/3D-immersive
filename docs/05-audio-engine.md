@@ -703,3 +703,15 @@ N-1 is the tripwire. If it fails on target hardware, the port is
 `pybind11`/`nanobind` extension or a Rust `cffi` module, with the same
 signature. `core/` and `ui/` are untouched. Nothing above this file needs to
 know it happened.
+
+⚠️ **Measured at M4 phase 10, the tripwire was not where it was expected.**
+N-1's throughput passes with room: 32 sources take a p99 of 3.0 ms of the
+10.67 (D-136). What fails is contention, which N-2 guards. The engine waits
+for the GIL once for every numpy call over 500 elements, about 90 times a
+block for 32 sources. So while the UI thread runs Python, a block is late
+by about that many switch intervals, whatever the interval is (D-137). The
+port above answers that too, if the extension releases the GIL for the
+whole block rather than call by call. So would an engine in a process of
+its own, with no port. Neither has been chosen yet. And "a few hundred lines"
+is stale: by the end of M4 the engine, the spatial path, the scheduler's
+reads and the limiter are about 1,800 lines, docstrings included.

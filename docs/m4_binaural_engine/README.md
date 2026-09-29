@@ -22,7 +22,7 @@ channel and project views of the *Parameters pane* in
 | [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
 | [8 — Level as mixed](phase_8_level_as_mixed.md) | ✅ |
 | [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
-| [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | in progress |
+| [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | ✅ |
 | [11 — Heard](phase_11_heard.md) | not started |
 
 The order is dependency order, and it is the spike's order. The spike
@@ -193,3 +193,14 @@ channel can ask to be two sources. Every spatial setting now has one home in
 the pane, the project's in the project view and the channel's in its view's
 Placement section, and the views and automation will move the same values
 (D-135). 32 pairs, 64 sources, take 3.2 ms a block.
+
+**Phase 10.** N-1 is met with room: 32 moving sources take a p99 of 3.0 ms
+of the 10.67, 28% of the budget where the line is half. 32 pairs, 64
+sources, take 5.5 to 5.8 ms (D-136). `python -m immersive.benchmark` measures
+it on any machine, and its `live` count is phase 11's. The switch interval
+is set at launch, but D-39 is reopened (D-137). The engine waits for the
+GIL at every numpy call, about 90 times a block, so with the window
+repainting without pause it missed nearly every block at 5 ms and at 1 ms
+alike. An engine that waits once a block missed none at 1 ms. Taking the
+block off the GIL is a choice left for the user, and it is wanted before
+M5, whose views repaint during playback. The plan's Outcome sets it out.

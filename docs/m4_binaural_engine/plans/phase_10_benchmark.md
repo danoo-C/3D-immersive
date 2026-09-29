@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 10 — The benchmark, and the switch interval
 
-**Written:** 2026-09-29 · **Status:** in progress
+**Written:** 2026-09-29 · **Status:** ✅ built
 
 ## Approach
 
@@ -206,4 +206,54 @@ row corrected, and how the benchmark is run
 
 ## Outcome
 
-Filled in at the end.
+Built as planned: `blocks`, `contention` and `live` in
+`immersive/benchmark.py`, the switch interval at the top of `app.run`, and
+`Engine.generation` for a sender that holds no feed. What changed on the way:
+
+- **The short form is marked `timing`.** The risk named above happened, and
+  the named fix, an interpreter of its own, would not have helped (Risks,
+  amended). A parallel run skips it and says why. A serial run and
+  `pytest -m timing` run it, and so does a new CI step after the parallel
+  run.
+- **The first lap is not counted, and the intervals take turns going
+  first.** The window's first seconds of playing a project it has just
+  built missed 52 blocks in 261, and that lap had always been at 5 ms.
+- **`live` gained `--load`**, so the listening machine can measure
+  scrolling and repainting with nobody at the window. The stand-in stream
+  gained a status, so a test can have it report underflows.
+
+The numbers are in the phase's Notes. N-1 is met: 32 sources take a p99 of
+3.0 ms, 28% of the budget. D-39 is reopened: with the window repainting
+without pause, 360 of 365 blocks were missed at 5 ms and 413 of 417 at 1 ms.
+An engine that waits once a block missed 23 and none.
+
+Twenty-four mutations were run: the sixteen named, two of them in two
+forms, and six more. All were caught but one at first. *The warm-up
+timed* survived, because the only check on it sat in the short form, which
+a parallel run skips, and a sweep is a parallel run. It has a test of its
+own now. A check that lives only in a `timing` test is one no sweep can
+see, and that holds for the next timed test too.
+
+### The choice this phase leaves
+
+N-1 passes. N-2 is at risk. With the UI thread busy, the audio thread waits
+for the GIL at every numpy call, and M5's views will keep the UI thread busy
+during playback. The fix is to take the block off the GIL, so the callback
+waits for it once a block. There D-39's interval bounds the wait, as
+measured: continuous repainting, no block missed at 1 ms. Three ways to do
+it, and the choice is the user's:
+
+| | What | For | Against |
+|---|---|---|---|
+| **A. Compiled kernels, with numba** | The block's work in `@njit(nogil=True)` kernels, the FFTs through rocket-fft; the GIL released once for the whole block | The measured fix. Still Python syntax, beside today's engine, which stays the reference its output is tested against. Wheels for all three platforms (numba 0.67 takes Python 3.13 and numpy below 2.6), so no compiler | A dependency of about 40 MB. Compiled on first launch, cached after. To reach one wait, everything a block does moves into kernels: the lanes and fades as well as the spatial path |
+| **B. A native engine** | 08's row 4: the block in Rust or C++, or the stream's callback native, with no Python in it at all | The most certain, and the seam 02 kept for it | About 1,800 lines to port and keep equivalent, and a build step on three platforms, where CI has never run |
+| **C. An engine process** | The engine and its stream in a process of their own, the decoded audio in shared memory | No GIL shared with the UI at all, and the engine's code as it is | Every structural edit crosses the boundary. A clip dragged during playback rebuilds a snapshot at mouse rate, and in the child that rebuild contends with the child's own callback. Shared memory for 1 GB of stems, and a child to start, watch and restart |
+
+**Recommended: A, starting with a spike.** Make the spatial path, which
+holds most of the waits, one nogil kernel, and measure it with
+`contention`. If the spike holds, the rest of the block follows it, and M5
+starts on an engine that does not queue behind the window. If it does not,
+B. A cheaper repaint of the window, 55 ms now, helps either way, and
+belongs with M5's views. Phase 11, hearing, does not wait on any of this:
+playing hands off missed almost nothing, and the live count there is taken
+hands off.

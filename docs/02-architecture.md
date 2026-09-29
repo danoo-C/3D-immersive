@@ -21,6 +21,11 @@ Two things make that risk acceptable:
    untouched. The reverse rescue — making a C++ project iterate quickly — does
    not exist.
 
+M4 phase 10 measured the risk. Throughput has room: N-1 passes at 28% of
+the budget (D-136). The GIL is the real risk. With the UI thread busy, the
+audio thread waits for it at every numpy call, and a window repainting
+without pause costs it nearly every block (D-137).
+
 ## Layering
 
 ```
@@ -49,6 +54,8 @@ individual files are the map.
 src/immersive/
   __main__.py            python -m immersive
   app.py                 wiring: build model, engine, window
+  benchmark.py           N-1's block times, the switch interval under load, and
+                         the live xrun count (D-136, D-137, M4)
 
   core/
     model.py             Project, Channel, Clip, MediaFile  (plain dataclasses)

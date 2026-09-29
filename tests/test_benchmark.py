@@ -55,11 +55,20 @@ def bank() -> Iterator[Bank]:
 def test_32_moving_sources_take_under_60_percent_of_the_budget(bank: Bank) -> None:
     timings = benchmark.blocks(bank, 32, False, 500)
 
-    assert len(timings.times) == 500, "the warm-up is not timed"
     assert timings.within(SHORT_FORM), (
         f"32 sources took a p99 of {timings.p99 * 1000:.2f} ms, "
         f"{timings.p99 / timings.budget:.0%} of a {BLOCK}-frame block"
     )
+
+
+def test_only_the_blocks_asked_for_are_timed(bank: Bank) -> None:
+    """Not the warm-up. Apart from the short form, because a parallel run
+    skips that, and a sweep is a parallel run: this check survived the
+    phase's sweep while it lived there."""
+    timings = benchmark.blocks(bank, 1, False, 20)
+
+    assert len(timings.times) == 20
+    assert timings.budget == budget(BLOCK)
 
 
 # ------------------------------------------------------------ arithmetic
