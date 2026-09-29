@@ -8,6 +8,7 @@ the process.
 from __future__ import annotations
 
 import sys
+from typing import Final
 
 from PySide6.QtWidgets import QApplication
 
@@ -17,6 +18,13 @@ from immersive.audio.player import Player
 from immersive.ui import theme, theme_menu
 from immersive.ui.main_window import MainWindow
 from immersive.ui.notices import Severity
+
+#: How long a thread may hold the GIL while another waits for it (D-39):
+#: 1 ms, not CPython's 5. It bounds each wait, and the audio thread waits
+#: once for every numpy call that releases the GIL, which with a busy UI
+#: is many a block (D-137): so this bounds each of those, and is not the
+#: whole of the answer.
+SWITCH_INTERVAL: Final = 0.001
 
 
 def build_application(argv: list[str] | None = None) -> QApplication:
@@ -41,6 +49,10 @@ def run(
     block: str | None = None,
 ) -> int:
     """Start the GUI and block until it closes."""
+    # First, before the output is so much as looked for, so every stream
+    # this process opens is called under it (D-39). Here and not in
+    # build_application, which every test calls.
+    sys.setswitchinterval(SWITCH_INTERVAL)
     app = build_application(argv)
     # M9 phase 4: make the theme directory on a real launch, so there is
     # somewhere to put a .3dimtheme. Deliberately here rather than anywhere
