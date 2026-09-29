@@ -11,9 +11,9 @@ centroids, and S0 used one. But `cKDTree.query` makes new arrays on every
 call, and the audio thread asks every block (D-106). So a cube map indexes
 the sphere instead, 64 by 64 cells a face. Each cell lists the faces that
 contain any of 16 points sampled in it, found once with the KD-tree, off
-the audio thread. A query tests its cell's few candidates in plain Python
-arithmetic on precomputed tuples; at this size that is faster than numpy's
-per-call overhead, and the floats it makes are freed at once. A query in
+the audio thread. A query tests its cell's few candidates, compiled by numba
+(D-138): `locate` is what the spatial kernel calls for every source, and
+`Lookup.weigh` calls it too, so the walk has one implementation. A query in
 none of them walks from the best across the edge opposite its most negative
 weight until all three are non-negative. On the convex hull of points on a
 sphere - their spherical Delaunay triangulation - such a walk ends at the
@@ -28,6 +28,7 @@ from typing import Final, overload
 
 import numpy as np
 import numpy.typing as npt
+from numba import njit
 from scipy.spatial import ConvexHull, cKDTree
 
 from immersive.core.progress import Part
@@ -64,11 +65,6 @@ class Lookup:
     #: Cells along each edge of each cube face: the index's own, carried
     #: with it, since a query into a table of another size reads past it.
     resolution: int
-    #: The same, as tuples, for the query's plain arithmetic.
-    _faces: tuple[tuple[int, int, int], ...]
-    _inverses: tuple[tuple[float, ...], ...]
-    _neighbours: tuple[tuple[int, int, int], ...]
-    _cells: tuple[tuple[int, ...], ...]
 
     @overload
     @classmethod
@@ -121,26 +117,18 @@ class Lookup:
         offsets: npt.NDArray[np.int64],
         resolution: int,
     ) -> Lookup:
-        """A lookup from its arrays - freshly built, or read from a cache."""
+        """A lookup from its arrays - freshly built, or read from a cache.
+        Each is made C-contiguous, writeable and of its one dtype, so the
+        compiled walk sees one type whatever made them (D-139)."""
         if len(offsets) != 6 * resolution * resolution + 1:
             raise ValueError("the cells do not fill a cube map of that resolution")
-        flat = cells.tolist()
-        bounds = offsets.tolist()
         return cls(
-            faces=faces,
-            inverses=inverses,
-            neighbours=neighbours,
-            cells=cells,
-            offsets=offsets,
-            resolution=resolution,
-            _faces=tuple((int(a), int(b), int(c)) for a, b, c in faces.tolist()),
-            _inverses=tuple(tuple(row) for row in inverses.reshape(-1, 9).tolist()),
-            _neighbours=tuple(
-                (int(a), int(b), int(c)) for a, b, c in neighbours.tolist()
-            ),
-            _cells=tuple(
-                tuple(flat[bounds[i] : bounds[i + 1]]) for i in range(len(bounds) - 1)
-            ),
+            faces=np.require(faces, np.int64, ("C", "W")),
+            inverses=np.require(inverses, np.float64, ("C", "W")),
+            neighbours=np.require(neighbours, np.int64, ("C", "W")),
+            cells=np.require(cells, np.int64, ("C", "W")),
+            offsets=np.require(offsets, np.int64, ("C", "W")),
+            resolution=int(resolution),
         )
 
     def weigh(
@@ -154,16 +142,24 @@ class Lookup:
         write its face's three vertex indices into `vertices` and their
         weights, summing to 1, into `weights`. No array is made."""
         rows = directions.shape[0] if count is None else count
+        faces, inverses, neighbours = self.faces, self.inverses, self.neighbours
+        cells, offsets, resolution = self.cells, self.offsets, self.resolution
         for row in range(rows):
-            x = float(directions[row, 0])
-            y = float(directions[row, 1])
-            z = float(directions[row, 2])
-            face, a, b, c = self._locate(x, y, z)
+            face, a, b, c = locate(
+                faces,
+                inverses,
+                neighbours,
+                cells,
+                offsets,
+                resolution,
+                float(directions[row, 0]),
+                float(directions[row, 1]),
+                float(directions[row, 2]),
+            )
             total = a + b + c
-            first, second, third = self._faces[face]
-            vertices[row, 0] = first
-            vertices[row, 1] = second
-            vertices[row, 2] = third
+            vertices[row, 0] = faces[face, 0]
+            vertices[row, 1] = faces[face, 1]
+            vertices[row, 2] = faces[face, 2]
             weights[row, 0] = a / total
             weights[row, 1] = b / total
             weights[row, 2] = c / total
@@ -171,7 +167,11 @@ class Lookup:
     def candidates(self, direction: npt.NDArray[np.float64]) -> tuple[int, ...]:
         """The faces the index offers for `direction`, before any walk."""
         x, y, z = (float(value) for value in direction)
-        return self._cells[_cell(x, y, z, self.resolution)]
+        cell = _cell(x, y, z, self.resolution)
+        return tuple(
+            int(face)
+            for face in self.cells[self.offsets[cell] : self.offsets[cell + 1]]
+        )
 
     @staticmethod
     def blend(
@@ -192,40 +192,60 @@ class Lookup:
                 + float(weights[row, 2]) * float(field[vertices[row, 2]])
             )
 
-    def _locate(self, x: float, y: float, z: float) -> tuple[int, float, float, float]:
-        """The face containing `(x, y, z)` and its barycentric coordinates."""
-        best = -1
-        best_low = -2.0
-        for face in self._cells[_cell(x, y, z, self.resolution)]:
-            a, b, c = self._coordinates(face, x, y, z)
-            low = min(a, b, c)
-            if low >= INSIDE:
-                return face, a, b, c
-            if low > best_low:
-                best, best_low = face, low
-        # The walk: across the edge opposite the most negative coordinate.
-        face = best
-        for _ in range(len(self._faces)):
-            a, b, c = self._coordinates(face, x, y, z)
-            if a >= INSIDE and b >= INSIDE and c >= INSIDE:
-                return face, a, b, c
-            opposite = 0 if a <= b and a <= c else (1 if b <= c else 2)
-            face = self._neighbours[face][opposite]
-        # Unreachable on a closed hull; never hold the audio thread for it.
-        a, b, c = self._coordinates(face, x, y, z)
-        return face, max(a, 0.0), max(b, 0.0), max(c, 0.0) or 1e-12
 
-    def _coordinates(
-        self, face: int, x: float, y: float, z: float
-    ) -> tuple[float, float, float]:
-        m = self._inverses[face]
-        return (
-            m[0] * x + m[1] * y + m[2] * z,
-            m[3] * x + m[4] * y + m[5] * z,
-            m[6] * x + m[7] * y + m[8] * z,
-        )
+@njit(cache=True, nogil=True)
+def locate(
+    faces: npt.NDArray[np.int64],
+    inverses: npt.NDArray[np.float64],
+    neighbours: npt.NDArray[np.int64],
+    cells: npt.NDArray[np.int64],
+    offsets: npt.NDArray[np.int64],
+    resolution: int,
+    x: float,
+    y: float,
+    z: float,
+) -> tuple[int, float, float, float]:
+    """The face containing the unit vector `(x, y, z)`, and its barycentric
+    coordinates: its cell's candidates first, then the walk. Compiled, and
+    called by the spatial kernel for every source (D-138)."""
+    best = -1
+    best_low = -2.0
+    cell = _cell(x, y, z, resolution)
+    for at in range(offsets[cell], offsets[cell + 1]):
+        face = cells[at]
+        a, b, c = _coordinates(inverses, face, x, y, z)
+        low = min(a, b, c)
+        if low >= INSIDE:
+            return face, a, b, c
+        if low > best_low:
+            best, best_low = face, low
+    # The walk: across the edge opposite the most negative coordinate.
+    face = best
+    for _ in range(faces.shape[0]):
+        a, b, c = _coordinates(inverses, face, x, y, z)
+        if a >= INSIDE and b >= INSIDE and c >= INSIDE:
+            return face, a, b, c
+        opposite = 0 if a <= b and a <= c else (1 if b <= c else 2)
+        face = neighbours[face, opposite]
+    # Unreachable on a closed hull; never hold the audio thread for it.
+    a, b, c = _coordinates(inverses, face, x, y, z)
+    c = max(c, 0.0)
+    return face, max(a, 0.0), max(b, 0.0), c if c > 0.0 else 1e-12
 
 
+@njit(cache=True, nogil=True)
+def _coordinates(
+    inverses: npt.NDArray[np.float64], face: int, x: float, y: float, z: float
+) -> tuple[float, float, float]:
+    m = inverses[face]
+    return (
+        m[0, 0] * x + m[0, 1] * y + m[0, 2] * z,
+        m[1, 0] * x + m[1, 1] * y + m[1, 2] * z,
+        m[2, 0] * x + m[2, 1] * y + m[2, 2] * z,
+    )
+
+
+@njit(cache=True, nogil=True)
 def _cell(x: float, y: float, z: float, cells: int) -> int:
     """The cube-map cell `(x, y, z)` falls in: its largest component picks
     the cube face and its sign, and the other two, divided by it, the cell."""
