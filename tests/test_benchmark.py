@@ -203,3 +203,19 @@ def test_the_stand_in_stream_calls_back_a_block_at_a_time_on_its_clock() -> None
     assert stream.clock.blocks == count
     assert stream.clock.interval == sys.getswitchinterval()
     assert backend.streams == [stream]
+
+
+def test_live_says_why_there_is_no_output_rather_than_raising(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from immersive.audio import device
+
+    monkeypatch.setattr(device, "load_backend", lambda: "PortAudio is missing")
+    assert benchmark.run_live(None, None, 1.0, "playing") == 2
+    assert capsys.readouterr().out == "PortAudio is missing\n"
+
+    unusable = device.Settled(device.Output(None, 512), False, ["no device"])
+    monkeypatch.setattr(device, "load_backend", lambda: object())
+    monkeypatch.setattr(device, "settle", lambda backend, name, block: unusable)
+    assert benchmark.run_live(None, None, 1.0, "playing") == 2
+    assert capsys.readouterr().out == "no device\n"

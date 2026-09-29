@@ -2,6 +2,8 @@
 
     python -m immersive.benchmark blocks [--block 512] [--count 3000] [--rounds 3]
     python -m immersive.benchmark contention [--seconds 8] [--rounds 3] [--one-wait]
+    python -m immersive.benchmark live [--device NAME] [--block 512] [--seconds 60]
+                                       [--load playing|scrolling|repainting]
 
 **`blocks`** times the engine a block at a time, with no window and no
 device. The HRTF set is the one the application ships, prepared at the
@@ -19,6 +21,12 @@ whole window without pause. Each load runs at CPython's 5 ms switch interval
 and at D-39's 1 ms, in turn, round after round. `--one-wait` puts in the
 engine's place a sleep as long as its median block: an engine that waits
 for the GIL once a block, which is what D-39 assumed the engine was.
+
+**`live`** is the count phase 11 takes on the listening machine: the same
+window on the real output, chosen as the application chooses it, 32 sources
+moving for a minute, and the engine's own xrun count at the end, which is
+what PortAudio reported. The window is on screen, and a person may use it
+meanwhile; `--load` scrolls or repaints it without one.
 
 **A source is a slot**: a channel placed as a pair is two (D-132), and each
 costs the FFT what a point does. Every arrangement is the finished graph.
@@ -314,9 +322,11 @@ class Stream:
     engine meets there what it meets on a device, the waits for the GIL
     included, and nothing is played."""
 
-    def __init__(self, **settings: Any) -> None:
+    def __init__(self, status: Any = None, **settings: Any) -> None:
         self.block = int(settings["blocksize"])
         self.callback: Callable[..., None] = settings["callback"]
+        #: What PortAudio says of each block. The stand-in says nothing.
+        self.status = status
         self.clock = Clock(budget(self.block), 0.0)
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -342,7 +352,7 @@ class Stream:
             if wait > 0:
                 time.sleep(wait)
             started = time.perf_counter()
-            self.callback(out, self.block, None, None)
+            self.callback(out, self.block, None, self.status)
             clock.done(started, time.perf_counter())
 
 
@@ -350,11 +360,12 @@ class Backend:
     """The stand-in's `sounddevice`: only what the player opens a stream
     with, and every stream it opened."""
 
-    def __init__(self) -> None:
+    def __init__(self, status: Any = None) -> None:
         self.streams: list[Stream] = []
+        self.status = status
 
     def OutputStream(self, **settings: Any) -> Stream:
-        stream = Stream(**settings)
+        stream = Stream(self.status, **settings)
         self.streams.append(stream)
         return stream
 
@@ -430,6 +441,44 @@ def contention(
     finally:
         sys.setswitchinterval(before)
         engine.__dict__.pop("process", None)
+        player.close()
+        window.stop_work()
+        window.deleteLater()
+
+
+@dataclass(frozen=True)
+class Heard:
+    """What `live` counted."""
+
+    #: The engine's own count: what the stream reported as underflows.
+    xruns: int
+    blocks: int
+
+
+def live(
+    backend: Any, output: Output, seconds: float, load: str, channels: int = 32
+) -> Heard:
+    """The application's window playing `channels` moving sources through
+    `backend` for `seconds` under `load`, and the xruns the engine counted.
+    The window is shown, for whoever is at the machine."""
+    from immersive.app import build_application
+    from immersive.audio.player import Player
+    from immersive.ui.main_window import MainWindow
+
+    build_application([])
+    player = Player(backend, output)
+    window = MainWindow(player=player)
+    window.show()
+    engine = player.engine
+    try:
+        window.prepare_hrtf()
+        _until(lambda: window.bank() is not None)
+        _arrange(window, channels, sample(seconds + 2.0))
+        moving = _moving(engine, channels)
+        _lap(window, player, load, seconds)
+        moving.stop()
+        return Heard(engine.xruns, engine.playhead // output.block)
+    finally:
         player.close()
         window.stop_work()
         window.deleteLater()
@@ -691,6 +740,39 @@ def run_contention(seconds: float, rounds: int, one_wait: bool) -> int:
     return 0
 
 
+def run_live(device: str | None, block: str | None, seconds: float, load: str) -> int:
+    """The live count, on the output the application would use: 0 when the
+    engine counted no xrun."""
+    from immersive.app import SWITCH_INTERVAL
+    from immersive.audio.device import load_backend, settle
+
+    backend = load_backend()
+    if isinstance(backend, str):
+        print(backend)
+        return 2
+    settled = settle(backend, device, block)
+    for problem in settled.problems:
+        print(problem)
+    if not settled.usable:
+        return 2
+    output = settled.output
+    facts = backend.query_devices(output.device, kind="output")
+    api = backend.query_hostapis(facts["hostapi"])["name"]
+    # As a launch sets it (D-39): this is the application, measured.
+    sys.setswitchinterval(SWITCH_INTERVAL)
+    heard = live(backend, output, seconds, load)
+    print(machine())
+    print(
+        f"{facts['name']} ({api}), {output.block} frames, PortAudio's latency "
+        f"{facts['default_high_output_latency'] * 1000:.0f} ms"
+    )
+    print(
+        f"32 moving sources, {seconds:g} s {load}: {heard.xruns} xruns in "
+        f"{heard.blocks} blocks"
+    )
+    return 0 if heard.xruns == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m immersive.benchmark",
@@ -707,7 +789,16 @@ def main(argv: list[str] | None = None) -> int:
     loaded.add_argument("--seconds", type=float, default=8.0)
     loaded.add_argument("--rounds", type=int, default=3)
     loaded.add_argument("--one-wait", action="store_true")
+    played = what.add_parser(
+        "live", help="xruns on the real output, the window shown (phase 11)"
+    )
+    played.add_argument("--device", help="as the application takes it")
+    played.add_argument("--block", help="as the application takes it")
+    played.add_argument("--seconds", type=float, default=60.0)
+    played.add_argument("--load", choices=LOADS, default="playing")
     options = parser.parse_args(argv)
+    if options.what == "live":
+        return run_live(options.device, options.block, options.seconds, options.load)
     if options.what == "contention":
         return run_contention(options.seconds, options.rounds, options.one_wait)
     return run_blocks(options.block, options.count, options.rounds)

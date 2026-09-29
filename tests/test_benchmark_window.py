@@ -20,10 +20,12 @@ from PySide6.QtWidgets import QApplication
 
 from immersive import benchmark
 from immersive.app import build_application
+from immersive.audio.device import Output
 from immersive.audio.hrtf import lookup
 from immersive.audio.hrtf.bank import Bank, prepare
-from immersive.benchmark import INTERVALS, LOADS, Arrangement
+from immersive.benchmark import INTERVALS, LOADS, Arrangement, Backend
 from immersive.ui import hrtf
+from standin import Status
 from test_spatial import head
 
 pytestmark = pytest.mark.gui
@@ -77,3 +79,16 @@ def test_the_ui_thread_moves_every_source() -> None:
 
     moved = np.linalg.norm(playing.snapshot.positions[:4, 0] - before[:, 0], axis=1)
     assert (moved > 0).all()
+
+
+def test_live_reports_the_engines_own_count() -> None:
+    """A stream that reports every block as an underflow: the count is the
+    engine's, what PortAudio said, and not the stand-in's clock, which saw
+    none of them late."""
+    backend = Backend(status=Status(output_underflow=True))
+    heard = benchmark.live(backend, Output(None, 512), 0.5, "playing", channels=4)
+
+    [stream] = backend.streams
+    assert heard.blocks > 0
+    assert heard.xruns >= heard.blocks, "every block said so"
+    assert heard.xruns == stream.clock.blocks
