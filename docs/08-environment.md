@@ -83,6 +83,7 @@ what PortAudio sees: `pulse` and `default` among the outputs mean it worked.
 .venv/bin/ruff format --check .  # formatting
 .venv/bin/mypy                   # types
 QT_QPA_PLATFORM=offscreen .venv/bin/pytest -n 8 --dist worksteal   # everything, in parallel
+.venv/bin/pytest -m timing          # then what is timed, alone (D-136)
 .venv/bin/pytest -m "not gui"    # the fast lane: nothing that needs Qt
 ```
 
@@ -91,6 +92,11 @@ it from 11.3 s to under 6 s where it was measured. More workers than that was
 slower, because each pays about two seconds to start. A plain `pytest` still
 runs serially — deliberately not in `addopts` — so a single test under a
 debugger behaves as it always has. CI runs `-n auto`, sized to the runner.
+
+**What is timed runs alone.** A test marked `timing` measures time, and
+under more than one worker the suite's own load decides the answer, so the
+parallel run skips it and says so. `pytest -m timing` runs it afterwards,
+as CI does. A serial `pytest` runs it with everything else.
 
 **The fast lane is for work in `core/` and `audio/`.** `-m "not gui"` runs
 every test that needs no Qt — the model, curves, time and undo, both file

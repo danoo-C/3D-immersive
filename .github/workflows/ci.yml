@@ -65,6 +65,11 @@ jobs:
       - name: Test
         run: pytest -n auto --dist worksteal
 
+      # Alone, after it: a timed test cannot share the machine with the
+      # suite's own workers, so the parallel run skips it (D-136).
+      - name: Timing
+        run: pytest -m timing
+
   # D-27's whole rationale is that packaging mistakes surface now rather than
   # at release. `pip install -e .` does not exercise the wheel, so on its own
   # it cannot deliver that: a missing __init__.py, undeclared package data or

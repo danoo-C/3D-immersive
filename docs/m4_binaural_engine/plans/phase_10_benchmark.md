@@ -178,6 +178,15 @@ row corrected, and how the benchmark is run
   p99 alone. If eight workers push it over, the line is right and the test
   is wrong: run it in an interpreter of its own, as the zero-allocation
   test is.
+  *Amended in step 1:* they did push it over, to 12 to 15 ms, and an
+  interpreter of its own would not have helped, since the load is the other
+  workers. Even the thread's own CPU time reached 11 ms at p99, because a
+  busy sibling hyperthread slows it too. Single-threaded BLAS in every
+  worker brought it to 8.6 to 10.7 ms, still over. So the test is marked
+  `timing`: skipped, with its reason, under more than one worker, and run
+  alone by `pytest -m timing`, as CI now does after the parallel run. A
+  serial suite runs it too. pytest-benchmark switches itself off under
+  xdist for the same reason.
 - **The contention runs are slow and noisy.** They are measured by hand,
   not in the suite, and in interleaved rounds. The suite tests the stand-in
   and the loads' plumbing with short runs, not the effect.

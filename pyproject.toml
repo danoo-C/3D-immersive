@@ -130,4 +130,5 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
     "gui: needs a Qt application instance",
+    "timing: measures time, so is skipped under more than one xdist worker (run: pytest -m timing)",
 ]

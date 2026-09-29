@@ -136,6 +136,22 @@ def _nothing_waits_for_a_person() -> Iterator[None]:
                 setattr(owner, name, original)
 
 
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """A test marked `timing` needs the machine to itself (D-136).
+
+    Under pytest-xdist the suite's own workers load every core. There, 32
+    sources that take 2.8 ms a block at p99 alone took 12 to 15 ms, and even
+    the thread's own CPU time reached 11 ms, since a busy sibling
+    hyperthread slows it too. So under more than one worker a timed test is
+    skipped with the command that runs it, and a serial run, or
+    `pytest -m timing` after the parallel one, runs it on a quiet machine.
+    pytest-benchmark switches itself off under xdist for the same reason.
+    """
+    workers = int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1"))
+    if workers > 1 and item.get_closest_marker("timing") is not None:
+        pytest.skip("timed, so run with the machine to itself: pytest -m timing")
+
+
 @pytest.fixture(autouse=True)
 def _tidied_as_marked(request: pytest.FixtureRequest) -> Iterator[None]:
     """A `gui` test is tidied up after; any other test must need no tidying.
