@@ -468,8 +468,11 @@ window repainted. So contention, the failure mode this section names, is
 not answered by row 0. It needs an audio thread that stops queueing for the
 GIL at every call. Rows 1 to 3 do not do that. Row 4 does, if the extension
 releases the GIL for the whole block, and so would an engine in a process of
-its own. Which one is a decision not yet taken: M4 phase 10's plan sets out
-the choice ([Outcome](m4_binaural_engine/plans/phase_10_benchmark.md#outcome)).
+its own. M4 phase 10's plan set out the choice
+([Outcome](m4_binaural_engine/plans/phase_10_benchmark.md#outcome)). The
+user chose a third form of row 4: numba kernels, compiled from the engine's
+own Python and releasing the GIL for a whole block, with no build step
+(D-138). They are built in M4 phases 11 and 12.
 
 Note that #1 touches four lines, while the nuclear option at #4 is still
 bounded and pre-planned. That ladder is why choosing Python was safe.

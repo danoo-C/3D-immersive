@@ -377,6 +377,10 @@ Phases: [`docs/m4_binaural_engine/`](m4_binaural_engine/README.md)
 - The zero-allocation test on `process()`, held over the spatial path — it
   starts at M3, on the flat one
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
+- The engine's block compiled by numba, releasing the GIL while it runs
+  (D-138, D-139). *Added after the benchmark*, which found the audio thread
+  waiting for the GIL at every numpy call and missing nearly every block
+  while the window repainted (D-137)
 - The channel's position X/Y/Z fields in the parameters pane, live. *Moved
   here from M5 before the milestone started*: the acceptance below is
   positions set numerically, and without the fields that means editing a
@@ -478,7 +482,7 @@ along the way costs them no more than the last autosave interval.
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| Python realtime dropouts | **High with a busy UI**, measured | M4 phase 10 measured it. Throughput has room (N-1 passes at 28% of the budget, D-136). But the audio thread waits for the GIL at every numpy call, and a window repainting without pause costs it nearly every block (D-137). The fix is to take the engine's block off the GIL: a native `process` that releases it for the whole block, or an engine in a process of its own. It is to be chosen before M5, whose views repaint during playback. The zero-alloc test; the `Engine.process` port seam |
+| Python realtime dropouts | **High with a busy UI**, measured | M4 phase 10 measured it. Throughput has room (N-1 passes at 28% of the budget, D-136). But the audio thread waits for the GIL at every numpy call, and a window repainting without pause costs it nearly every block (D-137). The fix is chosen: the engine's block compiled by numba, releasing the GIL for all of it (D-138), in M4 phases 11 and 12, before M5's views repaint during playback. The zero-alloc test; the `Engine.process` port seam |
 | HRTF interpolation artifacts on moving sources | **High if done naively** | Two halves, both non-optional and both specified in [05-audio-engine.md](05-audio-engine.md): the ITD/minimum-phase split, which prevents comb filtering *within* a block's filter, and the unconditional input-windowed crossfade (D-37), which prevents zipper noise *between* blocks. Neither covers the other. S0 puts both in someone's ears before M1 rather than after M4 |
 | Timeline repaint performance at hundreds of clips | Medium | `QGraphicsView` + cached pixmaps + zoom LOD from the start, not retrofitted |
 | Cross-platform audio backend differences (WASAPI/CoreAudio/PipeWire) | Medium | Device picker with explicit backend choice; CI can't test audio, so manual smoke test per platform per milestone |

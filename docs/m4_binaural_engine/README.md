@@ -23,7 +23,9 @@ channel and project views of the *Parameters pane* in
 | [8 — Level as mixed](phase_8_level_as_mixed.md) | ✅ |
 | [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
 | [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | ✅ |
-| [11 — Heard](phase_11_heard.md) | not started |
+| [11 — The spatial path, compiled](phase_11_spatial_compiled.md) | in progress |
+| [12 — The whole block, compiled](phase_12_block_compiled.md) | not started |
+| [13 — Heard](phase_13_heard.md) | not started |
 
 The order is dependency order, and it is the spike's order. The spike
 proved the pipeline by ear (S0), and this milestone rewrites it properly in
@@ -37,8 +39,10 @@ a bank. The fifth puts it on the audio thread, the sixth adds the paths that
 skip it and the bus everything lands on, and the seventh gives the pane the
 fields that make it audible. The eighth makes a placed stem keep the level
 it was mixed at, and the ninth lets a stereo stem be placed as two sides.
-The benchmark is tenth because it measures the finished graph, and hearing
-is last because only a person can do it.
+The benchmark is tenth because it measures the finished graph. The eleventh
+and twelfth take the graph's block off the GIL, which the benchmark found
+waiting for it at every numpy call. Hearing is last because only a person
+can do it.
 
 ## Milestone acceptance
 
@@ -71,6 +75,16 @@ user issue: [stereo-placement](../user-issues/stereo-placement/README.md). A
 stereo channel's two sides can be placed apart, freely or in symmetry. It is
 built in the engine before the views draw it (M5), as agreed. The benchmark
 and hearing moved on again, to 10 and 11.
+
+**Phases 11 and 12, the block compiled, were added after phase 10**
+(2026-09-29). The benchmark found N-1 met with room, but the audio thread
+waiting for the GIL at every numpy call. With the window repainting it
+missed nearly every block, whatever the switch interval (D-137). Of the
+three ways out in phase 10's Outcome, the user chose numba kernels, which
+release the GIL for a whole block (D-138). A spike showed the spatial path
+alone clears playing and scrolling but not repainting, so the work is two
+phases: the spatial path, then the rest of the block. Hearing moved to 13,
+to hear what ships.
 
 ## Scope amended before the milestone started
 
@@ -197,7 +211,7 @@ Placement section, and the views and automation will move the same values
 **Phase 10.** N-1 is met with room: 32 moving sources take a p99 of 3.0 ms
 of the 10.67, 28% of the budget where the line is half. 32 pairs, 64
 sources, take 5.5 to 5.8 ms (D-136). `python -m immersive.benchmark` measures
-it on any machine, and its `live` count is phase 11's. The switch interval
+it on any machine, and its `live` count is phase 13's. The switch interval
 is set at launch, but D-39 is reopened (D-137). The engine waits for the
 GIL at every numpy call, about 90 times a block, so with the window
 repainting without pause it missed nearly every block at 5 ms and at 1 ms

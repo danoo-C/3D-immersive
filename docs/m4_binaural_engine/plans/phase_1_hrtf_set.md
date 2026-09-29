@@ -129,7 +129,7 @@ stdlib only
 |---|---|
 | Loading a set of the person's own from the pane | M8 (F-27); `load()` takes any path already |
 | Anything done to the responses beyond resampling and scaling | phase 2 |
-| Candidate sets other than SADIE II D1 | phase 11, for listening |
+| Candidate sets other than SADIE II D1 | phase 13, for listening |
 
 ## Outcome
 

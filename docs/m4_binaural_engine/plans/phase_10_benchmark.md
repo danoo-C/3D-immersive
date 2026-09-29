@@ -21,7 +21,7 @@ does, and run as `python -m immersive.benchmark`:
   the timeline (7 px every 16 ms, a hand on the scroll bar), or repaints
   the whole window continuously (the roadmap's condition, and the worst
   case). Each is run at 5 ms and at 1 ms, in turn, for several rounds.
-- **`live`**, the count phase 11 needs. The same window on the real
+- **`live`**, the count phase 13 needs. The same window on the real
   output, `--device` and `--block` as the application takes them, 32
   sources moving for a minute, and the engine's own xrun count at the end.
 
@@ -132,9 +132,9 @@ user, listed with a recommendation in the Outcome.
 4. **The live count.** `live`: the real backend through `settle`, the
    window shown, a minute, and the engine's xruns. Tests, with the stand-in
    backend: the report is the engine's own count, and an unusable output is
-   reported, not raised. The procedure goes into phase 11's Notes.
+   reported, not raised. The procedure goes into phase 13's Notes.
 5. **The sweep, and the close.** The named mutations; the docs (01, 02, 05,
-   06, 08, phase 11); acceptance, Notes, Outcome.
+   06, 08, phase 13); acceptance, Notes, Outcome.
 
 ## Files
 
@@ -148,7 +148,7 @@ user, listed with a recommendation in the Outcome.
 `docs/05-audio-engine.md`, `docs/08-environment.md` — the switch interval's
 row corrected, and how the benchmark is run
 `docs/06-roadmap.md` — the risk register's row for realtime dropouts
-`docs/m4_binaural_engine/phase_11_heard.md` — the live count's procedure
+`docs/m4_binaural_engine/phase_13_heard.md` — the live count's procedure
 
 ## Mutations, named before the tests
 
@@ -201,7 +201,7 @@ row corrected, and how the benchmark is run
 |---|---|
 | Moving the audio thread off the GIL: an engine process, a native `process`, or fewer releases and a lighter window | the user's call, in the Outcome; a phase or milestone of its own |
 | `gc.freeze()` after load (05, *Realtime safety checklist*) | not measured as a cause here; with the above |
-| The live count on the listening machine | phase 11 |
+| The live count on the listening machine | phase 13 |
 | Making the window's repaint cheaper | M5, where the views add to it; noted there |
 
 ## Outcome
@@ -254,6 +254,6 @@ holds most of the waits, one nogil kernel, and measure it with
 `contention`. If the spike holds, the rest of the block follows it, and M5
 starts on an engine that does not queue behind the window. If it does not,
 B. A cheaper repaint of the window, 55 ms now, helps either way, and
-belongs with M5's views. Phase 11, hearing, does not wait on any of this:
+belongs with M5's views. Phase 13, hearing, does not wait on any of this:
 playing hands off missed almost nothing, and the live count there is taken
 hands off.

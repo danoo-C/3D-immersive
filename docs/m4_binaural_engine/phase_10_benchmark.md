@@ -21,7 +21,7 @@ channels, 64 sources, recorded beside them; a stand-in
 audio thread calling `process` on a real-time schedule while the window
 repaints offscreen, counting missed deadlines with and without the switch
 interval; the switch interval itself; what the live count must be, written
-into phase 11 for the listening machine.
+into phase 13 for the listening machine.
 
 **Out:** optimising past N-1 → only if it fails (05, *If Python is not
 enough*).
@@ -126,5 +126,5 @@ h5py and netCDF4 all ship `cp314t` (08, *The thing genuinely worth
 watching*).
 
 **No live count here.** Inside the sandbox this machine has no output
-device, and `live` says so. The count is phase 11's, on native Windows,
+device, and `live` says so. The count is phase 13's, on native Windows,
 and its Notes say how to take it.

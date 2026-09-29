@@ -24,7 +24,7 @@ file; tests against small synthetic SOFA files written by the tests, and
 against the real set where it has been fetched.
 
 **Out:** anything done to the responses beyond resampling and scaling →
-phase 2. Choosing among candidate sets by ear → phase 11.
+phase 2. Choosing among candidate sets by ear → phase 13.
 
 ## Acceptance
 

@@ -397,6 +397,7 @@ command on mouse-release, coalescing the intermediate states.
 | `soundfile` | libsndfile decode/encode |
 | `soxr` | high-quality resampling |
 | `sofar` | SOFA HRIR loading |
+| `numba`, `rocket-fft` | the engine's block compiled, releasing the GIL while it runs; rocket-fft gives numba pocketfft's transforms into arrays made once (D-138) |
 | `pytest`, `pytest-qt` | tests |
 | `ruff`, `mypy` | lint, types |
 | `pyinstaller` | packaging |
