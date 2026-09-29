@@ -299,6 +299,29 @@ def test_a_position_sent_is_heard_at_the_next_block(bank: Bank) -> None:
     np.testing.assert_array_equal(snapshot.positions[0, 0], [2.0, 0.0, 0.0])
 
 
+def test_the_engines_generation_is_the_snapshot_the_next_block_plays(
+    bank: Bank,
+) -> None:
+    """A position sent with `Engine.generation` straight after an install
+    is heard, not dropped as the old snapshot's: how the benchmark moves
+    sources without a feed (M4 phase 10)."""
+    project, store = empty()
+    channel_with(project, store, np.full(8 * BLOCK, 0.2), (0.0, 1.0, 0.0))
+    engine = Engine(BLOCK)
+    first = build(project, store.get, None, bank)
+    engine.install(first)
+    engine.set_playing(True)
+    out = np.zeros((BLOCK, 2), dtype=np.float32)
+    engine.process(out)
+    second = build(project, store.get, first, bank)
+    engine.install(second)
+
+    assert engine.generation == second.generation != first.generation
+    engine.send_position(engine.generation, 0, 2.0, 0.0, 0.0)
+    engine.process(out)
+    np.testing.assert_array_equal(second.positions[0, 0], [2.0, 0.0, 0.0])
+
+
 def after_moving_and_seeking(
     bank: Bank, audio: npt.NDArray[np.float64]
 ) -> npt.NDArray[np.float32]:

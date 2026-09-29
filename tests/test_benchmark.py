@@ -11,17 +11,21 @@ It is marked `timing`, so a parallel run leaves it to `pytest -m timing`
 
 from __future__ import annotations
 
+import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from immersive import benchmark
 from immersive.audio.hrtf import lookup
 from immersive.audio.hrtf.bank import Bank, prepare
-from immersive.benchmark import Arrangement, Timings, budget
+from immersive.benchmark import Arrangement, Backend, Clock, Timings, budget
 from test_spatial import head
 
 BLOCK = 512
@@ -131,3 +135,71 @@ def test_one_source_in_eight_orbits_inside_the_centre(bank: Bank) -> None:
     inside = reach < playing.project.distance.min_distance
     assert inside.tolist() == [n % 8 == 0 for n in range(32)]
     assert np.ptp(playing.snapshot.positions[:32, 0, 2]) > 0, "at their own heights"
+
+
+# ------------------------------------------------------ the stand-in stream
+
+
+def test_a_block_done_within_its_block_is_not_missed() -> None:
+    clock = Clock(0.010, 100.0)
+
+    assert not clock.done(100.000, 100.009)
+    assert clock.due() == pytest.approx(100.010)
+    assert clock.missed == 0
+    assert clock.times == [pytest.approx(0.009)]
+
+
+def test_a_block_that_starts_late_is_missed_by_when_it_was_due() -> None:
+    """It took 5 ms, but began 8 ms late: the device wanted it at 10."""
+    clock = Clock(0.010, 100.0)
+
+    assert clock.done(100.008, 100.013)
+    assert clock.missed == 1
+    assert clock.woken == [pytest.approx(0.008)]
+    assert clock.times == [pytest.approx(0.013)]
+
+
+def test_one_long_block_is_one_miss() -> None:
+    """3.5 blocks long, then five quick ones: the clock is set again from
+    when the long one finished, as a device plays on after an underrun."""
+    clock = Clock(0.010, 100.0)
+    clock.done(100.0, 100.035)
+
+    assert clock.due() == pytest.approx(100.035)
+    for _ in range(5):
+        began = clock.due()
+        clock.done(began, began + 0.002)
+    assert clock.missed == 1
+    assert clock.blocks == 6
+
+
+def test_the_stand_in_stream_calls_back_a_block_at_a_time_on_its_clock() -> None:
+    calls: list[tuple[Any, ...]] = []
+
+    def callback(
+        out: npt.NDArray[np.float32], frames: int, when: Any, status: Any
+    ) -> None:
+        calls.append((out.shape, out.dtype, frames, status))
+
+    backend = Backend()
+    stream = backend.OutputStream(
+        samplerate=48_000,
+        blocksize=BLOCK,
+        device=None,
+        channels=2,
+        dtype="float32",
+        callback=callback,
+        finished_callback=lambda: None,
+    )
+    stream.start()
+    time.sleep(0.2)
+    stream.close()
+    count = len(calls)
+    time.sleep(0.05)
+
+    assert len(calls) == count, "nothing after close"
+    assert 5 <= count <= 25, "0.2 s is 19 blocks of 512 frames"
+    assert set(calls) == {((BLOCK, 2), np.dtype(np.float32), BLOCK, None)}
+    assert stream.clock.blocks == count
+    assert stream.clock.interval == sys.getswitchinterval()
+    assert backend.streams == [stream]

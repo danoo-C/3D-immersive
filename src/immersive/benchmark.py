@@ -1,6 +1,7 @@
-"""N-1, measured (D-136).
+"""N-1, measured (D-136), and the switch interval under load (D-137).
 
     python -m immersive.benchmark blocks [--block 512] [--count 3000] [--rounds 3]
+    python -m immersive.benchmark contention [--seconds 8] [--rounds 3] [--one-wait]
 
 **`blocks`** times the engine a block at a time, with no window and no
 device. The HRTF set is the one the application ships, prepared at the
@@ -9,6 +10,15 @@ since timings on one machine drift from run to run. It reports the median,
 the 99th percentile and the worst block, and how many blocks were over
 budget, beside the machine's name. N-1 is met when 32 sources take a p99
 under half the budget.
+
+**`contention`** plays 32 sources in the application's window through a
+**stand-in stream**: a thread that calls the engine's callback on a clock of
+its own, as PortAudio does, and counts the blocks that were late. The UI
+thread meanwhile plays (its own tick), scrolls the timeline, or repaints the
+whole window without pause. Each load runs at CPython's 5 ms switch interval
+and at D-39's 1 ms, in turn, round after round. `--one-wait` puts in the
+engine's place a sleep as long as its median block: an engine that waits
+for the GIL once a block, which is what D-39 assumed the engine was.
 
 **A source is a slot**: a channel placed as a pair is two (D-132), and each
 costs the FFT what a point does. Every arrangement is the finished graph.
@@ -26,18 +36,21 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import platform
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import numpy as np
 import numpy.typing as npt
 
-from immersive.audio.device import DEFAULT_BLOCK
+from immersive.audio.device import DEFAULT_BLOCK, Output
 from immersive.audio.engine import Engine
 from immersive.audio.hrtf.bank import Bank
 from immersive.audio.scheduler import Snapshot, build
@@ -82,6 +95,23 @@ SPREAD: Final = math.pi * (3.0 - math.sqrt(5.0))
 SHAPES: Final = ((1, False), (8, False), (16, False), (32, False), (32, True))
 
 MEDIA_ID: Final = "m-0000be00"
+
+#: What the UI thread does while `contention` listens: plays, scrolls the
+#: timeline, or repaints the whole window without pause.
+LOADS: Final = ("playing", "scrolling", "repainting")
+
+#: CPython's default switch interval, and D-39's.
+INTERVALS: Final = (0.005, 0.001)
+
+#: How often the UI thread moves the sources in the window: the window's
+#: own tick rate (main_window.TICK_HZ), named here to keep this module
+#: clear of Qt.
+MOVES_HZ: Final = 30
+
+#: How far the timeline scrolls each 16 ms while `scrolling`: a hand on the
+#: scroll bar.
+SCROLL_PX: Final = 7
+SCROLL_MS: Final = 16
 
 
 def budget(block: int) -> float:
@@ -233,6 +263,285 @@ def blocks(bank: Bank, channels: int, paired: bool, count: int) -> Timings:
     return Timings(np.array(playing.play(count)), budget(bank.block))
 
 
+# ------------------------------------------------------ the stand-in stream
+
+
+class Clock:
+    """A device's clock, as the stand-in stream keeps it (D-137).
+
+    Block `n` is to start `n` blocks after the clock's origin, and is due
+    one block after that: the tightest stream a device can open, so a block
+    missed here is missed on any device. A late block is one miss, and the
+    clock is set again from when it finished, as a device plays on after an
+    underrun. Without that, one long stall would be counted again in every
+    block after it.
+    """
+
+    def __init__(self, period: float, origin: float) -> None:
+        self.period = period
+        self._origin = origin
+        self.blocks = 0
+        self.missed = 0
+        #: Each block's time from when it was due to start until it was
+        #: done: the wait to be woken, every wait for the GIL, and the block.
+        self.times: list[float] = []
+        #: How late each block's callback began.
+        self.woken: list[float] = []
+        #: The switch interval the audio thread ran under, read by it.
+        self.interval = 0.0
+
+    def due(self) -> float:
+        """When the next block is to start."""
+        return self._origin + self.blocks * self.period
+
+    def done(self, started: float, finished: float) -> bool:
+        """The next block began at `started` and finished at `finished`:
+        whether it was missed."""
+        due = self.due()
+        self.times.append(finished - due)
+        self.woken.append(started - due)
+        self.blocks += 1
+        if finished - due <= self.period:
+            return False
+        self.missed += 1
+        self._origin = finished - self.blocks * self.period
+        return True
+
+
+class Stream:
+    """`sounddevice.OutputStream`'s stand-in. It calls its callback on a
+    clock of its own, from a thread of its own, as PortAudio does. The
+    engine meets there what it meets on a device, the waits for the GIL
+    included, and nothing is played."""
+
+    def __init__(self, **settings: Any) -> None:
+        self.block = int(settings["blocksize"])
+        self.callback: Callable[..., None] = settings["callback"]
+        self.clock = Clock(budget(self.block), 0.0)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="stand-in audio", daemon=True
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def close(self) -> None:
+        """Stop after the block under way. The clock is whole once this
+        returns."""
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+    def _run(self) -> None:
+        out = np.zeros((self.block, 2), dtype=np.float32)
+        clock = self.clock = Clock(self.clock.period, time.perf_counter())
+        clock.interval = sys.getswitchinterval()
+        while not self._stop.is_set():
+            wait = clock.due() - time.perf_counter()
+            if wait > 0:
+                time.sleep(wait)
+            started = time.perf_counter()
+            self.callback(out, self.block, None, None)
+            clock.done(started, time.perf_counter())
+
+
+class Backend:
+    """The stand-in's `sounddevice`: only what the player opens a stream
+    with, and every stream it opened."""
+
+    def __init__(self) -> None:
+        self.streams: list[Stream] = []
+
+    def OutputStream(self, **settings: Any) -> Stream:
+        stream = Stream(**settings)
+        self.streams.append(stream)
+        return stream
+
+
+@dataclass(frozen=True)
+class Lap:
+    """One load at one switch interval: what the stand-in stream saw."""
+
+    load: str
+    #: The interval the audio thread read, not the one asked for.
+    interval: float
+    missed: int
+    #: Each block from when it was due to start until it was done.
+    timings: Timings
+
+
+def contention(
+    seconds: float,
+    rounds: int,
+    channels: int = 32,
+    *,
+    one_wait: bool = False,
+    block: int = DEFAULT_BLOCK,
+    loads: Sequence[str] = LOADS,
+) -> list[Lap]:
+    """Each load at each interval, `seconds` long, `rounds` times over, in
+    turn: the window playing `channels` moving sources through a stand-in
+    stream. The switch interval is put back after."""
+    from immersive.app import build_application
+    from immersive.audio.player import Player
+    from immersive.ui.main_window import MainWindow
+
+    build_application([])
+    backend = Backend()
+    player = Player(backend, Output(None, block))
+    window = MainWindow(player=player)
+    window.show()
+    before = sys.getswitchinterval()
+    engine = player.engine
+    try:
+        window.prepare_hrtf()
+        _until(lambda: window.bank() is not None)
+        bank = window.bank()
+        assert bank is not None
+        decoded = sample(seconds + 2.0)
+        _arrange(window, channels, decoded)
+        if one_wait:
+            _one_wait(engine, blocks(bank, channels, False, 200).p50)
+        moving = _moving(engine, channels)
+        # A lap not counted first: the window's first seconds of playing a
+        # project it has just built are heavier than any after, and would
+        # land on whichever interval came first.
+        _lap(window, player, "playing", seconds)
+        laps = []
+        for turn in range(rounds):
+            for load in loads:
+                # Each round the other interval first, so neither is always
+                # the one that follows a change of load.
+                for interval in INTERVALS[:: -1 if turn % 2 else 1]:
+                    sys.setswitchinterval(interval)
+                    _lap(window, player, load, seconds)
+                    clock = backend.streams[-1].clock
+                    laps.append(
+                        Lap(
+                            load,
+                            clock.interval,
+                            clock.missed,
+                            Timings(np.array(clock.times), budget(block)),
+                        )
+                    )
+        moving.stop()
+        return laps
+    finally:
+        sys.setswitchinterval(before)
+        engine.__dict__.pop("process", None)
+        player.close()
+        window.stop_work()
+        window.deleteLater()
+
+
+def _lap(window: Any, player: Any, load: str, seconds: float) -> None:
+    """From the start, playing under `load` for `seconds`; then the stream
+    closed, so its clock is whole and the next lap opens a new one."""
+    window.seek(0)
+    window.play_pause()
+    _load(window, load, seconds)
+    window.play_pause()
+    player.close()
+
+
+def _until(condition: Callable[[], bool], timeout: float = 60.0) -> None:
+    """Turn the event loop until `condition` holds."""
+    from PySide6.QtCore import QEventLoop
+    from PySide6.QtWidgets import QApplication
+
+    deadline = time.monotonic() + timeout
+    while not condition():
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
+        if time.monotonic() > deadline:
+            raise TimeoutError("the HRTF set was not prepared")
+
+
+def _arrange(window: Any, channels: int, decoded: Decoded) -> None:
+    """The arrangement, pushed into the window's project as edits, its
+    sample in the window's store as an import leaves one."""
+    from immersive.core.edits import AddChannel, AddMedia
+    from immersive.core.io.peaks import build as pyramid
+    from immersive.core.media_store import Prepared
+
+    arranged = arrangement(channels, False, decoded)
+    [media] = arranged.media_pool
+    window.store().keep(
+        media.id, Prepared(Path(media.path), decoded, "", pyramid(decoded.audio))
+    )
+    document = window.document()
+    project = document.project
+    document.push(AddMedia(project, [media]))
+    for channel in arranged.channels:
+        document.push(AddChannel(project, channel))
+
+
+def _one_wait(engine: Engine, seconds: float) -> None:
+    """Put in the engine's place a sleep as long as its block: an engine
+    that waits for the GIL once a block. `contention` takes it out."""
+
+    def process(out: npt.NDArray[np.float32]) -> None:
+        time.sleep(seconds)
+
+    engine.process = process  # type: ignore[method-assign]
+
+
+def _moving(engine: Engine, channels: int) -> Any:
+    """A timer on the UI thread, the ring's one producer, moving every
+    source `MOVES_HZ` times a second along its orbit."""
+    from PySide6.QtCore import QTimer
+
+    per_move = round(SAMPLE_RATE / MOVES_HZ / engine.block)
+    at = [0]
+
+    def move() -> None:
+        generation = engine.generation
+        for index in range(channels):
+            engine.send_position(generation, index, *place(index, at[0]))
+        at[0] += per_move
+
+    timer = QTimer()
+    timer.setInterval(1000 // MOVES_HZ)
+    timer.timeout.connect(move)
+    timer.start()
+    return timer
+
+
+def _load(window: Any, load: str, seconds: float) -> None:
+    """What the UI thread does for `seconds`."""
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtWidgets import QApplication
+
+    if load == "repainting":
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            window.repaint()
+            QApplication.processEvents()
+        return
+    scrolling = None
+    if load == "scrolling":
+        axis = window.timeline().axis
+        step = [SCROLL_PX]
+
+        def scroll() -> None:
+            # Back the other way at either end, so it never stops moving.
+            was = axis.offset
+            axis.scroll_by(step[0])
+            if axis.offset == was:
+                step[0] = -step[0]
+                axis.scroll_by(step[0])
+
+        scrolling = QTimer()
+        scrolling.setInterval(SCROLL_MS)
+        scrolling.timeout.connect(scroll)
+        scrolling.start()
+    loop = QEventLoop()
+    QTimer.singleShot(round(seconds * 1000), loop.quit)
+    loop.exec()
+    if scrolling is not None:
+        scrolling.stop()
+
+
 def machine() -> str:
     """The machine's name, its processor, its system, Python and numpy."""
     return " · ".join(
@@ -347,17 +656,60 @@ def run_blocks(block: int, count: int, rounds: int) -> int:
     return 0 if met else 1
 
 
+def run_contention(seconds: float, rounds: int, one_wait: bool) -> int:
+    """The switch interval's table: misses at each interval, each load."""
+    # Offscreen unless asked otherwise: the same window on every machine,
+    # and nothing drawn on anyone's screen for a minute.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    laps = contention(seconds, rounds, one_wait=one_wait)
+    limit = budget(DEFAULT_BLOCK)
+    print(machine())
+    engine = "a sleep as long as its median block" if one_wait else "the engine"
+    print(
+        f"{_title()} at {DEFAULT_BLOCK} frames, 32 moving sources through "
+        f"{engine}, and a stand-in stream: each block due {limit * 1000:.2f} ms "
+        f"after it starts. {rounds} round{'s' if rounds != 1 else ''} of "
+        f"{seconds:g} s, taken in turn, after one not counted."
+    )
+    print()
+    print("load        interval  blocks  missed  by round        p50      p99    worst")
+    for load in LOADS:
+        for interval in INTERVALS:
+            mine = [
+                lap
+                for lap in laps
+                if lap.load == load and math.isclose(lap.interval, interval)
+            ]
+            times = np.concatenate([lap.timings.times for lap in mine])
+            timings = Timings(times, limit)
+            by_round = ", ".join(str(lap.missed) for lap in mine)
+            print(
+                f"{load:11} {interval * 1000:4g} ms  {len(times):6}  "
+                f"{sum(lap.missed for lap in mine):6}  {by_round:12} "
+                f"{_ms(timings.p50)}  {_ms(timings.p99)}  {_ms(timings.worst)}"
+            )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m immersive.benchmark",
-        description="N-1, measured (D-136).",
+        description="N-1, measured (D-136), and the switch interval (D-137).",
     )
     what = parser.add_subparsers(dest="what", required=True)
     timed = what.add_parser("blocks", help="each arrangement's block times")
     timed.add_argument("--block", type=int, default=DEFAULT_BLOCK)
     timed.add_argument("--count", type=int, default=3000)
     timed.add_argument("--rounds", type=int, default=3)
+    loaded = what.add_parser(
+        "contention", help="missed blocks with the window loaded, at each interval"
+    )
+    loaded.add_argument("--seconds", type=float, default=8.0)
+    loaded.add_argument("--rounds", type=int, default=3)
+    loaded.add_argument("--one-wait", action="store_true")
     options = parser.parse_args(argv)
+    if options.what == "contention":
+        return run_contention(options.seconds, options.rounds, options.one_wait)
     return run_blocks(options.block, options.count, options.rounds)
 
 

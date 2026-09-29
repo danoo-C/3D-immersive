@@ -243,6 +243,14 @@ class Engine:
         """Where the next block starts."""
         return self._playhead
 
+    @property
+    def generation(self) -> int:
+        """The generation of the snapshot the next block plays: what a gain
+        or a position sent now names, to be heard rather than dropped
+        (D-105, D-121). The UI thread's view, for a sender that holds no
+        feed: the benchmark's moving sources."""
+        return self._next.generation
+
     def sent(self) -> int:
         """How many commands have been sent: a mark `caught_up` can be
         asked about."""
