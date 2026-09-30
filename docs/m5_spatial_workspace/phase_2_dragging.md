@@ -1,6 +1,6 @@
 # M5 · Phase 2 — Dragging, heard
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:** [plans/phase_2_dragging.md](plans/phase_2_dragging.md)
 
 ## Goal
 

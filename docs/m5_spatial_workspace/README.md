@@ -9,7 +9,7 @@ D-135 · Workflow: [09-workflow.md](../09-workflow.md)
 | Phase | Status |
 |---|---|
 | [1 — The ortho views, drawn](phase_1_ortho_views.md) | ✅ |
-| [2 — Dragging, heard](phase_2_dragging.md) | not started |
+| [2 — Dragging, heard](phase_2_dragging.md) | in progress |
 | [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | not started |
 | [4 — The 3D view](phase_4_view3d.md) | not started |
 | [5 — Measured with the views playing](phase_5_measured.md) | not started |
