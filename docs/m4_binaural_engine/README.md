@@ -24,7 +24,7 @@ channel and project views of the *Parameters pane* in
 | [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
 | [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | ✅ |
 | [11 — The spatial path, compiled](phase_11_spatial_compiled.md) | ✅ |
-| [12 — The whole block, compiled](phase_12_block_compiled.md) | not started |
+| [12 — The whole block, compiled](phase_12_block_compiled.md) | in progress |
 | [13 — Heard](phase_13_heard.md) | not started |
 
 The order is dependency order, and it is the spike's order. The spike

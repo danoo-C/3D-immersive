@@ -1,6 +1,6 @@
 # M4 · Phase 12 — The whole block, compiled
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:** [plans/phase_12_block_compiled.md](plans/phase_12_block_compiled.md)
 
 ## Goal
 
