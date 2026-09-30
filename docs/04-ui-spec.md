@@ -435,7 +435,7 @@ the built-in paints each in its channel's:
 | `fade.handle` | `text.secondary` | the square at a fade's end, on a selected clip, as the worked example under *The file* named it |
 
 The spatial views', built at M5 phase 1: the top and front views, and the
-3D view after them. `icon` and `pair` are the reserved `channel` value, so
+3D view after them; the bypass strip's at phase 3. `icon` and `pair` are the reserved `channel` value, so
 a source is drawn in its channel's colour, as its clips are, unless a theme
 paints them all one colour:
 
@@ -449,7 +449,11 @@ paints them all one colour:
 | `head.fill` | `surface.raised` | inside the head glyph |
 | `icon` | `channel` | a source's icon: a channel's point, or a pair's side |
 | `pair` | `channel` | the line joining a pair's two sides |
-| `selected` | `accent` | the ring around a selected channel's icons |
+| `selected` | `accent` | the ring around a selected channel's icons; a selected chip's outline; the ⊘ under the pointer |
+| `strip` | `surface.raised` | behind the bypass strip's chips |
+| `chip` | `surface.hover` | a bypassed channel's chip |
+| `chip.text` | `text.primary` | a chip's name |
+| `chip.glyph` | `text.secondary` | a chip's ⊘ |
 
 The check box's, built at M3 phase 7. It paints itself, so its state is a
 tick or a dash as well as a fill:
@@ -674,15 +678,39 @@ costs no space.
 └──────────────────────────────┴──────────────────────┘
 ```
 
-Clicking a chip selects that channel, exactly as clicking its icon would.
-Clicking the ⊘ on the chip un-bypasses it, at which point it appears on the
-canvases at its preserved position.
+Clicking a chip selects that channel, exactly as clicking its icon would,
+and Ctrl-click toggles it. Clicking the ⊘ on the chip un-bypasses it, as
+one edit, at which point it appears on the canvases at its preserved
+position. The ⊘ under the pointer is lit, and a selected chip is outlined.
+
+The strip is a widget of its own under the top view, not drawn over it,
+where it would cover the sources behind the listener (D-147). The top view
+gives it the room while it shows, so the head moves up by half the strip.
+Its chips follow the channel order and wrap into as many rows as they
+need. A name longer than 140 px is cut short, and the chip's tooltip has
+it whole.
 
 ### Icons and depth
 
 In all three views an icon's **radius encodes distance** (nearer = larger) and
 its opacity encodes gain, so a glance at the top view still tells you about
 height indirectly. Muted channels drop to 25% opacity; soloed ones get a glow.
+
+The rules (D-146):
+
+- **Radius.** The distance is from the listener in three dimensions. 10 px
+  at 1 m, and 2 px less each time the distance doubles: 12 px at 0.5 m,
+  8 px at 2 m, 6 px at 4 m. Never under 5 px or over 13 px. A pair's
+  sides each have their own. A source being dragged grows and shrinks as
+  it goes.
+- **Opacity.** 100% at 0 dB and above. Below 0 dB it falls towards 40%,
+  its height above 40% halving every 10 dB, which is about half as loud:
+  70% at −10 dB, 55% at −20 dB. A pair's line takes it too. The selected
+  ring does not, since it is the selection's.
+- **Not heard.** A channel muted, or silenced because another is soloed,
+  is at 25% whatever its gain, below any gain's opacity. The soloed glow,
+  a soft halo in their own colour 8 px past their edge, so the faint ones
+  say why, as the headers' *silenced* does.
 
 ## Timeline (bottom)
 

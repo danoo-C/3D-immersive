@@ -89,10 +89,13 @@ def test_the_ortho_views_share_the_first_tab(app: object) -> None:
     ortho, view3d = workspace.widget(0), workspace.widget(1)
     assert ortho is not None and view3d is not None
     assert isinstance(ortho, QSplitter)
-    top, front = ortho.widget(0), ortho.widget(1)
-    assert isinstance(top, OrthoView) and isinstance(front, OrthoView)
+    top_side, front = ortho.widget(0), ortho.widget(1)
+    assert top_side is not None
+    [top] = top_side.findChildren(OrthoView)
+    assert isinstance(front, OrthoView)
     assert (top.plane, front.plane) == ("top", "front"), "top on the left"
     assert window.spatial_views() == (top, front)
+    assert window.bypass_strip().parent() is top_side, "the strip under the top"
     assert isinstance(view3d, Placeholder), "until M5 phase 4"
 
 

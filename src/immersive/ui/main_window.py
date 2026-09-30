@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QToolBar,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -67,6 +68,7 @@ from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
 from immersive.ui.parameters.pane import ParametersPane
 from immersive.ui.parameters.views import LONGEST, TEMPO_CEILING, TEMPO_FLOOR, TIME_STEP
+from immersive.ui.spatial.bypass_strip import BypassStrip
 from immersive.ui.spatial.ortho_view import OrthoView
 from immersive.ui.spatial.placing import Placing
 from immersive.ui.spatial.scale import Scale
@@ -651,7 +653,17 @@ class MainWindow(QMainWindow):
         self._scale = Scale()
         self._top = OrthoView(self._document, self._scale, "top", self._placing)
         self._front = OrthoView(self._document, self._scale, "front", self._placing)
-        ortho.addWidget(self._top)
+        # The bypass strip under the top view, not over it, where it would
+        # cover the sources behind the listener (D-147). Hidden, it takes
+        # no room.
+        top_side = QWidget()
+        self._strip = BypassStrip(self._document, top_side)
+        column = QVBoxLayout(top_side)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self._top, 1)
+        column.addWidget(self._strip)
+        ortho.addWidget(top_side)
         ortho.addWidget(self._front)
         ortho.setSizes([600, 600])
 
@@ -851,6 +863,10 @@ class MainWindow(QMainWindow):
     def spatial_views(self) -> tuple[OrthoView, OrthoView]:
         """The top view and the front view."""
         return self._top, self._front
+
+    def bypass_strip(self) -> BypassStrip:
+        """The strip of bypassed channels, under the top view."""
+        return self._strip
 
     def focus_view(self, which: str) -> None:
         """Keys 1, 2 and 3 (04, *The workspace is tabbed*): the top or the

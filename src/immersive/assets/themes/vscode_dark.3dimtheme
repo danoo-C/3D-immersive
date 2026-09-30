@@ -134,6 +134,9 @@
     },
     "spatial": {
       "background": "surface.panel",
+      "chip": "surface.hover",
+      "chip.glyph": "text.secondary",
+      "chip.text": "text.primary",
       "head": "text.secondary",
       "head.fill": "surface.raised",
       "icon": "channel",
@@ -141,7 +144,8 @@
       "pair": "channel",
       "ring": "border",
       "ring.label": "text.secondary",
-      "selected": "accent"
+      "selected": "accent",
+      "strip": "surface.raised"
     },
     "splitter": {
       "handle": "border",
