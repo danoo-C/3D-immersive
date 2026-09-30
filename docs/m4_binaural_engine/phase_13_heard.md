@@ -1,4 +1,4 @@
-# M4 · Phase 9 — Heard
+# M4 · Phase 13 — Heard
 
 **Status:** not started · **Plan:** not written yet
 
@@ -46,3 +46,26 @@ The roadmap's named crossfade test, QA-30, and M4's *Done when*.
 ## Notes
 
 Appended while building.
+
+**The live count, from phase 10.** Run on the listening machine, from the
+repository:
+
+```
+.venv\Scripts\python -m immersive.benchmark live     # Windows
+.venv/bin/python -m immersive.benchmark live         # Linux
+```
+
+It opens the application's window on the output the application would use,
+taking `--device` and `--block` as the application does. It plays 32
+sources, each moving on an orbit, for a minute, then prints the machine,
+the device and its host API, the block, PortAudio's latency, and the
+engine's xrun count, which is what PortAudio reported. **Hands off, the
+count must be 0**: that is this phase's acceptance line.
+
+Run it twice more with `--load scrolling` and `--load repainting`. The
+window then scrolls the timeline, or repaints itself without pause, with
+nobody at it. Those counts are recorded but not held to zero. Phase 10
+found that the audio thread waits for the GIL at every numpy call (D-137),
+so a busy UI costs it blocks, and these two runs say how much on the
+machine that matters. `python -m immersive.benchmark blocks` gives N-1's
+timings there too.

@@ -83,6 +83,7 @@ what PortAudio sees: `pulse` and `default` among the outputs mean it worked.
 .venv/bin/ruff format --check .  # formatting
 .venv/bin/mypy                   # types
 QT_QPA_PLATFORM=offscreen .venv/bin/pytest -n 8 --dist worksteal   # everything, in parallel
+.venv/bin/pytest -m timing          # then what is timed, alone (D-136)
 .venv/bin/pytest -m "not gui"    # the fast lane: nothing that needs Qt
 ```
 
@@ -91,6 +92,11 @@ it from 11.3 s to under 6 s where it was measured. More workers than that was
 slower, because each pays about two seconds to start. A plain `pytest` still
 runs serially — deliberately not in `addopts` — so a single test under a
 debugger behaves as it always has. CI runs `-n auto`, sized to the runner.
+
+**What is timed runs alone.** A test marked `timing` measures time, and
+under more than one worker the suite's own load decides the answer, so the
+parallel run skips it and says so. `pytest -m timing` runs it afterwards,
+as CI does. A serial `pytest` runs it with everything else.
 
 **The fast lane is for work in `core/` and `audio/`.** `-m "not gui"` runs
 every test that needs no Qt — the model, curves, time and undo, both file
@@ -166,9 +172,19 @@ needed and nothing here would have required 3.13 anyway.
 ### You are on WSL2
 
 `core/` tests run here happily; they need no audio device, which is exactly why
-N-5 exists. The realtime preview and the M4 benchmark do **not** belong here —
-WSLg audio has poor latency and limited device control. Run those on Windows
-native Python (WASAPI, ideally ASIO) or a native Linux install.
+N-5 exists. The realtime preview and the M4 benchmark's live count do **not**
+belong here — WSLg audio has poor latency and limited device control. Run
+those on Windows native Python (WASAPI, ideally ASIO) or a native Linux
+install.
+
+The benchmark (D-136) has three parts, and two need no device, so they run
+here as well as anywhere:
+
+```bash
+.venv/bin/python -m immersive.benchmark blocks       # N-1: block times, no device
+.venv/bin/python -m immersive.benchmark contention   # the switch interval, window loaded
+.venv/bin/python -m immersive.benchmark live         # xruns on the real output: not here
+```
 
 From M3 on, `--device` and `--block` pick the output device and buffer size
 without a preferences UI (F-55, D-63), which is what makes "run it on the
@@ -416,11 +432,11 @@ short, this is the escalation ladder:
 
 | # | Lever | Expected gain | Cost |
 |---|---|---|---|
-| 0 | **`sys.setswitchinterval(0.001)`** at startup | Bounds each GIL wait to ~1 ms instead of 5 | One line (D-39) |
+| 0 | **`sys.setswitchinterval(0.001)`** at startup | Bounds each GIL wait to ~1 ms instead of 5; not enough on its own, since the engine waits once per numpy call (D-137) | One line (D-39) |
 | 1 | **`scipy.fft` with `workers=`, or pyFFTW with a saved plan** | Often meaningful for repeated same-size transforms — FFTW plans once for our fixed `nfft` and reuses it forever | A dependency, a few lines |
 | 2 | **Raise the block size** 512 → 1024 | Halves per-block Python overhead | +10 ms latency, still fine for auditioning |
 | 3 | **Profile and kill remaining per-block allocations** | The zero-alloc test should already prevent these | Free |
-| 4 | **Cython / nanobind on `Engine.process`** | Removes Python from the callback entirely | A few hundred lines, a build step — the documented seam in [02-architecture.md](02-architecture.md) |
+| 4 | **Cython / nanobind on `Engine.process`** | Removes Python from the callback entirely, and with it the waits for the GIL, if it releases the GIL for the whole block (D-137) | The engine is about 1,800 lines by the end of M4, docstrings included, not a few hundred; and a build step. The documented seam in [02-architecture.md](02-architecture.md) |
 
 **Row 0 deserves more than a table cell.** CPython releases the GIL every
 5 ms by default. A Python-side paint event on the UI thread can therefore make
@@ -436,6 +452,30 @@ buried at the bottom. Its effect is not assumed: the M4 benchmark measures the
 xrun counter with and without it **while the UI is actively repainting**,
 because an idle UI will show no difference and prove nothing.
 
+⚠️ **Corrected at M4 phase 10 (D-137): row 0 is needed, and it is not
+enough.** The two paragraphs above assume the audio callback waits for the
+GIL once a block. It waits once for every numpy call that releases the GIL.
+numpy releases it inside every loop over 500 elements, and a block's rows
+and spectra are 512 and 513 long, so for 32 sources that is about 90 waits a
+block. While the UI thread runs Python, each wait can last the whole
+interval. So 1 ms against 5 ms changes how late a block is, not whether it
+is late: with the main thread in a Python loop, one block took 92 ms against
+444. Measured in the window, 1 ms missed no fewer blocks than 5 ms under any
+load, and with the window repainting without pause both missed nearly every
+block. What the interval does bound is an engine that waits once a block.
+Emulated, that engine went from 23 missed blocks in 2250 to none while the
+window repainted. So contention, the failure mode this section names, is
+not answered by row 0. It needs an audio thread that stops queueing for the
+GIL at every call. Rows 1 to 3 do not do that. Row 4 does, if the extension
+releases the GIL for the whole block, and so would an engine in a process of
+its own. M4 phase 10's plan set out the choice
+([Outcome](m4_binaural_engine/plans/phase_10_benchmark.md#outcome)). The
+user chose a third form of row 4: numba kernels, compiled from the engine's
+own Python and releasing the GIL for a whole block, with no build step
+(D-138). They are built in M4 phases 11 and 12. With the whole block one
+kernel, the window repainting without pause costs 1 block in 2255 at 1 ms,
+and 5 to 11 at 5 ms: row 0 now does what it was meant to.
+
 Note that #1 touches four lines, while the nuclear option at #4 is still
 bounded and pre-planned. That ladder is why choosing Python was safe.
 
@@ -449,6 +489,11 @@ that directly, which is more relevant to this project than any JIT.
 It is not adoptable yet: free-threaded wheels for numpy, scipy and especially
 PySide6 are still maturing, and the free-threaded build is itself slower
 single-threaded. Revisit at M8, and again a year after. Do not build on it now.
+
+*Checked at M4 phase 10 (2026-09-29), when the contention was measured
+(D-137):* numpy, cffi, soxr, h5py and netCDF4 all ship `cp314t` wheels.
+PySide6 6.11.2 ships only `abi3` ones, which a free-threaded interpreter
+cannot load. PySide6 is what blocks it.
 
 ### Verdict
 

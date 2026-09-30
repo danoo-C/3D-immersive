@@ -72,7 +72,7 @@ It grows with the channels. The transforms are constant, as 05 says, but
 the filter's blend, the ITD ramp and the windows are numpy calls per
 channel, which is the risk the plan named. The margin is wide, so nothing
 is batched yet. 05's *Cost estimate*, which said under a millisecond, is
-corrected, and phase 8 measures it with the UI running.
+corrected, and phase 10 measures it with the UI running.
 
 The crossfade, A against B: a band-limited 440 Hz sawtooth orbiting at
 1 rev/s has block-rate sidebands at −75.9 dB crossfaded and −43.7 dB

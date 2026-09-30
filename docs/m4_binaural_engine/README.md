@@ -20,8 +20,12 @@ channel and project views of the *Parameters pane* in
 | [5 — The engine, spatial](phase_5_spatial_engine.md) | ✅ |
 | [6 — Bypass and the master bus](phase_6_bypass_and_master.md) | ✅ |
 | [7 — The spatial fields](phase_7_spatial_fields.md) | ✅ |
-| [8 — The benchmark, and the switch interval](phase_8_benchmark.md) | not started |
-| [9 — Heard](phase_9_heard.md) | not started |
+| [8 — Level as mixed](phase_8_level_as_mixed.md) | ✅ |
+| [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
+| [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | ✅ |
+| [11 — The spatial path, compiled](phase_11_spatial_compiled.md) | ✅ |
+| [12 — The whole block, compiled](phase_12_block_compiled.md) | ✅ |
+| [13 — Heard](phase_13_heard.md) | not started |
 
 The order is dependency order, and it is the spike's order. The spike
 proved the pipeline by ear (S0), and this milestone rewrites it properly in
@@ -33,8 +37,12 @@ against numbers the spike measured: a set loaded and normalised, then split
 into delay and spectrum, then made queryable by direction, then prepared as
 a bank. The fifth puts it on the audio thread, the sixth adds the paths that
 skip it and the bus everything lands on, and the seventh gives the pane the
-fields that make it audible. The benchmark is eighth because it measures
-the finished graph, and hearing is last because only a person can do it.
+fields that make it audible. The eighth makes a placed stem keep the level
+it was mixed at, and the ninth lets a stereo stem be placed as two sides.
+The benchmark is tenth because it measures the finished graph. The eleventh
+and twelfth take the graph's block off the GIL, which the benchmark found
+waiting for it at every numpy call. Hearing is last because only a person
+can do it.
 
 ## Milestone acceptance
 
@@ -52,6 +60,31 @@ Windows or Linux, and both are one sitting (M3 phase 10's Notes). Nothing
 here rests on those boxes: the flat engine this milestone extends is tested
 headless. M4's own last phase needs the same machine, and the same
 headphones.
+
+## Scope amended during the milestone
+
+**Phase 8, level as mixed, was added after phase 7** (2026-09-27), from a
+user issue: [3d-sensitivity](../user-issues/3d-sensitivity/level-as-mixed.md).
+Listening to phase 7's fields found a placed stem at the default position
+14 dB louder than itself and distorting, and every direction and every
+stereo stem at a level nobody chose. The benchmark and hearing moved to 9
+and 10, since the one should measure and the other hear what ships.
+
+**Phase 9, stereo placement, was added after phase 8** (2026-09-27), from a
+user issue: [stereo-placement](../user-issues/stereo-placement/README.md). A
+stereo channel's two sides can be placed apart, freely or in symmetry. It is
+built in the engine before the views draw it (M5), as agreed. The benchmark
+and hearing moved on again, to 10 and 11.
+
+**Phases 11 and 12, the block compiled, were added after phase 10**
+(2026-09-29). The benchmark found N-1 met with room, but the audio thread
+waiting for the GIL at every numpy call. With the window repainting it
+missed nearly every block, whatever the switch interval (D-137). Of the
+three ways out in phase 10's Outcome, the user chose numba kernels, which
+release the GIL for a whole block (D-138). A spike showed the spatial path
+alone clears playing and scrolling but not repainting, so the work is two
+phases: the spatial path, then the rest of the block. Hearing moved to 13,
+to hear what ships.
 
 ## Scope amended before the milestone started
 
@@ -87,7 +120,7 @@ phase's first decision.
   a 2 dB knee. (Phase 6.)
 - **What "zero xruns" can mean on WSL.** N-1's benchmark is timings with a
   margin here. The live count, with the UI repainting, is the listening
-  machine's. (Phase 8.)
+  machine's. (Phase 10.)
 
 ## What this milestone does not deliver
 
@@ -153,3 +186,55 @@ live, one edit each, and heard at the next block. The tests type into the
 pane of a window playing through a synthetic head, and listen. With several
 channels, position is live while any is placed and goes to all of them on
 the axis typed (D-127). Only the HRTF set is still drawn dead, naming M8.
+
+**Phase 8.** A placed stem keeps the level it was mixed at, until distance
+takes it away. The set is calibrated to flat, +4.99 dB for SADIE (D-128). A
+stereo stem is given back what folding it to a point loses (D-129). At the
+listener a source is heard as it is, and crossing through them is a pass
+through the middle, not a flip between the ears (D-130). A project switch,
+on by default, removes the near boost and evens every direction (D-131).
+The drum stem that distorted at the default position now plays within half
+a decibel of itself.
+
+**Phase 9.** A placed stereo channel can be two sources, its left side and
+its right: one point as before, free, or linked in symmetry about a pivot
+with each axis mirrored or kept (D-132). A new channel is linked, mirroring
+X about the listener, and there it is the stem as mixed, each side to its
+own ear (D-134). A pair keeps the stem's level at any separation, read with
+the stem's own spectra: four real stems stay within 0.3 dB of themselves,
+where the planned pink-noise rule missed the drums by 1.3 dB (D-133). A mono
+channel can ask to be two sources. Every spatial setting now has one home in
+the pane, the project's in the project view and the channel's in its view's
+Placement section, and the views and automation will move the same values
+(D-135). 32 pairs, 64 sources, take 3.2 ms a block.
+
+**Phase 10.** N-1 is met with room: 32 moving sources take a p99 of 3.0 ms
+of the 10.67, 28% of the budget where the line is half. 32 pairs, 64
+sources, take 5.5 to 5.8 ms (D-136). `python -m immersive.benchmark` measures
+it on any machine, and its `live` count is phase 13's. The switch interval
+is set at launch, but D-39 is reopened (D-137). The engine waits for the
+GIL at every numpy call, about 90 times a block, so with the window
+repainting without pause it missed nearly every block at 5 ms and at 1 ms
+alike. An engine that waits once a block missed none at 1 ms. Taking the
+block off the GIL is a choice left for the user, and it is wanted before
+M5, whose views repaint during playback. The plan's Outcome sets it out.
+
+**Phase 11.** The spatial path is one numba kernel that releases the GIL
+for all of its work, equal to the Python it replaced within 2e-6 (D-138).
+It is compiled on the HRTF worker with one signature (D-139). 32 sources
+take a p99 of 1.2 to 1.3 ms a block, where they took 3.0. With the window
+loaded, playing and scrolling miss almost nothing, and repainting still
+misses, at 16 to 19 ms a block, because the rest of the block is Python.
+Kernels run without numba's runtime, which cost 48 bytes an array per
+call, over D-106's line, and a kernel then cannot make an array at all.
+numba's cache keeps stale code when a called kernel's file changes, so the
+audio package clears it whenever its sources change.
+
+**Phase 12.** The whole block is one kernel: `process` keeps its
+bookkeeping in Python and calls it once, so the audio thread waits for the
+GIL once a block. Lanes are read through a table of addresses the
+snapshot holds alive (D-140). The kernel is compiled before any stream
+opens (D-141), and memory is frozen after each load (D-142). With the
+window repainting without pause, 32 moving sources miss 1 block in 2255 at
+1 ms, where phase 10's engine missed 413 of 417. 32 sources take 8% of the
+budget.

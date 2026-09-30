@@ -236,12 +236,15 @@ def run() -> tuple[int, int]:
 def run_spatial() -> tuple[int, int]:
     """The spatial path (M4): 32 channels, every one moving by a `POSITION`
     every block - N-1's load - through a synthetic head's bank, with one
-    bypassed channel beside them. The same measure as `run`."""
+    bypassed channel beside them. One orbits inside the centre (D-130), and
+    the level is kept as mixed (D-131). A third are linked pairs and a third
+    free ones, each free right side moving too (D-132, D-133). The same
+    measure as `run`."""
     import tempfile
 
     from immersive.audio.hrtf import lookup
     from immersive.audio.hrtf.bank import Bank, prepare
-    from immersive.core.model import Position
+    from immersive.core.model import Pairing, Placement, Position
     from test_spatial import head
 
     # The index at test size: `setattr`, since they are `Final` constants.
@@ -261,6 +264,9 @@ def run_spatial() -> tuple[int, int]:
             hrtf_bypass=n == 32,
             gain_db=-12.0,
             position=Position(1.0, 1.0, 0.0),
+            placement=Placement(
+                mode=(Pairing.POINT, Pairing.LINKED, Pairing.FREE)[n % 3]
+            ),
             clips=[Clip(f"k-{n:08x}", source.id, n * 100, 0, FRAMES - n * 100)],
         )
         for n in range(33)
@@ -279,9 +285,20 @@ def run_spatial() -> tuple[int, int]:
         engine.take_channel_peaks()
         for channel in range(32):
             angle = float(turns[channel]) + n * 0.07
+            # Channel 0 orbits inside the centre, a tenth of the way out, so
+            # its filter fades part way to flat every block (D-130).
+            reach = 0.1 if channel == 0 else 1.0
             engine.send_position(
-                generation, channel, math.sin(angle), math.cos(angle), 0.3
+                generation,
+                channel,
+                reach * math.sin(angle),
+                reach * math.cos(angle),
+                reach * 0.3,
             )
+            if channel % 3 == 2:  # a free pair's right side, the other way
+                engine.send_position(
+                    generation, channel, math.cos(angle), math.sin(angle), 0.0, 1
+                )
         if n == 50:
             engine.seek(24_000)
 

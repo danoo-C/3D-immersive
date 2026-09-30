@@ -1,6 +1,6 @@
 # Level as mixed: placing a stem without changing how loud it is
 
-**Status:** proposed, not built · **Written:** 2026-09-27 · **Measured at:**
+**Status:** built, as [M4 phase 8](../../m4_binaural_engine/phase_8_level_as_mixed.md), with its decisions D-128 to D-131 · **Written:** 2026-09-27 · **Measured at:**
 `15720c6` on `m3-timeline`, through SADIE II D1, on the 23 stems in
 `test-samples/`
 

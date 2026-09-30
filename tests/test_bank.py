@@ -119,13 +119,15 @@ def test_nfft_comes_from_the_sets_own_itd(tmp_path: Path) -> None:
 
 
 def test_each_filter_is_its_minimum_phase_response_zero_padded(tmp_path: Path) -> None:
+    """At the calibration's gain (D-128), the same for every direction."""
     from immersive.audio.hrtf.decompose import minimum_phase
 
     hrirs = synthetic()
     result = made(prepare(hrirs, 512, tmp_path))
     back = np.fft.irfft(result.filters.astype(np.complex128), n=result.nfft, axis=-1)
+    scale = 10 ** (result.calibration / 20)
     np.testing.assert_allclose(
-        back[..., :TAPS], minimum_phase(hrirs.responses), atol=1e-6
+        back[..., :TAPS], scale * minimum_phase(hrirs.responses), atol=1e-6 * scale
     )
     assert np.abs(back[..., TAPS:]).max() < 1e-6
     assert result.filters.dtype == np.complex64

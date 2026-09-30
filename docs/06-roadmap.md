@@ -377,6 +377,10 @@ Phases: [`docs/m4_binaural_engine/`](m4_binaural_engine/README.md)
 - The zero-allocation test on `process()`, held over the spatial path — it
   starts at M3, on the flat one
 - **A benchmark against N-1: 32 moving sources, 512 block, zero xruns**
+- The engine's block compiled by numba, releasing the GIL while it runs
+  (D-138, D-139). *Added after the benchmark*, which found the audio thread
+  waiting for the GIL at every numpy call and missing nearly every block
+  while the window repainted (D-137)
 - The channel's position X/Y/Z fields in the parameters pane, live. *Moved
   here from M5 before the milestone started*: the acceptance below is
   positions set numerically, and without the fields that means editing a
@@ -478,7 +482,7 @@ along the way costs them no more than the last autosave interval.
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| Python realtime dropouts | Medium | M4 benchmarks it before anything is built on top; zero-alloc test; the `Engine.process` port seam is deliberately small |
+| Python realtime dropouts | Low, measured after the fix | M4 phase 10 found the audio thread waiting for the GIL at every numpy call, and a window repainting without pause costing it nearly every block (D-137). M4 phases 11 and 12 compiled the block with numba, one kernel releasing the GIL for all of it (D-138 to D-141). Now the same load misses 1 block in 2255 at 1 ms, and 32 sources take 8% of the budget. Memory is frozen after a load (D-142). What is left is the live count on the listening machine (phase 13), and M5's views, which `contention` should be run against. The zero-alloc test; the `Engine.process` seam |
 | HRTF interpolation artifacts on moving sources | **High if done naively** | Two halves, both non-optional and both specified in [05-audio-engine.md](05-audio-engine.md): the ITD/minimum-phase split, which prevents comb filtering *within* a block's filter, and the unconditional input-windowed crossfade (D-37), which prevents zipper noise *between* blocks. Neither covers the other. S0 puts both in someone's ears before M1 rather than after M4 |
 | Timeline repaint performance at hundreds of clips | Medium | `QGraphicsView` + cached pixmaps + zoom LOD from the start, not retrofitted |
 | Cross-platform audio backend differences (WASAPI/CoreAudio/PipeWire) | Medium | Device picker with explicit backend choice; CI can't test audio, so manual smoke test per platform per milestone |

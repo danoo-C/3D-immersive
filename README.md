@@ -227,6 +227,7 @@ python3 launch.py --install --dev                  # or: uv sync --extra dev
 .venv/bin/ruff format --check .                    # formatting
 .venv/bin/mypy                                     # type checking
 .venv/bin/pytest -n 8 --dist worksteal             # full suite, in parallel
+.venv/bin/pytest -m timing                         # then what is timed, alone
 .venv/bin/pytest -m "not gui"                      # fast lane: no Qt needed
 ```
 

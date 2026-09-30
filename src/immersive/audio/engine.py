@@ -49,6 +49,16 @@ one, and never frees its array. A voice stopped or replaced while it still
 sounds plays one block more, falling to silence, so it does not click
 (D-115).
 
+**One kernel a block, and one wait for the GIL** (D-138). `process` keeps
+in Python what is bookkeeping and makes no numpy call: taking up a
+snapshot or a voice, draining the ring, cutting the block into the pieces a
+loop wraps at. Everything else is `_block`, compiled by numba, which
+releases the GIL for all of it: the lanes read through their snapshot's
+table (D-140), their gains, the space, the audition, the master, the
+limiter, the meters and the output. It is compiled before any stream opens
+(`warm`, D-141), and held by the tests to the Python it replaced
+(`tests/reference_engine.py`).
+
 **Nothing on the audio thread allocates an array** (D-106). The bus and a
 channel's rows are made once, one contiguous row per ear, and every
 operation writes into them with `out=` - never broadcasting, which makes
@@ -62,10 +72,12 @@ from typing import Any, Final
 import numpy as np
 import numpy.typing as npt
 
+from immersive.audio.compiled import kernel, read
 from immersive.audio.device import DEFAULT_BLOCK
 from immersive.audio.dsp import ramp_steps
-from immersive.audio.limiter import LOOKAHEAD, Limiter
-from immersive.audio.scheduler import MONO, STEREO, Lane, Sides, Snapshot, empty, fill
+from immersive.audio.limiter import LOOKAHEAD, Limiter, _limit
+from immersive.audio.scheduler import MONO, STEREO, Sides, Snapshot, _fill, empty
+from immersive.audio.spatial import _drain, _render, nothing
 from immersive.core.model import MIN_LOOP_LENGTH
 
 #: How many commands can wait between two blocks. A gain is sent once per
@@ -77,7 +89,8 @@ RING: Final = 4096
 #: (D-125); for a seek, the sample, third; for playing, 1 or 0, third; for
 #: the loop, its start, its end, and 1 or 0 for whether it is on; for
 #: repeating, the project's end, first, and 1 or 0, third; for a position,
-#: its snapshot's generation, the channel, and x, y and z (D-121); for the
+#: its snapshot's generation, the channel, x, y and z, and the side, 0 or 1
+#: (D-121, D-132); for the
 #: master, its snapshot's generation, the gain, and 1 or 0 for the limiter
 #: (D-126).
 GAIN: Final = 0.0
@@ -102,7 +115,13 @@ class Voice:
     engine is. The position is written only by the audio thread."""
 
     def __init__(self, audio: npt.NDArray[np.float32]) -> None:
-        self.audio = audio
+        # Read by address (D-140): C-contiguous float32, as a decode leaves
+        # it; `require` copies only if not.
+        self.audio = np.require(audio, np.float32, "C")
+        #: Where the kernel reads it (D-140), worked out here, on the UI
+        #: thread: `ndarray.ctypes` makes objects, which a block must not.
+        self.address = int(self.audio.ctypes.data)
+        self.channels = int(self.audio.shape[1])
         self.frames = int(audio.shape[0])
         self.last = int(audio.shape[1]) - 1
         self.position = 0
@@ -141,16 +160,18 @@ class Engine:
         self._steps = ramp_steps(block)
         #: A block's fall to silence: its last sample is at 0.
         self._fall = np.subtract(np.float32(1.0), self._steps)
-        self._ramp = np.zeros(block, dtype=np.float32)
-        self._scratch = np.zeros(block, dtype=np.float32)
         #: Where a block's pieces start on the timeline, where in the block,
         #: and how long: more than one only where a loop wraps.
         self._pieces = np.zeros((block // SHORTEST_LOOP + 2, 3), dtype=np.int64)
         #: The master gain and the limiter's switch as the last block left
-        #: them (D-126).
-        self._master_level = 1.0
-        self._switch = 1.0
+        #: them (D-126), where the kernel keeps them.
+        self._state = np.ones(2)
         self._limiter = Limiter(block)
+        #: The voice falling and the voice sounding, as the kernel reads
+        #: them: address, frames, channels, position (D-140); 0 for none.
+        self._voices = np.zeros((2, 4), dtype=np.int64)
+        #: What the kernel is handed for a snapshot without a space.
+        self._nothing = nothing(block)
         #: The bus's highest level on each side since the peaks were taken.
         self._peaks = np.zeros(2, dtype=np.float64)
         self._xruns = np.zeros(1, dtype=np.int64)
@@ -195,11 +216,18 @@ class Engine:
         return self._send(MASTER, generation, gain, 1.0 if limiter else 0.0)
 
     def send_position(
-        self, generation: int, channel: int, x: float, y: float, z: float
+        self,
+        generation: int,
+        channel: int,
+        x: float,
+        y: float,
+        z: float,
+        side: int = 0,
     ) -> bool:
-        """Place channel `channel` of snapshot `generation` at `(x, y, z)`,
-        metres, from the next block (D-121). False when the ring is full."""
-        return self._send(POSITION, generation, channel, x, y, z)
+        """Place side `side` - 0 the left, or the only point; 1 the right - of
+        channel `channel` of snapshot `generation` at `(x, y, z)`, metres, from
+        the next block (D-121, D-132). False when the ring is full."""
+        return self._send(POSITION, generation, channel, x, y, z, side)
 
     def seek(self, sample: int) -> bool:
         """Play the next block from `sample`. False when the ring is full."""
@@ -234,6 +262,14 @@ class Engine:
     def playhead(self) -> int:
         """Where the next block starts."""
         return self._playhead
+
+    @property
+    def generation(self) -> int:
+        """The generation of the snapshot the next block plays: what a gain
+        or a position sent now names, to be heard rather than dropped
+        (D-105, D-121). The UI thread's view, for a sender that holds no
+        feed: the benchmark's moving sources."""
+        return self._next.generation
 
     def sent(self) -> int:
         """How many commands have been sent: a mark `caught_up` can be
@@ -315,41 +351,67 @@ class Engine:
         self.process(outdata)
 
     def process(self, out: npt.NDArray[np.float32]) -> None:
-        """Fill `out`, `(block, 2)`, with the next block. No array is made
-        below this line."""
+        """Fill `out`, `(block, 2)`, with the next block: the bookkeeping
+        here, the block in `_block`, one kernel, without the GIL."""
         snapshot = self._next
         if snapshot is not self._current:
             self._take_up(snapshot)
         if self._next_voice is not self._voice:
             # Held as fading before it stops being the voice, so the UI
             # thread never sees it held by neither. One that has finished
-            # falls through nothing: `_sound` has no frames left to play.
+            # falls through nothing: it has no frames left to play.
             self._fading = self._voice
             self._voice = self._next_voice
         self._drain(snapshot)
+        playing = self._playing
+        pieces = self._plan() if playing else 0
 
-        bus_l, bus_r = self._bus_l, self._bus_r
-        bus_l.fill(0)
-        bus_r.fill(0)
+        fading, voice, voices = self._fading, self._voice, self._voices
+        for row, held in ((0, fading), (1, voice)):
+            if held is None:
+                voices[row, 0] = 0
+            else:
+                voices[row, 0] = held.address
+                voices[row, 1] = held.frames
+                voices[row, 2] = held.channels
+                voices[row, 3] = held.position
         space = snapshot.space
-        if self._playing:
-            self._mix(snapshot, self._plan())
-            if space is not None:
-                space.render(snapshot.positions, snapshot.peaks, bus_l, bus_r)
-        else:
-            # Stopped: nothing ramps, so a gain changed meanwhile is in place
-            # when playing starts. The spatial tail still drains, so a pause
-            # decays rather than cuts and a resume does not replay it.
-            np.copyto(snapshot.levels, snapshot.targets)
-            if space is not None:
-                space.drain(bus_l, bus_r)
-        self._audition()
-        self._master(snapshot)
-
-        self._peak(bus_l, 0)
-        self._peak(bus_r, 1)
-        np.copyto(out[:, 0], bus_l)
-        np.copyto(out[:, 1], bus_r)
+        placed = space if space is not None else self._nothing
+        _block(
+            out,
+            self._bus,
+            self._lane,
+            self._steps,
+            self._fall,
+            self._pieces,
+            pieces,
+            playing,
+            snapshot.clips,
+            snapshot.clip_gains,
+            snapshot.lane_first,
+            snapshot.targets,
+            snapshot.levels,
+            snapshot.peaks,
+            snapshot.slot_of,
+            snapshot.pairs_of,
+            snapshot.positions,
+            snapshot.master,
+            space is not None,
+            placed.fresh,
+            placed.crossfade,
+            placed.arguments,
+            voices,
+            self._state,
+            self._peaks,
+            self._limiter.arguments,
+        )
+        if fading is not None:
+            fading.position = int(voices[0, 3])
+            self._fading = None
+        if voice is not None:
+            voice.position = int(voices[1, 3])
+        if space is not None and playing:
+            space.fresh = False
 
     def _plan(self) -> int:
         """Cut the block into the pieces of the timeline it plays - one, or
@@ -391,148 +453,6 @@ class Engine:
             return end, 0
         return -1, 0
 
-    def _mix(self, snapshot: Snapshot, pieces: int) -> None:
-        """Every channel's share of the block, at its gain, into the bus."""
-        bus_l, bus_r = self._bus_l, self._bus_r
-        lane_l, lane_r, lane_m = self._lane_l, self._lane_r, self._lane_m
-        targets, levels, peaks = snapshot.targets, snapshot.levels, snapshot.peaks
-        lanes = snapshot.lanes
-        slots = snapshot.slots
-        space = snapshot.space
-        if space is not None:
-            space.src.fill(0.0)  # a silent spatial channel still has a block
-        start = int(self._pieces[0, 0])
-        for index in range(len(lanes)):
-            now = targets[index]
-            was = levels[index]
-            if not (now.any() or was.any()):
-                continue
-            if pieces == 1:
-                wrote = fill(lanes[index], start, lane_l, lane_r, lane_m)
-            else:
-                wrote = self._fill_pieces(lanes[index], pieces)
-            if not wrote:
-                np.copyto(was, now)
-                continue
-            # A channel's two sides from its rows and its four factors
-            # (D-125): a stereo clip's sides kept or turned down, a mono
-            # clip's row added to each at its own factor.
-            if wrote & STEREO:
-                self._gain(lane_l, lane_l, float(was[2]), float(now[2]), add=False)
-                self._gain(lane_r, lane_r, float(was[3]), float(now[3]), add=False)
-            if wrote & MONO:
-                add = bool(wrote & STEREO)
-                self._gain(lane_l, lane_m, float(was[0]), float(now[0]), add=add)
-                self._gain(lane_r, lane_m, float(was[1]), float(now[1]), add=add)
-            np.copyto(was, now)
-            slot = slots[index]
-            if space is not None and slot >= 0:
-                # A mono point (D-16): the space places it, meters it after
-                # its distance, and sums it into the bus after the HRTF.
-                row = space.src[slot]
-                np.add(lane_l, lane_r, out=row)
-                np.multiply(row, 0.5, out=row)
-                continue
-            # What this channel adds to the bus, for its meter (D-117).
-            self._raise(peaks, index, 0, lane_l)
-            self._raise(peaks, index, 1, lane_r)
-            np.add(bus_l, lane_l, out=bus_l)
-            np.add(bus_r, lane_r, out=bus_r)
-
-    def _fill_pieces(self, lane: Lane, pieces: int) -> int:
-        """`fill`, a piece at a time, silence in any piece no clip of a row's
-        kind plays."""
-        self._lane.fill(0)
-        wrote = 0
-        for piece in range(pieces):
-            t, at, length = (int(value) for value in self._pieces[piece])
-            wrote |= fill(
-                lane,
-                t,
-                self._lane_l[at : at + length],
-                self._lane_r[at : at + length],
-                self._lane_m[at : at + length],
-            )
-        return wrote
-
-    def _gain(
-        self,
-        into: npt.NDArray[np.float32],
-        row: npt.NDArray[np.float32],
-        was: float,
-        now: float,
-        *,
-        add: bool,
-    ) -> None:
-        """`row` at a gain moving from `was` to `now` across the block -
-        or held, when they are the same - written into `into`, or added."""
-        if was != now:
-            ramp = self._ramp
-            np.multiply(self._steps, now - was, out=ramp)
-            np.add(ramp, was, out=ramp)
-            if add:
-                np.multiply(row, ramp, out=self._scratch)
-                np.add(into, self._scratch, out=into)
-            else:
-                np.multiply(row, ramp, out=into)
-        elif add:
-            np.multiply(row, now, out=self._scratch)
-            np.add(into, self._scratch, out=into)
-        elif now != 1.0 or into is not row:
-            np.multiply(row, now, out=into)
-
-    def _master(self, snapshot: Snapshot) -> None:
-        """The master gain over the whole bus, ramped, then the limiter
-        (D-126, D-123)."""
-        was = self._master_level
-        now = float(snapshot.master[0])
-        if was != now:
-            ramp = self._ramp
-            np.multiply(self._steps, now - was, out=ramp)
-            np.add(ramp, was, out=ramp)
-            np.multiply(self._bus_l, ramp, out=self._bus_l)
-            np.multiply(self._bus_r, ramp, out=self._bus_r)
-            self._master_level = now
-        elif now != 1.0:
-            np.multiply(self._bus_l, now, out=self._bus_l)
-            np.multiply(self._bus_r, now, out=self._bus_r)
-        switch = float(snapshot.master[1])
-        self._limiter.process(self._bus_l, self._bus_r, self._switch, switch)
-        self._switch = switch
-
-    def _audition(self) -> None:
-        """The voice's next block, summed into the bus over the channels -
-        and a voice just stopped or replaced, falling to silence."""
-        fading = self._fading
-        if fading is not None:
-            self._sound(fading, falling=True)
-            self._fading = None
-        voice = self._voice
-        if voice is not None:
-            self._sound(voice, falling=False)
-
-    def _sound(self, voice: Voice, *, falling: bool) -> None:
-        read = voice.position
-        if read >= voice.frames:
-            return
-        count = min(self.block, voice.frames - read)
-        sample = voice.audio
-        into_l = self._bus_l[:count]
-        into_r = self._bus_r[:count]
-        left = sample[read : read + count, 0]
-        right = sample[read : read + count, voice.last]
-        if falling:
-            fall = self._fall[:count]
-            scratch = self._scratch[:count]
-            np.multiply(left, fall, out=scratch)
-            np.add(into_l, scratch, out=into_l)
-            np.multiply(right, fall, out=scratch)
-            np.add(into_r, scratch, out=into_r)
-        else:
-            np.add(into_l, left, out=into_l)
-            np.add(into_r, right, out=into_r)
-        voice.position = read + count
-
     def _take_up(self, snapshot: Snapshot) -> None:
         """Start playing `snapshot`, each channel ramping from the gain it
         had in the one before - if the one before is the one it was built
@@ -547,8 +467,8 @@ class Engine:
         if self._current.generation == 0:
             # The first snapshot: nothing has played, so the master starts
             # where it is rather than ramping there from unity.
-            self._master_level = float(snapshot.master[0])
-            self._switch = float(snapshot.master[1])
+            self._state[0] = snapshot.master[0]
+            self._state[1] = snapshot.master[1]
         # The tail is sound already begun: it carries into the new snapshot
         # when the two are shaped alike. The filters do not (05): its first
         # block starts fresh, with no crossfade from a stale one.
@@ -589,13 +509,15 @@ class Engine:
                     snapshot.space.fresh = True  # no crossfade from before it
             elif kind == POSITION:
                 positions = snapshot.positions
-                if command[1] == snapshot.generation and 0 <= command[2] < len(
-                    positions
+                if (
+                    command[1] == snapshot.generation
+                    and 0 <= command[2] < len(positions)
+                    and 0 <= command[6] <= 1
                 ):
-                    row = int(command[2])
-                    positions[row, 0] = command[3]
-                    positions[row, 1] = command[4]
-                    positions[row, 2] = command[5]
+                    at = positions[int(command[2]), int(command[6])]
+                    at[0] = command[3]
+                    at[1] = command[4]
+                    at[2] = command[5]
             elif kind == PLAY:
                 self._playing = bool(command[3])
             elif kind == LOOP:
@@ -610,21 +532,266 @@ class Engine:
                 snapshot.master[1] = command[3]
             self._read += 1
 
-    def _peak(self, side: npt.NDArray[np.float32], which: int) -> None:
-        np.abs(side, out=self._scratch)
-        loudest = self._scratch.max()
-        if loudest > self._peaks[which]:
-            self._peaks[which] = loudest
 
-    def _raise(
-        self,
-        peaks: npt.NDArray[np.float64],
-        channel: int,
-        which: int,
-        side: npt.NDArray[np.float32],
-    ) -> None:
-        """A channel's peak on one side, raised to this block's loudest."""
-        np.abs(side, out=self._scratch)
-        loudest = self._scratch.max()
-        if loudest > peaks[channel, which]:
-            peaks[channel, which] = loudest
+def warm(block: int = DEFAULT_BLOCK) -> None:
+    """Compile the block kernel, or load it from numba's cache, by playing
+    one block through a scratch engine: before any stream opens (D-141),
+    since the flat path plays before the bank arrives. Once it exists this
+    costs nothing. One signature serves every block size, space or none."""
+    if _block.signatures:  # type: ignore[attr-defined]
+        return
+    engine = Engine(block)
+    engine.set_playing(True)
+    engine.process(np.zeros((block, 2), dtype=np.float32))
+
+
+# --------------------------------------------------------------- the kernel
+
+Rows = npt.NDArray[np.float32]
+Floats = npt.NDArray[np.float64]
+Indices = npt.NDArray[np.int64]
+
+
+@kernel
+def _block(
+    out: Rows,
+    bus: Rows,
+    lane: Rows,
+    steps: Rows,
+    fall: Rows,
+    pieces: Indices,
+    count: int,
+    playing: bool,
+    clips: Indices,
+    clip_gains: Floats,
+    lane_first: Indices,
+    targets: Floats,
+    levels: Floats,
+    peaks: Floats,
+    slot_of: Indices,
+    pairs_of: npt.NDArray[np.bool_],
+    positions: Floats,
+    master: Floats,
+    has_space: bool,
+    fresh: bool,
+    crossfade: bool,
+    space: tuple[Any, ...],
+    voices: Indices,
+    state: Floats,
+    master_peaks: Floats,
+    limiter: tuple[Any, ...],
+) -> None:
+    """One block, as the module's docstring gives it, without the GIL."""
+    bus_l, bus_r = bus[0], bus[1]
+    bus_l[:] = 0.0
+    bus_r[:] = 0.0
+    src, tail = space[19], space[28]
+    if playing:
+        if has_space:
+            src[:, :] = 0.0  # a silent spatial channel still has a block
+        _mix(
+            bus_l,
+            bus_r,
+            lane,
+            steps,
+            pieces,
+            count,
+            clips,
+            clip_gains,
+            lane_first,
+            targets,
+            levels,
+            peaks,
+            slot_of,
+            pairs_of,
+            has_space,
+            src,
+        )
+        if has_space:
+            _render(positions, peaks, bus_l, bus_r, fresh, crossfade, *space)
+    else:
+        # Stopped: nothing ramps, so a gain changed meanwhile is in place
+        # when playing starts. The spatial tail still drains, so a pause
+        # decays rather than cuts and a resume does not replay it.
+        for index in range(targets.shape[0]):
+            for side in range(4):
+                levels[index, side] = targets[index, side]
+        if has_space:
+            _drain(tail, bus_l, bus_r)
+    _sound(bus_l, bus_r, voices, 0, fall)
+    _sound(bus_l, bus_r, voices, 1, fall)
+    _master(bus_l, bus_r, steps, master, state, limiter)
+    for which, side in enumerate((bus_l, bus_r)):
+        loudest = np.float32(0.0)
+        for i in range(side.shape[0]):
+            loudest = max(loudest, abs(side[i]))
+        if loudest > master_peaks[which]:
+            master_peaks[which] = loudest
+    for i in range(bus_l.shape[0]):
+        out[i, 0] = bus_l[i]
+        out[i, 1] = bus_r[i]
+
+
+@kernel
+def _mix(
+    bus_l: Rows,
+    bus_r: Rows,
+    lane: Rows,
+    steps: Rows,
+    pieces: Indices,
+    count: int,
+    clips: Indices,
+    clip_gains: Floats,
+    lane_first: Indices,
+    targets: Floats,
+    levels: Floats,
+    peaks: Floats,
+    slot_of: Indices,
+    pairs_of: npt.NDArray[np.bool_],
+    has_space: bool,
+    src: Rows,
+) -> None:
+    """Every channel's share of the block, at its gain: into the space, or
+    into the bus and the channel's meter."""
+    lane_l, lane_r, lane_m = lane[0], lane[1], lane[2]
+    block = lane_l.shape[0]
+    start = pieces[0, 0]
+    for index in range(targets.shape[0]):
+        now, was = targets[index], levels[index]
+        if not (now.any() or was.any()):
+            continue
+        first, last = lane_first[index], lane_first[index + 1]
+        table, gains = clips[first:last], clip_gains[first:last]
+        if count == 1:
+            wrote = _fill(table, gains, start, lane_l, lane_r, lane_m)
+        else:
+            # A piece at a time, silence in any piece no clip of a row's
+            # kind plays.
+            lane[:, :] = 0.0
+            wrote = 0
+            for piece in range(count):
+                t, at, length = pieces[piece, 0], pieces[piece, 1], pieces[piece, 2]
+                wrote |= _fill(
+                    table,
+                    gains,
+                    t,
+                    lane_l[at : at + length],
+                    lane_r[at : at + length],
+                    lane_m[at : at + length],
+                )
+        if wrote:
+            # A channel's two sides from its rows and its four factors
+            # (D-125): a stereo clip's sides kept or turned down, a mono
+            # clip's row added to each at its own factor.
+            if wrote & STEREO:
+                _gain(lane_l, lane_l, was[2], now[2], False, True, steps)
+                _gain(lane_r, lane_r, was[3], now[3], False, True, steps)
+            if wrote & MONO:
+                add = (wrote & STEREO) != 0
+                _gain(lane_l, lane_m, was[0], now[0], add, False, steps)
+                _gain(lane_r, lane_m, was[1], now[1], add, False, steps)
+        for side in range(4):
+            was[side] = now[side]
+        if not wrote:
+            continue
+        slot = slot_of[index]
+        if has_space and slot >= 0:
+            # The space places it, meters it after its distance, and sums
+            # it into the bus after the HRTF: a pair's two sides as they
+            # are (D-132), or one mono point (D-16).
+            if pairs_of[index]:
+                for i in range(block):
+                    src[slot, i] = lane_l[i]
+                    src[slot + 1, i] = lane_r[i]
+            else:
+                half = np.float32(0.5)
+                for i in range(block):
+                    src[slot, i] = (lane_l[i] + lane_r[i]) * half
+            continue
+        # What this channel adds to the bus, for its meter (D-117).
+        for which, side in enumerate((lane_l, lane_r)):
+            loudest = np.float32(0.0)
+            for i in range(block):
+                loudest = max(loudest, abs(side[i]))
+            if loudest > peaks[index, which]:
+                peaks[index, which] = loudest
+        for i in range(block):
+            bus_l[i] += lane_l[i]
+            bus_r[i] += lane_r[i]
+
+
+@kernel
+def _gain(
+    into: Rows, row: Rows, was: float, now: float, add: bool, own: bool, steps: Rows
+) -> None:
+    """`row` at a gain moving from `was` to `now` across the block - or
+    held, when they are the same - written into `into`, or added. `own`
+    says `into` is `row` itself, which a gain of 1 leaves as it is."""
+    block = into.shape[0]
+    if was != now:
+        rise, start = np.float32(now - was), np.float32(was)
+        for i in range(block):
+            value = row[i] * (steps[i] * rise + start)
+            into[i] = into[i] + value if add else value
+    else:
+        level = np.float32(now)
+        if add:
+            for i in range(block):
+                into[i] = into[i] + row[i] * level
+        elif now != 1.0 or not own:
+            for i in range(block):
+                into[i] = row[i] * level
+
+
+@kernel
+def _sound(bus_l: Rows, bus_r: Rows, voices: Indices, which: int, fall: Rows) -> None:
+    """A voice's next block, summed into the bus over the channels: row 0
+    falling to silence, row 1 as it is (D-107, D-115). Its read position
+    moves on in `voices`."""
+    address = voices[which, 0]
+    if address == 0:
+        return
+    frames, channels, read_from = voices[which, 1], voices[which, 2], voices[which, 3]
+    if read_from >= frames:
+        return
+    count = min(bus_l.shape[0], frames - read_from)
+    last = channels - 1
+    for i in range(count):
+        left = read(address, (read_from + i) * channels)
+        right = read(address, (read_from + i) * channels + last)
+        if which == 0:
+            left = left * fall[i]
+            right = right * fall[i]
+        bus_l[i] = bus_l[i] + left
+        bus_r[i] = bus_r[i] + right
+    voices[which, 3] = read_from + count
+
+
+@kernel
+def _master(
+    bus_l: Rows,
+    bus_r: Rows,
+    steps: Rows,
+    master: Floats,
+    state: Floats,
+    limiter: tuple[Any, ...],
+) -> None:
+    """The master gain over the whole bus, ramped, then the limiter (D-126,
+    D-123)."""
+    block = bus_l.shape[0]
+    was, now = state[0], master[0]
+    if was != now:
+        rise, start = np.float32(now - was), np.float32(was)
+        for i in range(block):
+            ramp = steps[i] * rise + start
+            bus_l[i] = bus_l[i] * ramp
+            bus_r[i] = bus_r[i] * ramp
+        state[0] = now
+    elif now != 1.0:
+        level = np.float32(now)
+        for i in range(block):
+            bus_l[i] = bus_l[i] * level
+            bus_r[i] = bus_r[i] * level
+    switch = master[1]
+    _limit(bus_l, bus_r, state[1], switch, *limiter)
+    state[1] = switch

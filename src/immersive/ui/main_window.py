@@ -243,6 +243,10 @@ class MainWindow(QMainWindow):
         #: The project the loop switch was last set for: another one means
         #: New or Open, and a project opens with looping off (D-108).
         self._looping_for: Project | None = None
+        #: Called once a project has loaded - New, Open - to settle memory
+        #: (D-142). Nothing here; `app.run` gives a launch its own, so no
+        #: test freezes the collector.
+        self.settle: Callable[[], None] = lambda: None
         #: What the engine plays, kept in step with the project (D-105).
         self._feed = (
             Feed(player.engine, self._store.audio) if player is not None else None
@@ -705,6 +709,7 @@ class MainWindow(QMainWindow):
             return False
         self._store.clear()
         self._document.new()
+        self.settle()
         return True
 
     def open_project(self, path: Path | None = None) -> bool:
@@ -738,6 +743,7 @@ class MainWindow(QMainWindow):
         # Reaching here, the open succeeded: every failure returned above.
         self._store.clear()
         self._load_samples()
+        self.settle()
         if self._hrtf_wanted is not None:
             self.prepare_hrtf()  # the set it names, if it names another
 

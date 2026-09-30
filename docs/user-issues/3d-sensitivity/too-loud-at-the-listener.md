@@ -1,6 +1,6 @@
 # Why a placed channel at (0, 0, 0) distorts, and a bypassed one does not
 
-**Status:** explained; nothing changed · **Written:** 2026-09-27 ·
+**Status:** explained, and fixed by [M4 phase 8](../../m4_binaural_engine/phase_8_level_as_mixed.md) · **Written:** 2026-09-27 ·
 **Measured at:** `46b71cb` on `m3-timeline`, through SADIE II D1, on
 `FEA2_DRUMS_2.wav` from `test-samples/`, its loudest 40 s (116–156 s)
 

@@ -29,12 +29,19 @@ from immersive.core.edits import AddChannel, AddMedia, DropClips, SetAttribute
 from immersive.core.io.media import Decoded
 from immersive.core.io.peaks import build
 from immersive.core.media_store import Prepared
-from immersive.core.model import Channel, Clip, MediaFile, Position, new_channel
+from immersive.core.model import (
+    Channel,
+    Clip,
+    MediaFile,
+    Pairing,
+    Position,
+    new_channel,
+)
 from immersive.core.selection import Kind
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import hrtf, theme
 from immersive.ui.main_window import MainWindow, Unsaved
-from immersive.ui.parameters.views import ChannelView, ProjectView
+from immersive.ui.parameters.views import MODES, ChannelView, ProjectView
 from standin import Backend, Stream
 from test_parameters import type_into
 from test_spatial import head
@@ -80,20 +87,22 @@ def window() -> Iterator[MainWindow]:
 
 def with_channel(
     window: MainWindow,
-    value: float,
+    value: float | tuple[float, float],
     *,
     sides: int = 1,
     where: Position | None = None,
     bypass: bool = False,
 ) -> Channel:
-    """A channel playing a sample that holds `value` throughout."""
+    """A channel playing a sample that holds `value` throughout, or a value
+    for each side."""
     document = window.document()
     project = document.project
     n = len(project.media_pool)
     media = MediaFile(
         f"m-0000000{n}", f"/{n}.wav", f"{n}.wav", SAMPLE_RATE, sides, FRAMES
     )
-    audio = np.full((FRAMES, sides), value, dtype=np.float32)
+    audio = np.zeros((FRAMES, sides), dtype=np.float32)
+    audio[:] = value
     window.store().keep(
         media.id,
         Prepared(Path(f"/{n}.wav"), Decoded(audio, SAMPLE_RATE), "", build(audio)),
@@ -162,6 +171,31 @@ def test_a_position_typed_is_heard_from_there_from_the_next_block(
     assert right_r > 1.5 * right_l, "and heard from the right"
 
 
+def test_a_linked_right_side_typed_and_then_one_point_are_heard(
+    window: MainWindow,
+) -> None:
+    """A stem with only its right side sounding, in a new channel's linked
+    pair ahead: its right side typed to the right is heard there, since a
+    pair is two sources, and made one point it is heard from the channel's
+    position, where the typing moved the left (D-132)."""
+    channel = with_channel(window, (0.0, 0.1), sides=2)
+    tape = playing(window)
+    view = channel_view(window, channel)
+    type_into(view.right[0], "1")
+    tape.play(4)
+    assert channel.position.x == -1.0
+
+    ahead_l, ahead_r = level(tape.heard(3, 1))
+    right_l, right_r = level(tape.heard(7, 1))
+    assert ahead_l == pytest.approx(ahead_r, rel=1e-4), "both sides ahead, even"
+    assert right_r > 1.5 * right_l, "its right side heard from the right"
+
+    view.mode.activated.emit(list(MODES).index(Pairing.POINT))
+    tape.play(3)
+    point_l, point_r = level(tape.heard(9, 1))
+    assert point_l > 1.5 * point_r, "one point, at the left side's position"
+
+
 def test_a_pan_typed_on_a_bypassed_channel_is_heard(window: MainWindow) -> None:
     channel = with_channel(window, 0.25, bypass=True)
     tape = playing(window)
@@ -205,3 +239,16 @@ def test_the_limiter_switched_off_is_heard(window: MainWindow) -> None:
     assert not window.document().project.master.limiter_on
     tape.play(3)
     assert (tape.heard(6, 1) == np.float32(1.5)).all(), "past full scale, untouched"
+
+
+def test_level_as_mixed_switched_off_is_heard(window: MainWindow) -> None:
+    """Half a metre ahead: level as mixed plays it as at a metre; off, nearer
+    is louder, by D-21's 6.02 dB for half the distance (D-131)."""
+    with_channel(window, 0.1, where=Position(0.0, 0.5, 0.0))
+    tape = playing(window)
+    project_view(window).keep_level.click()
+    assert not window.document().project.distance.keep_level
+    tape.play(3)
+    before, after = level(tape.heard(3, 1)), level(tape.heard(6, 1))
+    for was, now in zip(before, after, strict=True):
+        assert 20 * np.log10(now / was) == pytest.approx(6.02, abs=0.05)

@@ -65,7 +65,12 @@ from immersive.core.model import (
     Fade,
     FadeShape,
     MediaFile,
+    Pairing,
+    Placement,
     SnapSetting,
+    mirror,
+    paired,
+    sides,
 )
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
@@ -91,6 +96,9 @@ AXES = (
 
 #: How far a position field reaches, each way.
 REACH = 100.0
+
+#: A channel's placement modes, as the pane names them (D-132).
+MODES = {Pairing.POINT: "One point", Pairing.FREE: "Free", Pairing.LINKED: "Linked"}
 
 #: Why a bypassed channel's position is greyed (D-127).
 UNPLACED = (
@@ -203,6 +211,20 @@ class View(QWidget):
 
     def set_heading(self, text: str) -> None:
         self._heading.setText(text)
+
+    def section(self, title: str) -> QLabel:
+        """A heading inside the form, over the rows that follow it."""
+        heading = QLabel(title)
+        heading.setObjectName("PaneHeading")
+        self._form.addRow(heading)
+        return heading
+
+    def show_row(self, field: QWidget, visible: bool) -> None:
+        """A field and its label, shown or hidden together."""
+        field.setVisible(visible)
+        label = self._form.labelForField(field)
+        if label is not None:
+            label.setVisible(visible)
 
     def row(self, label: str, field: QWidget) -> QWidget:
         """A field and its label, in the form's order."""
@@ -354,6 +376,18 @@ class ProjectView(View):
             )
         )
         self.row("", self.limiter)
+        self.keep_level = CheckBox("Level as mixed")
+        self.keep_level.setToolTip(
+            "Level as mixed: a placed channel is as loud as the channel itself,\n"
+            "in every direction, until it is farther than 1 m - then it fades\n"
+            "with distance. Off: nearer is louder, and some directions quieter."
+        )
+        self.keep_level.clicked.connect(
+            lambda on: self._push(
+                set_on_all([self._document.project.distance], "keep_level", bool(on))
+            )
+        )
+        self.row("", self.keep_level)
 
     def show_values(self) -> None:
         project = self._document.project
@@ -369,6 +403,7 @@ class ProjectView(View):
         self.rolloff.set_value(project.distance.rolloff)
         self.master.set_value(project.master.gain_db)
         self.limiter.setChecked(project.master.limiter_on)
+        self.keep_level.setChecked(project.distance.keep_level)
 
     def _set_tempo(self, bpm: float) -> None:
         self._push(set_on_all([self._document.project], "bpm", bpm))
@@ -604,25 +639,6 @@ class ChannelView(View):
         self.snap.menu().aboutToShow.connect(self.snap_menu)
         self.row("Snap", self.snap)
 
-        self._position_tips = [
-            f"{label}: {meaning} — drag, or click and type"
-            for _, label, meaning in AXES
-        ]
-        self.position = [
-            numeric(
-                0,
-                minimum=-REACH,
-                maximum=REACH,
-                step=0.01,
-                unit="m",
-                decimals=2,
-                tip=tip,
-                committed=partial(self._place, axis),
-            )
-            for (axis, _, _), tip in zip(AXES, self._position_tips, strict=True)
-        ]
-        for (_, label, _), field in zip(AXES, self.position, strict=True):
-            self.row(f"Position {label}", field)
         self.pan = numeric(
             0,
             minimum=-1,
@@ -637,6 +653,76 @@ class ChannelView(View):
             committed=lambda value: self._set("pan", value),
         )
         self.row("Pan", self.pan)
+
+        # Where it is heard from (D-135): one section, shown field by field
+        # as the channel's placement gives each one a meaning (D-132).
+        self.section("Placement")
+        self.mode = QComboBox()
+        self.mode.addItems(list(MODES.values()))
+        self.mode.setPlaceholderText(MIXED)
+        self.mode.setToolTip(
+            "One point: a stereo clip folded to one place.\n"
+            "Free: its left and right placed apart, each where you put it.\n"
+            "Linked: the right mirrors the left about the pivot."
+        )
+        self.mode.activated.connect(
+            lambda index: self._replace(lambda p: replace(p, mode=list(MODES)[index]))
+        )
+        self.row("Mode", self.mode)
+        self._position_tips = [
+            f"{label}: {meaning} — drag, or click and type"
+            for _, label, meaning in AXES
+        ]
+        self.position = self._axes(self._position_tips, self._place)
+        for (_, label, _), field in zip(AXES, self.position, strict=True):
+            self.row(f"Position {label}", field)
+        self.right = self._axes(
+            [f"The right side's {label}" for _, label, _ in AXES], self._place_right
+        )
+        for (_, label, _), field in zip(AXES, self.right, strict=True):
+            self.row(f"Right {label}", field)
+        self.pivot = self._axes(
+            [f"What a linked pair mirrors about: {label}" for _, label, _ in AXES],
+            self._place_pivot,
+        )
+        for (_, label, _), field in zip(AXES, self.pivot, strict=True):
+            self.row(f"Pivot {label}", field)
+        self.mirrored = [CheckBox(label) for _, label, _ in AXES]
+        mirror_row = QWidget()
+        boxes = QHBoxLayout(mirror_row)
+        boxes.setContentsMargins(0, 0, 0, 0)
+        boxes.setSpacing(8)
+        for index, box in enumerate(self.mirrored):
+            box.setToolTip("Mirrored on this axis about the pivot; kept if not")
+            box.clicked.connect(lambda on, index=index: self._mirror(index, bool(on)))
+            boxes.addWidget(box)
+        boxes.addStretch(1)
+        self._mirror_row = mirror_row
+        self.row("Mirror", mirror_row)
+        self.mono = CheckBox("Mono as two sources")
+        self.mono.setToolTip("A mono clip heard from both sides, as a stereo one is")
+        self.mono.clicked.connect(
+            lambda on: self._replace(lambda p: replace(p, mono=bool(on)))
+        )
+        self.row("", self.mono)
+
+    def _axes(
+        self, tips: Sequence[str], committed: Callable[[str, float], None]
+    ) -> list[NumericField]:
+        """X, Y and Z fields in metres, each committing its own axis."""
+        return [
+            numeric(
+                0,
+                minimum=-REACH,
+                maximum=REACH,
+                step=0.01,
+                unit="m",
+                decimals=2,
+                tip=tip if tip.endswith("type") else f"{tip} — drag, or click and type",
+                committed=partial(committed, axis),
+            )
+            for (axis, _, _), tip in zip(AXES, tips, strict=True)
+        ]
 
     def _channels(self) -> list[Channel]:
         return self._document.selection.channels()
@@ -676,27 +762,55 @@ class ChannelView(View):
             self.snap.setText("Follows the project")
         else:
             self.snap.setText(snap_text(override).removeprefix("Snap "))
-        for field, values in zip(
+        show_number(self.pan, [channel.pan for channel in channels])
+        # 04, D-127: pan only when every channel is bypassed - it means
+        # nothing on the spatial path - and the placement greyed then.
+        bypassed = all(channel.hrtf_bypass for channel in channels)
+        self.show_row(self.pan, bypassed)
+        self._show_placement(channels, bypassed)
+
+    def _show_placement(self, channels: list[Channel], bypassed: bool) -> None:
+        """The Placement section, each field shown where it means something
+        for every selected channel (D-132)."""
+        project = self._document.project
+        modes = [channel.placement.mode for channel in channels]
+        same, mode = common(modes)
+        self.mode.setCurrentIndex(list(MODES).index(mode) if same and mode else -1)
+        pairs = all(paired(project, channel) for channel in channels)
+        linked = pairs and all(mode is Pairing.LINKED for mode in modes)
+        placed = [sides(channel) for channel in channels]
+        for (axis, label, _), left, right, pivot, box, tip in zip(
+            AXES,
             self.position,
-            (
-                [c.position.x for c in channels],
-                [c.position.y for c in channels],
-                [c.position.z for c in channels],
-            ),
+            self.right,
+            self.pivot,
+            self.mirrored,
+            self._position_tips,
             strict=True,
         ):
-            show_number(field, values)
-        show_number(self.pan, [channel.pan for channel in channels])
-        # 04, D-127: a position while any is placed, pan only when none is -
-        # it means nothing on the spatial path.
-        bypassed = all(channel.hrtf_bypass for channel in channels)
-        for field, tip in zip(self.position, self._position_tips, strict=True):
-            field.setEnabled(not bypassed)
-            field.setToolTip(UNPLACED if bypassed else tip)
-        self.pan.setVisible(bypassed)
-        label = self._form.labelForField(self.pan)
-        if label is not None:
-            label.setVisible(bypassed)
+            show_number(left, [getattr(side[0], axis) for side in placed])
+            show_number(right, [getattr(side[1], axis) for side in placed])
+            show_number(pivot, [getattr(c.placement.pivot, axis) for c in channels])
+            index = "xyz".index(axis)
+            show_check(box, [c.placement.mirrored[index] for c in channels])
+            name = self._form.labelForField(left)
+            if isinstance(name, QLabel):
+                name.setText(f"{'Left' if pairs else 'Position'} {label}")
+            self.show_row(right, pairs)
+            self.show_row(pivot, linked)
+            left.setToolTip(UNPLACED if bypassed else tip)
+        self.show_row(self._mirror_row, linked)
+        show_check(self.mono, [channel.placement.mono for channel in channels])
+        self.show_row(self.mono, all(mode is not Pairing.POINT for mode in modes))
+        for widget in (
+            self.mode,
+            *self.position,
+            *self.right,
+            *self.pivot,
+            *self.mirrored,
+            self.mono,
+        ):
+            widget.setEnabled(not bypassed)
 
     def colour_menu(self) -> QMenu:
         """The theme's channel palette, the shared colour checked."""
@@ -750,6 +864,47 @@ class ChannelView(View):
                 ]
             )
         )
+
+    def _replace(self, change: Callable[[Placement], Placement]) -> None:
+        """Each selected channel's placement changed as `change` says, as a
+        new `Placement`, so undo has the old one: one edit for all."""
+        changes: list[Command] = []
+        for channel in self._channels():
+            new = change(channel.placement)
+            if new != channel.placement:
+                changes.append(SetAttribute(channel, "placement", new))
+        self._push(together(changes))
+
+    def _place_right(self, axis: str, value: float) -> None:
+        """A pair's right side on one axis: free, the side itself; linked,
+        the left side moved through the mirror, so the right lands there."""
+        changes: list[Command] = []
+        for channel in self._channels():
+            placement = channel.placement
+            _, right = sides(channel)
+            moved = replace(right, **{axis: value})
+            if moved == right:
+                continue
+            if placement.mode is Pairing.FREE:
+                changes.append(
+                    SetAttribute(channel, "placement", replace(placement, right=moved))
+                )
+            elif placement.mode is Pairing.LINKED:
+                left = mirror(moved, placement.pivot, placement.mirrored)
+                changes.append(SetAttribute(channel, "position", left))
+        self._push(together(changes))
+
+    def _place_pivot(self, axis: str, value: float) -> None:
+        self._replace(lambda p: replace(p, pivot=replace(p.pivot, **{axis: value})))
+
+    def _mirror(self, index: int, on: bool) -> None:
+        def flipped(p: Placement) -> Placement:
+            axes = tuple(
+                bool(on) if at == index else was for at, was in enumerate(p.mirrored)
+            )
+            return replace(p, mirrored=(axes[0], axes[1], axes[2]))
+
+        self._replace(flipped)
 
     def _rename(self) -> None:
         channels = self._channels()

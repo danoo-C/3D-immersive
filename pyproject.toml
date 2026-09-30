@@ -27,6 +27,10 @@ dependencies = [
     "soundfile>=0.12",
     "soxr>=0.3.7",
     "sofar>=1.1",
+    # D-138: the engine's block compiled, releasing the GIL while it runs.
+    # rocket-fft gives numba pocketfft's transforms into arrays made once.
+    "numba>=0.67",
+    "rocket-fft>=0.3",
 ]
 
 [project.optional-dependencies]
@@ -118,7 +122,7 @@ strict_equality = true
 
 # These ship no type information.
 [[tool.mypy.overrides]]
-module = ["sounddevice.*", "soundfile.*", "soxr.*", "sofar.*", "scipy.*"]
+module = ["sounddevice.*", "soundfile.*", "soxr.*", "sofar.*", "scipy.*", "llvmlite.*"]
 ignore_missing_imports = true
 
 # --------------------------------------------------------------------------- #
@@ -130,4 +134,5 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
     "gui: needs a Qt application instance",
+    "timing: measures time, so is skipped under more than one xdist worker (run: pytest -m timing)",
 ]

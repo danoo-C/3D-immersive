@@ -24,13 +24,13 @@ is a bypassed channel's, so it is only there that they differ.
 
 from __future__ import annotations
 
-import bisect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
 import numpy.typing as npt
 
+from immersive.audio.compiled import kernel, read
 from immersive.audio.dsp import (
     IMPLICIT_FADE,
     Samples,
@@ -41,9 +41,20 @@ from immersive.audio.dsp import (
     pan_law,
 )
 from immersive.audio.hrtf.bank import Bank
-from immersive.audio.spatial import Space
+from immersive.audio.spatial import POINT, Space, Weighed
+from immersive.core.io.loudness import StemSpectra, measure
 from immersive.core.io.media import Decoded
-from immersive.core.model import Clip, Fade, FadeShape, Project, audible
+from immersive.core.model import (
+    Channel,
+    Clip,
+    Fade,
+    FadeShape,
+    Position,
+    Project,
+    audible,
+    paired,
+    sides,
+)
 
 Audio = npt.NDArray[np.float32]
 
@@ -54,6 +65,16 @@ Sides = tuple[float, float, float, float]
 #: What `fill()` wrote, as bits: the stereo rows, the mono row.
 STEREO = 1
 MONO = 2
+
+#: A snapshot's clips as a table a kernel reads (D-140), a row per clip, in
+#: each lane's order: where it sits on the timeline, where it starts in its
+#: sample, the sample's address, frames and channels (all 0 when it is not
+#: here), and its fades' tables' addresses and lengths (0 for none).
+START, END, OFFSET, ADDRESS, FRAMES, CHANNELS = 0, 1, 2, 3, 4, 5
+HEAD, HEAD_LENGTH, TAIL, TAIL_LENGTH = 6, 7, 8, 9
+COLUMNS = 10
+
+Table = npt.NDArray[np.int64]
 
 
 @dataclass(frozen=True, eq=False)
@@ -73,11 +94,13 @@ class Placed:
 
 @dataclass(frozen=True, eq=False)
 class Lane:
-    """One channel's clips, in order, and their ends for the search."""
+    """One channel's clips, in order: as `Placed`, which hold the arrays
+    alive, and as their rows of the snapshot's table, which a kernel reads."""
 
     channel_id: str
     clips: tuple[Placed, ...]
-    ends: tuple[int, ...]
+    table: Table = field(repr=False)
+    gains: npt.NDArray[np.float64] = field(repr=False)
 
 
 @dataclass(frozen=True, eq=False)
@@ -97,11 +120,16 @@ class Snapshot:
     #: them, `(channels, 2)`: what it adds to the bus, for its meter (D-117).
     #: Raised by the engine, read and zeroed by `Engine.take_channel_peaks`.
     peaks: npt.NDArray[np.float64] = field(repr=False)
-    #: `(channels, 3)` each channel's position, metres; written by the
-    #: engine from `POSITION` commands after handover (D-121).
+    #: `(channels, 2, 3)` each channel's left and right side, metres - its
+    #: point twice when it is one (D-132); written by the engine from
+    #: `POSITION` commands after handover (D-121).
     positions: npt.NDArray[np.float64] = field(repr=False)
-    #: Each channel's row in `space`, or -1 for a channel played flat.
+    #: Each channel's row in `space` - its left side's, when it is a pair -
+    #: or -1 for a channel played flat.
     slots: tuple[int, ...] = ()
+    #: Whether each channel is heard as two sources, a pair (D-132): its
+    #: right side is the row after its left.
+    paired: tuple[bool, ...] = ()
     #: The spatial channels' buffers and the bank, or None: no bank yet,
     #: or every channel bypassed.
     space: Space | None = field(default=None, repr=False)
@@ -114,6 +142,34 @@ class Snapshot:
     master: npt.NDArray[np.float64] = field(
         default_factory=lambda: np.array([1.0, 1.0]), repr=False
     )
+    #: Every lane's clips as one table, each lane's rows from
+    #: `lane_first[lane]` to `lane_first[lane + 1]`, and each clip's gain
+    #: (D-140). It names arrays that `lanes` holds, so it is read only while
+    #: the snapshot is.
+    clips: Table = field(
+        default_factory=lambda: np.zeros((0, COLUMNS), dtype=np.int64), repr=False
+    )
+    clip_gains: npt.NDArray[np.float64] = field(
+        default_factory=lambda: np.zeros(0), repr=False
+    )
+    lane_first: npt.NDArray[np.int64] = field(
+        default_factory=lambda: np.zeros(1, dtype=np.int64), repr=False
+    )
+    #: `slots` and `paired` as arrays, which the block kernel reads.
+    slot_of: npt.NDArray[np.int64] = field(
+        default_factory=lambda: np.zeros(0, dtype=np.int64), repr=False
+    )
+    pairs_of: npt.NDArray[np.bool_] = field(
+        default_factory=lambda: np.zeros(0, dtype=np.bool_), repr=False
+    )
+
+
+def positioned(project: Project, channel: Channel) -> tuple[Position, Position]:
+    """Where a channel's two sides are heard from: its placement's, when it
+    is a pair, and its one point twice when it is not (D-132)."""
+    if paired(project, channel):
+        return sides(channel)
+    return channel.position, channel.position
 
 
 def even(gain: float) -> Sides:
@@ -179,26 +235,60 @@ def build(
     `audio`. With a `bank`, every channel not bypassed is spatial. On the UI
     thread only: it allocates freely."""
     frames = {media.id: media.frames for media in project.media_pool}
-    lanes = []
-    for channel in project.channels:
+    spatial = tuple(
+        index
+        for index, channel in enumerate(project.channels)
+        if bank is not None and not channel.hrtf_bypass
+    )
+    # Heard as two sources (D-132): a pair is not folded, so no fold.
+    pairs = tuple(
+        index in spatial and paired(project, channel)
+        for index, channel in enumerate(project.channels)
+    )
+    held: list[tuple[str, list[Placed]]] = []
+    for index, channel in enumerate(project.channels):
         placed = []
         for clip in channel.clips:
             decoded = audio(clip.media_id)
             head, tail = edges(clip, frames.get(clip.media_id, 0))
+            gain = db_to_gain(clip.gain_db)
+            if decoded is not None and index in spatial and not pairs[index]:
+                # Folded to a point, a stereo clip gets back what the
+                # folding loses (D-129); a mono one's fold is 1.
+                gain *= decoded.fold
             placed.append(
                 Placed(
                     start=clip.start,
                     end=clip.end,
                     offset=clip.offset,
-                    audio=decoded.audio if decoded is not None else None,
-                    gain=db_to_gain(clip.gain_db),
+                    # Read by address (D-140): C-contiguous float32, as a
+                    # decode leaves it; `require` copies only if not.
+                    audio=(
+                        np.require(decoded.audio, np.float32, "C")
+                        if decoded is not None
+                        else None
+                    ),
+                    gain=gain,
                     head=head,
                     tail=tail,
                 )
             )
-        lanes.append(
-            Lane(channel.id, tuple(placed), tuple(clip.end for clip in placed))
+        held.append((channel.id, placed))
+    rows = [row(clip) for _, placed in held for clip in placed]
+    clips = np.array(rows, dtype=np.int64).reshape(len(rows), COLUMNS)
+    clip_gains = np.array(
+        [clip.gain for _, placed in held for clip in placed], dtype=np.float64
+    )
+    lane_first = np.cumsum([0] + [len(placed) for _, placed in held]).astype(np.int64)
+    lanes = [
+        Lane(
+            channel_id,
+            tuple(placed),
+            clips[lane_first[index] : lane_first[index + 1]],
+            clip_gains[lane_first[index] : lane_first[index + 1]],
         )
+        for index, (channel_id, placed) in enumerate(held)
+    ]
     before = (
         {lane.channel_id: index for index, lane in enumerate(previous.lanes)}
         if previous is not None
@@ -206,15 +296,26 @@ def build(
     )
     targets = np.array(gains(project), dtype=np.float64).reshape(len(lanes), 4)
     positions = np.array(
-        [(c.position.x, c.position.y, c.position.z) for c in project.channels],
+        [
+            [(side.x, side.y, side.z) for side in positioned(project, channel)]
+            for channel in project.channels
+        ],
         dtype=np.float64,
-    ).reshape(len(lanes), 3)
-    spatial = tuple(
-        index
-        for index, channel in enumerate(project.channels)
-        if bank is not None and not channel.hrtf_bypass
-    )
-    slot_of = {index: slot for slot, index in enumerate(spatial)}
+    ).reshape(len(lanes), 2, 3)
+    sources: list[int] = []
+    sides: list[int] = []
+    spectra: list[Weighed] = []
+    bins = bank.nfft // 2 + 1 if bank is not None else 0
+    slot_of: dict[int, int] = {}
+    for index in spatial:
+        slot_of[index] = len(sources)
+        if pairs[index]:
+            sources += [index, index]
+            sides += [0, 1]
+            spectra.append(heard_as(project.channels[index], audio, bins))
+        else:
+            sources.append(index)
+            sides.append(POINT)
     return Snapshot(
         generation=previous.generation + 1 if previous is not None else 1,
         lanes=tuple(lanes),
@@ -223,15 +324,79 @@ def build(
         peaks=np.zeros((len(lanes), 2), dtype=np.float64),
         positions=positions,
         slots=tuple(slot_of.get(index, -1) for index in range(len(lanes))),
+        paired=pairs,
         space=(
-            Space.build(bank, spatial, positions, project.distance)
+            Space.build(
+                bank,
+                tuple(sources),
+                positions,
+                project.distance,
+                tuple(sides),
+                spectra,
+            )
             if bank is not None and spatial
             else None
         ),
         carry=tuple(before.get(channel.id, -1) for channel in project.channels),
         based_on=previous.generation if previous is not None else 0,
         master=np.array(master(project), dtype=np.float64),
+        clips=clips,
+        clip_gains=clip_gains,
+        lane_first=lane_first,
+        slot_of=np.array(
+            [slot_of.get(index, -1) for index in range(len(lanes))], dtype=np.int64
+        ),
+        pairs_of=np.array(pairs, dtype=np.bool_).reshape(len(lanes)),
     )
+
+
+def row(clip: Placed) -> list[int]:
+    """A clip's row of the table (D-140): its arrays by address, which the
+    `Placed` it came from keeps alive."""
+    audio, head, tail = clip.audio, clip.head, clip.tail
+    return [
+        clip.start,
+        clip.end,
+        clip.offset,
+        audio.ctypes.data if audio is not None else 0,
+        audio.shape[0] if audio is not None else 0,
+        audio.shape[1] if audio is not None else 0,
+        head.ctypes.data if head is not None else 0,
+        head.shape[0] if head is not None else 0,
+        tail.ctypes.data if tail is not None else 0,
+        tail.shape[0] if tail is not None else 0,
+    ]
+
+
+def heard_as(
+    channel: Channel, audio: Callable[[str], Decoded | None], bins: int
+) -> Weighed:
+    """A pair's left, right and shared spectra at the bank's `bins`, divided
+    by the stem as mixed (D-133): its clips' files' own, each weighted by
+    how much of its file the clip plays. A mono clip's three are its one."""
+    left = right = None
+    shared = None
+    for clip in channel.clips:
+        decoded = audio(clip.media_id)
+        if decoded is None or decoded.frames == 0:
+            continue
+        own = decoded.spectra if decoded.spectra is not None else measure(decoded.audio)
+        share = clip.length / decoded.frames
+        if left is None or right is None or shared is None:
+            left, right, shared = (
+                own.left * share,
+                own.right * share,
+                own.shared * share,
+            )
+        else:
+            left = left + own.left * share
+            right = right + own.right * share
+            shared = shared + own.shared * share
+    if left is None or right is None or shared is None:
+        return StemSpectra(np.ones(1), np.ones(1), np.zeros(1, dtype=np.complex128)).at(
+            bins
+        )
+    return StemSpectra(left, right, shared).at(bins)
 
 
 def empty() -> Snapshot:
@@ -243,7 +408,7 @@ def empty() -> Snapshot:
         targets=none,
         levels=none.copy(),
         peaks=np.zeros((0, 2), dtype=np.float64),
-        positions=np.zeros((0, 3), dtype=np.float64),
+        positions=np.zeros((0, 2, 3), dtype=np.float64),
     )
 
 
@@ -253,68 +418,102 @@ def fill(lane: Lane, t: int, left: Samples, right: Samples, mono: Samples) -> in
     where no clip of that kind plays. Which rows were written, as `STEREO`
     and `MONO` bits, so a silent channel can be passed over and a row no
     clip wrote is not read. A clip whose sample is not here plays silence,
-    and the rest of the lane plays."""
+    and the rest of the lane plays. `_fill`, compiled, on the lane's rows
+    of its snapshot's table."""
+    return int(_fill(lane.table, lane.gains, t, left, right, mono))
+
+
+@kernel
+def _fill(
+    table: Table,
+    gains: npt.NDArray[np.float64],
+    t: int,
+    left: Samples,
+    right: Samples,
+    mono: Samples,
+) -> int:
+    """`fill` for the clips in `table`, in order of their ends, reading each
+    sample through its address (D-140)."""
     size = left.shape[0]
     stop = t + size
-    clips = lane.clips
-    index = bisect.bisect_right(lane.ends, t)
+    clips = table.shape[0]
+    # The first clip ending after `t`: a binary search on the ends.
+    low, high = 0, clips
+    while low < high:
+        middle = (low + high) // 2
+        if t < table[middle, END]:
+            high = middle
+        else:
+            low = middle + 1
     wrote = 0
-    while index < len(clips):
-        clip = clips[index]
-        if clip.start >= stop:
+    for row in range(low, clips):
+        start = table[row, START]
+        if start >= stop:
             break
-        index += 1
-        sample = clip.audio
-        if sample is None:
-            continue
-        first = max(t, clip.start)
-        last = min(stop, clip.end)
-        read = clip.offset + (first - clip.start)
-        count = last - first
+        if table[row, ADDRESS] == 0:
+            continue  # not here: silence, and the rest of the lane plays
+        first = max(t, start)
+        count = min(stop, table[row, END]) - first
         at = first - t
-        if sample.shape[1] == 1:
+        channels = table[row, CHANNELS]
+        if channels == 1:
             if not wrote & MONO:
-                mono.fill(0)
+                mono[:] = 0.0
                 wrote |= MONO
-            _place(clip, mono[at : at + count], sample[read : read + count, 0], first)
+            _place(table, gains, row, mono, at, count, 0, first)
         else:
             if not wrote & STEREO:
-                left.fill(0)
-                right.fill(0)
+                left[:] = 0.0
+                right[:] = 0.0
                 wrote |= STEREO
-            _place(clip, left[at : at + count], sample[read : read + count, 0], first)
-            _place(
-                clip,
-                right[at : at + count],
-                sample[read : read + count, sample.shape[1] - 1],
-                first,
-            )
+            _place(table, gains, row, left, at, count, 0, first)
+            _place(table, gains, row, right, at, count, channels - 1, first)
     return wrote
 
 
-def _place(clip: Placed, into: Samples, samples: Samples, first: int) -> None:
-    """One side of `clip` from timeline sample `first`: its samples, at its
-    gain, through its fades."""
-    np.copyto(into, samples)
-    if clip.gain != 1.0:
-        np.multiply(into, clip.gain, out=into)
-    count = into.shape[0]
-    if clip.head is not None:
-        _envelope(into, clip.head, first - clip.start, count)
-    if clip.tail is not None:
-        length = clip.tail.shape[0]
-        _envelope(into, clip.tail, first - (clip.end - length), count)
+@kernel
+def _place(
+    table: Table,
+    gains: npt.NDArray[np.float64],
+    row: int,
+    into: Samples,
+    at: int,
+    count: int,
+    channel: int,
+    first: int,
+) -> None:
+    """One side of clip `row` into `into[at : at + count]`, from timeline
+    sample `first`: its samples, at its gain, through its fades. Reads stop
+    at the sample's own end, and anything past it is silence: an address is
+    not bounds-checked (D-140)."""
+    start, end = table[row, START], table[row, END]
+    frames, channels = table[row, FRAMES], table[row, CHANNELS]
+    address = table[row, ADDRESS]
+    begin = table[row, OFFSET] + (first - start)
+    heard = max(min(count, frames - begin), 0)
+    for i in range(heard):
+        into[at + i] = read(address, (begin + i) * channels + channel)
+    for i in range(heard, count):
+        into[at + i] = 0.0
+    gain = gains[row]
+    if gain != 1.0:
+        scale = np.float32(gain)
+        for i in range(count):
+            into[at + i] = into[at + i] * scale
+    head = table[row, HEAD_LENGTH]
+    if head > 0:
+        _envelope(into, at, count, table[row, HEAD], head, first - start)
+    tail = table[row, TAIL_LENGTH]
+    if tail > 0:
+        _envelope(into, at, count, table[row, TAIL], tail, first - (end - tail))
 
 
-def _envelope(row: Samples, table: Samples, into: int, count: int) -> None:
-    """Multiply the part of `row` that lies over `table` by it.
-
-    `into` is how far into the table the row's first sample is - negative
-    when the row begins before it - and `count` how long the row is.
-    """
-    begin = max(into, 0)
-    end = min(into + count, table.shape[0])
-    if begin >= end:
-        return
-    part = row[begin - into : end - into]
-    np.multiply(part, table[begin:end], out=part)
+@kernel
+def _envelope(
+    into: Samples, at: int, count: int, address: int, length: int, offset: int
+) -> None:
+    """Multiply the part of `into[at : at + count]` that lies over the fade
+    table at `address` by it. `offset` is how far into the table the row's
+    first sample is: negative when the row begins before it."""
+    for k in range(max(offset, 0), min(offset + count, length)):
+        into[at + k - offset] = into[at + k - offset] * read(address, k)

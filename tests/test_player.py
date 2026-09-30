@@ -20,6 +20,7 @@ import soundfile
 import immersive
 from hearing import Tape, listen
 from immersive.app import build_application
+from immersive.audio import engine as compiled
 from immersive.audio.device import Output, load_backend
 from immersive.audio.dsp import ramp_steps
 from immersive.audio.engine import RING
@@ -45,6 +46,29 @@ def player(backend: Backend) -> Player:
 # --------------------------------------------------------------------------- #
 # the stream
 # --------------------------------------------------------------------------- #
+
+
+def test_the_block_kernel_exists_before_any_stream_opens(
+    backend: Backend, player: Player, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compiled, or loaded, before the stream can call it (D-141): the
+    first Play after an install waits here, with no audio thread yet."""
+    order: list[str] = []
+    real_warm, real_stream = compiled.warm, backend.OutputStream
+
+    def warm(block: int = 512) -> None:
+        order.append(f"warm {block}")
+        real_warm(block)
+
+    def stream(**settings: object) -> Stream:
+        order.append("stream")
+        return real_stream(**settings)
+
+    monkeypatch.setattr(compiled, "warm", warm)
+    monkeypatch.setattr(backend, "OutputStream", stream)
+    assert player.play()
+
+    assert order == [f"warm {BLOCK}", "stream"]
 
 
 def test_the_stream_is_opened_at_48k_and_nothing_else(

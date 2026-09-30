@@ -321,6 +321,25 @@ def test_rolloff_master_gain_and_the_limiter_are_one_edit_each() -> None:
     assert view.limiter.isChecked()
 
 
+def keeping(project: Project) -> bool:
+    """The switch, read afresh: mypy would keep an assert's narrowing."""
+    return project.distance.keep_level
+
+
+def test_level_as_mixed_is_on_to_begin_with_and_one_edit() -> None:
+    window, _ = a_window()
+    project = window.document().project
+    view = project_view(window)
+    assert view.keep_level.isChecked() and keeping(project)
+    count = stacked(window)
+
+    view.keep_level.click()
+
+    assert not keeping(project) and stacked(window) == count + 1
+    window.document().undo()
+    assert keeping(project) and view.keep_level.isChecked()
+
+
 def test_the_hrtf_set_is_shown_by_its_title_and_names_m8() -> None:
     window, _ = a_window()
     view = project_view(window)
@@ -615,10 +634,19 @@ def test_a_channel_shows_what_its_header_edits_and_what_comes_later() -> None:
         "",
         "",
         "Snap",
+        "Pan",
+        "Mode",
         "Position X",
         "Position Y",
         "Position Z",
-        "Pan",
+        "Right X",
+        "Right Y",
+        "Right Z",
+        "Pivot X",
+        "Pivot Y",
+        "Pivot Z",
+        "Mirror",
+        "",
     ]
     channel = window.document().project.channels[1]
     assert view.heading() == "Channel" and view.name.text() == channel.name

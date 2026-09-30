@@ -7,7 +7,9 @@ the process.
 
 from __future__ import annotations
 
+import gc
 import sys
+from typing import Final
 
 from PySide6.QtWidgets import QApplication
 
@@ -17,6 +19,13 @@ from immersive.audio.player import Player
 from immersive.ui import theme, theme_menu
 from immersive.ui.main_window import MainWindow
 from immersive.ui.notices import Severity
+
+#: How long a thread may hold the GIL while another waits for it (D-39):
+#: 1 ms, not CPython's 5. It bounds each wait, and the audio thread waits
+#: once for every numpy call that releases the GIL, which with a busy UI
+#: is many a block (D-137): so this bounds each of those, and is not the
+#: whole of the answer.
+SWITCH_INTERVAL: Final = 0.001
 
 
 def build_application(argv: list[str] | None = None) -> QApplication:
@@ -34,6 +43,16 @@ def build_application(argv: list[str] | None = None) -> QApplication:
     return app
 
 
+def settle_memory() -> None:
+    """Collect what is garbage now, then freeze the rest (D-142): a later
+    collection scans only what was made since, where a full one of a
+    32-channel window's heap held the GIL for 67 ms, six blocks. Unfrozen
+    first, so what the previous project left in cycles is still freed."""
+    gc.unfreeze()
+    gc.collect()
+    gc.freeze()
+
+
 def run(
     argv: list[str] | None = None,
     *,
@@ -41,6 +60,10 @@ def run(
     block: str | None = None,
 ) -> int:
     """Start the GUI and block until it closes."""
+    # First, before the output is so much as looked for, so every stream
+    # this process opens is called under it (D-39). Here and not in
+    # build_application, which every test calls.
+    sys.setswitchinterval(SWITCH_INTERVAL)
     app = build_application(argv)
     # M9 phase 4: make the theme directory on a real launch, so there is
     # somewhere to put a .3dimtheme. Deliberately here rather than anywhere
@@ -62,9 +85,11 @@ def run(
             player = Player(backend, settled.output)
 
     window = MainWindow(player=player, unavailable=unavailable)
+    window.settle = settle_memory
     for problem in problems:
         window.notices().add(Severity.WARN, problem)
     window.show()
+    settle_memory()
     # The HRTF set, on a worker (D-120): here, where a real launch is, and
     # never in the window's constructor, where every test is.
     window.prepare_hrtf()

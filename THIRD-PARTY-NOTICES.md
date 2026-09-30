@@ -23,6 +23,10 @@ Keep this file current with `pyproject.toml`'s `dependencies`. It is checked by
 | [libsndfile](http://libsndfile.github.io/libsndfile/) (via soundfile) | LGPL-2.1 | Dynamically linked; see below |
 | [soxr](https://github.com/dofuuz/python-soxr) | LGPL-2.1 | Dynamically linked; see below |
 | [sofar](https://github.com/pyfar/sofar) | MIT | Reproduce the copyright notice |
+| [numba](https://numba.pydata.org/) | BSD-2-Clause | Reproduce the copyright notice |
+| [llvmlite](https://github.com/numba/llvmlite) (via numba) | BSD-2-Clause, and LLVM's Apache-2.0 WITH LLVM-exception for the LLVM it bundles | Reproduce both notices; the exception waives Apache-2.0's attribution for compiled output |
+| [rocket-fft](https://github.com/styfenschaer/rocket-fft) | BSD-3-Clause | Reproduce the copyright notice |
+| [pocketfft](https://github.com/mreineck/pocketfft) (via rocket-fft) | BSD-3-Clause | Reproduce the copyright notice |
 
 ### The LGPL components
 

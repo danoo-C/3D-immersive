@@ -72,6 +72,14 @@ project therefore opens in 0.23 s once the set has been prepared once.
 Preparing runs on a worker, shown in the info box, and a closed window
 stops it at its next chunk (`ui/hrtf.py`).
 
+**The bank is calibrated to flat** (D-128). After the transform, each
+direction's loudness to pink noise is read from its spectra, K-weighted as
+ITU-R BS.1770 weights loudness and summed over both ears. Every filter is
+then scaled so straight ahead is as loud as the same sound played flat, a
+response of 1 to both ears: +4.99 dB for SADIE II D1. Each direction's gain
+to that loudness is kept beside the filters as `evening`, −1.7 dB to +3.8 dB
+for SADIE, for a project that keeps its level as mixed (D-131).
+
 #### Buffer length must account for the ITD
 
 The ITD is applied as a frequency-domain phase ramp (see the per-block
@@ -199,6 +207,59 @@ A seek sets `H_prev = H` for the block after it, and so does a new
 snapshot's first block. The accumulator carries across a new snapshot when
 it is the same size, because it is sound already begun.
 
+**Level as mixed** (M4 phase 8, D-128 to D-131) changes what a placed
+channel's level is, not what it is heard from:
+
+- **A stereo clip's mono point** gets back what folding it loses, measured
+  once when its file is decoded and capped at +6 dB (D-129). The code's
+  `(L + R) / 2` is multiplied by the file's `fold`.
+- **Distance**, with the project's `distance.keep_level` on, never rises
+  above 1: `(ref / max(r, ref)) ** rolloff`. Off, it is D-21's law above.
+- **The filter**, with it on, blends each measurement scaled by its
+  `evening` gain, so every direction is as loud as the front. The ITD is
+  blended with the plain weights.
+- **The centre**: inside `min_distance` the filter fades towards 1 and the
+  ITD towards none, as `r / min_distance`, so at the listener the channel is
+  heard as it is (D-130). Flat's share of the delay is rounded to whole
+  samples. A fractional delay of a response that reaches Nyquist rings
+  through the whole transform and wraps, where the measured responses fall
+  away up there and stay compact.
+
+**A pair** (M4 phase 9, D-132 to D-134) is a placed channel heard as two
+sources, its left side and its right. It takes two slots, left then right:
+the mix copies the lane's left row into the first and its right row into
+the second, where one point averages them, and a mono clip asked to be two
+fills both with the same signal. Each slot has its own position, sent as
+`POSITION` with the side in the ring's seventh column, so moving one side is
+one command. `render` goes over the slots twice:
+
+1. directions, distances and the lookup; the filters; then each pair's gain
+   into both its targets;
+2. the ramped gains onto the rows, and the meters, a pair's left slot being
+   its channel's left meter and its right slot the right.
+
+- **The centre** fades each side to flat on its **own ear** only, the far
+  ear reaching silence, so a pair at the listener is the stem as mixed,
+  its left to the left ear and its right to the right, as bypass plays it
+  (D-134).
+- **The pair's gain** keeps it as loud as the stem as mixed at any
+  separation (D-133). Two sides apart add like unrelated signals and
+  together like the stem's own sides, so no one number is right. With
+  level as mixed on, the gain is `1 / √P`, `P` being the pair's K-weighted
+  power at the two ears read with the **stem's own spectra**: its left
+  power `S_LL`, its right `S_RR` and their cross spectrum `S_LR`, per bin,
+  over each ear's two filters `A` (left side) and `B` (right side):
+  `Σ S_LL|A|² + S_RR|B|² + 2 Re(S_LR · A · B̄)`. The spectra are measured
+  when a file is decoded, in the pass that measures its fold, and averaged
+  into the bank's bins over the channel's clips by length. The gain is
+  capped at +6 dB. Off, each side is at `1/√2`. A pair's clips are not
+  given their fold (D-129), since nothing of a pair is folded.
+
+32 paired stereo channels, 64 sources, take 3.2 ms a block on average and
+5.2 ms at the 99th percentile with level as mixed on (2.6 ms and 4.3 ms
+off), against 1.4 ms for the same 32 as points. Their pair gains are the
+0.6 ms between on and off.
+
 ### Cost estimate
 
 At 512 frames, `nfft` = 1024, 32 sources: one batched 64×1024 rFFT (two
@@ -236,7 +297,8 @@ What bypass switches off, and what it leaves alone:
 | Master gain and limiter | Everything positional |
 
 Stereo handling inverts: a spatialised stereo source is downmixed to a mono
-point (D-16), because a stereo file has no single position. A **bypassed**
+point (D-16), because a stereo file has no single position, unless its
+channel places its two sides as a pair (D-132). A **bypassed**
 stereo source keeps left and right intact — preserving that image is the whole
 reason the switch exists.
 
@@ -622,8 +684,14 @@ traced memory's peak by 2 KiB:
 - No allocation, no `append`, no f-strings, no `logging` inside `process()`.
 - No locks. UI→audio is the command ring; structural changes are an atomic
   snapshot swap.
-- `gc.freeze()` after load; explicit collection on the UI thread only.
+- `gc.freeze()` after load (D-142). The collector otherwise runs as Python
+  runs it: with the block compiled, steady playback makes no collection,
+  measured, so none is moved to the UI thread by hand.
 - Every numpy op writes into a preallocated buffer via `out=`.
+- **Compiled kernels run without numba's runtime** (D-138). A kernel that
+  tried to make an array would not compile, and a call makes no record for
+  each array it is handed, which with the runtime on was 48 bytes an array,
+  2.8 KiB a block for the spatial path.
 - **No ufunc broadcasts.** A `(B, 1)` ramp over a `(B, 2)` block allocates
   17 KiB behind `out=`, measured. Buffers are planar, one contiguous row per
   ear, and a ramp is applied a row at a time.
@@ -641,3 +709,23 @@ N-1 is the tripwire. If it fails on target hardware, the port is
 `pybind11`/`nanobind` extension or a Rust `cffi` module, with the same
 signature. `core/` and `ui/` are untouched. Nothing above this file needs to
 know it happened.
+
+⚠️ **Measured at M4 phase 10, the tripwire was not where it was expected.**
+N-1's throughput passes with room: 32 sources take a p99 of 3.0 ms of the
+10.67 (D-136). What fails is contention, which N-2 guards. The engine waits
+for the GIL once for every numpy call over 500 elements, about 90 times a
+block for 32 sources. So while the UI thread runs Python, a block is late
+by about that many switch intervals, whatever the interval is (D-137). The
+port above answers that too, if the extension releases the GIL for the
+whole block rather than call by call. So would an engine in a process of
+its own, with no port. And "a few hundred lines" is stale: by the end of
+M4 the engine, the spatial path, the scheduler's reads and the limiter are
+about 1,800 lines, docstrings included.
+
+**What was built instead** (D-138 to D-141): the block compiled by numba
+from the engine's own Python, one kernel a block that releases the GIL for
+all of it, so the callback waits for the GIL once. With the window
+repainting without pause, 32 moving sources miss 1 block in 2255 at 1 ms,
+where they missed 413 of 417. And 32 sources take a p99 of 0.8 ms, 8% of
+the budget. The seam is where it was: `Engine.process`, now bookkeeping in
+Python and one call into `_block`.

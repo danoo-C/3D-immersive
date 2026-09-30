@@ -35,6 +35,12 @@ a source dragged onto the head does not blow up. Attenuation is then
 `(ref_distance / r) ** rolloff` — `rolloff` 1.0 is the physically correct
 inverse-distance law, and lower values soften it (D-21).
 
+With `distance.keep_level` on, as it is unless a project says otherwise,
+`r` is clamped to `ref_distance` instead: nothing is louder for being nearer
+than 1 m, and every direction is as loud as the front (D-131). Inside
+`min_distance` a source is faded towards its flat self as `r` falls, so at
+the origin it is heard as it is, with no direction at all (D-130).
+
 ## Time
 
 The single source of truth for time is **samples, int64, at the project rate**.
@@ -95,7 +101,7 @@ Project
 ├── time_signature   [num, den]
 ├── snap             SnapSetting            global default
 ├── hrtf             HrtfRef
-├── distance         { rolloff, min_distance, ref_distance }
+├── distance         { rolloff, min_distance, ref_distance, keep_level }
 ├── master           { gain_db, limiter_on }
 ├── loop             { start, end } or null  where the transport loops (D-108)
 ├── media_pool       [MediaFile]
@@ -121,7 +127,11 @@ Channel
 ├── hrtf_bypass      bool   true → straight to the stereo bus, unprocessed
 ├── pan              float  -1 left … 0 centre … +1 right; bypass only
 ├── snap_override    null → inherit Project.snap
-├── position         { x, y, z }            used where no automation exists
+├── position         { x, y, z }            used where no automation exists;
+│                                           a pair's left side (D-132)
+├── placement        { mode, right, pivot, mirrored, mono }
+│                      point, free or linked: how a stereo channel's two
+│                      sides are placed (D-132)
 ├── automation       { "pos.x": Curve, "pos.y": Curve, "pos.z": Curve,
 │                      "gain": Curve, "pan": Curve }   any key may be absent
 └── clips            [Clip]                 sorted by start, never overlapping
@@ -253,6 +263,17 @@ another's time is a collision to resolve, not a reordering.
 - `pan` is meaningful only under bypass. On a mono source it is a
   constant-power pan; on a stereo source it is a balance, attenuating the
   opposite side rather than folding the image.
+- **A channel's placement** (D-132) says how its sides are heard. `point`
+  folds a stereo clip to `position`, as before M4 phase 9. `free` and
+  `linked` make it two sources, its left at `position`: `free` puts its
+  right at `right`, and `linked` derives it as
+  `pivot + S · (position − pivot)`, `S` being −1 on each `mirrored` axis and
+  +1 on the others, so a linked pair's `right` is stored but not heard.
+  `mono` makes a mono clip a pair of the same signal; otherwise a channel
+  holding only mono clips is one point whatever its mode. A new channel is
+  `linked`, mirroring X about the listener. A file without `placement`
+  reads as `point`, which is how every file before M4 phase 9 sounded. Like
+  `position`, it is inactive but preserved under bypass.
 - **Solo is additive** (D-62): several channels can be soloed at once, and
   while any of them is, every non-soloed channel is silent. A channel that is
   both soloed and muted stays muted — mute is the more deliberate gesture, and
@@ -279,9 +300,11 @@ move between two points on opposite sides of the listener therefore travels in
 a straight line **through the origin**, not around it.
 
 The 0.2 m clamp (see *Coordinate system*) stops the distance gain from blowing
-up, but the perceived direction still flips abruptly as the source crosses from
-one side to the other. This is expected behaviour, not a bug — it is a direct
-consequence of having no motion-path presets in v1 (D-25).
+up. Since M4 the direction no longer flips as the source crosses from one side
+to the other: inside `min_distance` it fades to the source's flat self, so the
+crossing passes through the middle (D-130). It still goes through the listener,
+not around, which is a direct consequence of having no motion-path presets in
+v1 (D-25).
 
 The fix, when path presets arrive, is **orbit interpolation**: interpolating
 azimuth and radius rather than cartesian coordinates, so a source moving from
@@ -313,7 +336,7 @@ git-friendliness D-13 was for. The filesystem already knows.
   "time_signature": [4, 4],
   "snap": { "enabled": true, "division": "1/16", "triplet": false },
   "hrtf": { "kind": "builtin", "id": "sadie-d1" },
-  "distance": { "rolloff": 1.0, "min_distance": 0.2, "ref_distance": 1.0 },
+  "distance": { "rolloff": 1.0, "min_distance": 0.2, "ref_distance": 1.0, "keep_level": true },
   "master": { "gain_db": 0.0, "limiter_on": true },
   "loop": { "start": 0, "end": 384000 },
   "media_pool": [
@@ -335,6 +358,9 @@ git-friendliness D-13 was for. The filesystem already knows.
       "hrtf_bypass": false, "pan": 0.0,
       "snap_override": null,
       "position": { "x": 0.0, "y": 1.5, "z": 0.0 },
+      "placement": { "mode": "point", "right": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                     "pivot": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                     "mirrored": [true, false, false], "mono": false },
       "automation": {
         "pos.x": { "keyframes": [
           { "t": 0,      "value": -2.0, "interp": "ease",
@@ -357,7 +383,10 @@ git-friendliness D-13 was for. The filesystem already knows.
       "gain_db": 0.0, "mute": false, "solo": false,
       "hrtf_bypass": true, "pan": 0.0,
       "snap_override": null,
-      "position": { "x": 0.0, "y": 1.0, "z": 0.0 },
+      "position": { "x": -0.5, "y": 1.0, "z": 0.0 },
+      "placement": { "mode": "linked", "right": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                     "pivot": { "x": 0.0, "y": 1.0, "z": 0.0 },
+                     "mirrored": [true, false, false], "mono": false },
       "automation": {},
       "clips": [
         {

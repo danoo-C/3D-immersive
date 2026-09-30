@@ -34,6 +34,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from immersive.audio import engine as compiled
 from immersive.audio.device import CHANNELS, Output
 from immersive.audio.engine import Engine, Voice
 from immersive.core.time import SAMPLE_RATE
@@ -159,6 +160,11 @@ class Player:
     def _open(self) -> bool:
         if self._stream is not None:
             return True
+        # The block kernel exists before any stream can call it (D-141): the
+        # HRTF worker has usually compiled it, and if not, the first Play
+        # after an install waits for it here, before there is an audio
+        # thread to miss a block.
+        compiled.warm(self._output.block)
         self._lost = False
         try:
             stream = self._backend.OutputStream(

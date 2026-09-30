@@ -154,6 +154,7 @@ def test_an_impulse_at_a_measured_direction_is_that_directions_pair(bank: Bank) 
     vertex = int(np.argmax(bank.directions[:, 0]))  # the most +X measurement
     direction = tuple(float(v) for v in bank.directions[vertex])
     project, store = empty()
+    project.distance.keep_level = False  # the pair as measured, not evened (D-131)
     channel_with(project, store, impulse(), direction)  # type: ignore[arg-type]
 
     heard = played(project, store, bank, 3)
@@ -200,15 +201,31 @@ def test_ahead_both_ears_hear_alike_and_either_side_is_heard_there(bank: Bank) -
 def test_distance_follows_its_law_and_stops_at_the_minimum(
     bank: Bank, rolloff: float
 ) -> None:
-    def level(distance: float) -> float:
+    def project_at(distance: float) -> tuple[Project, dict[str, Decoded]]:
         project, store = empty()
         project.distance.rolloff = rolloff
+        project.distance.keep_level = False  # D-21's own law (D-131)
         channel_with(project, store, impulse(), (0.0, distance, 0.0))
-        return float(np.sqrt(np.mean(played(project, store, bank, 3) ** 2)))
+        return project, store
+
+    def level(distance: float) -> float:
+        return float(np.sqrt(np.mean(played(*project_at(distance), bank, 3) ** 2)))
+
+    def metered(distance: float) -> float:
+        """The gain reached, read where the meter reads it: after distance,
+        before the filter - which fades to flat in the centre (D-130)."""
+        project, store = project_at(distance)
+        engine = Engine(BLOCK)
+        engine.install(build(project, store.get, None, bank))
+        engine.set_playing(True)
+        engine.process(np.zeros((BLOCK, 2), dtype=np.float32))
+        [(_, left, _)] = engine.take_channel_peaks()
+        return left
 
     halved = 20 * np.log10(level(1.0) / level(2.0))
     assert halved == pytest.approx(rolloff * 6.0206, abs=0.01)
-    assert level(0.1) == pytest.approx(level(0.2)), "inside min_distance, no louder"
+    assert metered(0.1) == pytest.approx(metered(0.2)), "inside min_distance, no louder"
+    assert metered(0.2) == pytest.approx(5.0**rolloff), "(1 m / 0.2 m) ** rolloff"
 
 
 def test_four_channels_together_are_the_four_alone_added(bank: Bank) -> None:
@@ -279,7 +296,30 @@ def test_a_position_sent_is_heard_at_the_next_block(bank: Bank) -> None:
     engine.send_position(snapshot.generation, 0, 2.0, 0.0, 0.0)
     engine.send_position(snapshot.generation + 5, 0, 9.0, 9.0, 9.0)  # stale: dropped
     engine.process(out)
-    np.testing.assert_array_equal(snapshot.positions[0], [2.0, 0.0, 0.0])
+    np.testing.assert_array_equal(snapshot.positions[0, 0], [2.0, 0.0, 0.0])
+
+
+def test_the_engines_generation_is_the_snapshot_the_next_block_plays(
+    bank: Bank,
+) -> None:
+    """A position sent with `Engine.generation` straight after an install
+    is heard, not dropped as the old snapshot's: how the benchmark moves
+    sources without a feed (M4 phase 10)."""
+    project, store = empty()
+    channel_with(project, store, np.full(8 * BLOCK, 0.2), (0.0, 1.0, 0.0))
+    engine = Engine(BLOCK)
+    first = build(project, store.get, None, bank)
+    engine.install(first)
+    engine.set_playing(True)
+    out = np.zeros((BLOCK, 2), dtype=np.float32)
+    engine.process(out)
+    second = build(project, store.get, first, bank)
+    engine.install(second)
+
+    assert engine.generation == second.generation != first.generation
+    engine.send_position(engine.generation, 0, 2.0, 0.0, 0.0)
+    engine.process(out)
+    np.testing.assert_array_equal(second.positions[0, 0], [2.0, 0.0, 0.0])
 
 
 def after_moving_and_seeking(

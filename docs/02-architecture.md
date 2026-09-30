@@ -21,6 +21,13 @@ Two things make that risk acceptable:
    untouched. The reverse rescue — making a C++ project iterate quickly — does
    not exist.
 
+M4 phase 10 measured the risk. Throughput has room: N-1 passes at 28% of
+the budget (D-136). The GIL is the real risk. With the UI thread busy, the
+audio thread waited for it at every numpy call, and a window repainting
+without pause cost it nearly every block (D-137). Phases 11 and 12 compiled
+the block with numba, one kernel that releases the GIL for all of it
+(D-138): the same load now costs 1 block in 2255.
+
 ## Layering
 
 ```
@@ -49,6 +56,8 @@ individual files are the map.
 src/immersive/
   __main__.py            python -m immersive
   app.py                 wiring: build model, engine, window
+  benchmark.py           N-1's block times, the switch interval under load, and
+                         the live xrun count (D-136, D-137, M4)
 
   core/
     model.py             Project, Channel, Clip, MediaFile  (plain dataclasses)
@@ -75,7 +84,9 @@ src/immersive/
     device.py            sounddevice stream lifecycle, device enumeration
     scheduler.py         timeline → which clips are active this block
     spatial.py           each non-bypassed channel heard from where it is
-                         (D-121, D-122, M4)
+                         (D-121, D-122, M4); compiled (D-138)
+    compiled.py          how the audio thread's work is compiled: without the
+                         GIL, cached, no runtime (D-138, D-139, M4)
     dsp.py               gain, pan, fades, resampling
     limiter.py           the master limiter, and the latency it costs
                          (D-123, D-124, M4)
@@ -347,7 +358,8 @@ feed, on the UI thread, that frees one.
 ### Keeping the callback honest
 
 - All buffers preallocated at stream start; every numpy op uses `out=`.
-- `gc.freeze()` after project load; GC runs explicitly on the UI thread.
+- `gc.freeze()` after project load (D-142); with the block compiled, steady
+  playback makes no collection, so GC is otherwise left as Python runs it.
 - No `try`/logging/string formatting inside `process()`.
 - An xrun counter is exposed in the UI so dropouts are visible, not mysterious.
 
@@ -390,6 +402,7 @@ command on mouse-release, coalescing the intermediate states.
 | `soundfile` | libsndfile decode/encode |
 | `soxr` | high-quality resampling |
 | `sofar` | SOFA HRIR loading |
+| `numba`, `rocket-fft` | the engine's block compiled, releasing the GIL while it runs; rocket-fft gives numba pocketfft's transforms into arrays made once (D-138) |
 | `pytest`, `pytest-qt` | tests |
 | `ruff`, `mypy` | lint, types |
 | `pyinstaller` | packaging |

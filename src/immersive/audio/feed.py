@@ -31,9 +31,16 @@ from collections.abc import Callable, Hashable
 
 from immersive.audio.engine import Engine
 from immersive.audio.hrtf.bank import Bank
-from immersive.audio.scheduler import Sides, Snapshot, build, gains, master
+from immersive.audio.scheduler import (
+    Sides,
+    Snapshot,
+    build,
+    gains,
+    master,
+    positioned,
+)
 from immersive.core.io.media import Decoded
-from immersive.core.model import Project
+from immersive.core.model import Project, paired
 
 
 def structure(project: Project, audio: Callable[[str], Decoded | None]) -> Hashable:
@@ -61,10 +68,13 @@ def structure(project: Project, audio: Callable[[str], Decoded | None]) -> Hasha
             for channel in project.channels
         ),
         tuple(channel.hrtf_bypass for channel in project.channels),
+        # How many sources a channel is, one or two (D-132).
+        tuple(paired(project, channel) for channel in project.channels),
         (
             project.distance.rolloff,
             project.distance.min_distance,
             project.distance.ref_distance,
+            project.distance.keep_level,
         ),
         tuple(
             (media.id, media.frames, id(decoded) if decoded is not None else None)
@@ -74,9 +84,22 @@ def structure(project: Project, audio: Callable[[str], Decoded | None]) -> Hasha
     )
 
 
-def positions(project: Project) -> list[tuple[float, float, float]]:
-    """Each channel's position, metres, in the order of its lane."""
-    return [(c.position.x, c.position.y, c.position.z) for c in project.channels]
+Point = tuple[float, float, float]
+
+
+def positions(project: Project) -> list[tuple[Point, Point | None]]:
+    """Each channel's left side, or its one point, and its right side when it
+    is a pair (D-132), metres, in the order of its lane."""
+    found: list[tuple[Point, Point | None]] = []
+    for channel in project.channels:
+        left, right = positioned(project, channel)
+        found.append(
+            (
+                (left.x, left.y, left.z),
+                (right.x, right.y, right.z) if paired(project, channel) else None,
+            )
+        )
+    return found
 
 
 class Feed:
@@ -90,7 +113,7 @@ class Feed:
         self._snapshot: Snapshot | None = None
         self._structure: Hashable = None
         self._gains: list[Sides] = []
-        self._positions: list[tuple[float, float, float]] = []
+        self._positions: list[tuple[Point, Point | None]] = []
         self._master: tuple[float, float] = (1.0, 1.0)
         #: The HRTF bank, once the window has one (D-120).
         self._bank: Bank | None = None
@@ -129,7 +152,7 @@ class Feed:
     def _sent(
         self,
         heard: list[Sides],
-        placed: list[tuple[float, float, float]],
+        placed: list[tuple[Point, Point | None]],
         overall: tuple[float, float],
     ) -> bool:
         """Each changed gain and position, and the master if it changed,
@@ -143,8 +166,13 @@ class Feed:
         for index, (before, where) in enumerate(
             zip(self._positions, placed, strict=True)
         ):
-            if before != where and not engine.send_position(generation, index, *where):
-                return False
+            for side, (sent, moved) in enumerate(zip(before, where, strict=True)):
+                if (
+                    moved is not None
+                    and sent != moved
+                    and not engine.send_position(generation, index, *moved, side=side)
+                ):
+                    return False
         if overall != self._master:
             level, limiter = overall
             return engine.send_master(generation, level, bool(limiter))
