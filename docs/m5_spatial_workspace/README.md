@@ -8,7 +8,7 @@ D-135 · Workflow: [09-workflow.md](../09-workflow.md)
 
 | Phase | Status |
 |---|---|
-| [1 — The ortho views, drawn](phase_1_ortho_views.md) | in progress |
+| [1 — The ortho views, drawn](phase_1_ortho_views.md) | ✅ |
 | [2 — Dragging, heard](phase_2_dragging.md) | not started |
 | [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | not started |
 | [4 — The 3D view](phase_4_view3d.md) | not started |
@@ -85,3 +85,10 @@ phase's first decision.
 ## Notes
 
 Appended as phases complete.
+
+**Phase 1.** The top and front views replace their placeholders: the head,
+rings a metre apart in the top view, lines of height in the front, and
+every channel's point or pair where its position puts it. A click selects,
+and the selected are ringed and drawn on top. They share one scale, zoomed
+by scroll and panned by middle-drag (D-143), and keys 1 to 3 focus them.
+

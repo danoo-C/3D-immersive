@@ -26,20 +26,22 @@ solo, the bypass strip → phase 3. The 3D view → phase 4.
 
 ## Acceptance
 
-- [ ] A channel at (1, 2, 0) is drawn 1 m right of and 2 m ahead of the
+- [x] A channel at (1, 2, 0) is drawn 1 m right of and 2 m ahead of the
       head in the top view, and 1 m right at ear level in the front view,
       at whatever zoom and pan, within a pixel. *`test_ortho_view.py`.*
-- [ ] A linked or free pair is two points, each where its side is, joined
+- [x] A linked or free pair is two points, each where its side is, joined
       by a line in the channel's colour. A bypassed channel is not drawn.
-- [ ] A click on an icon selects its channel, and a click on empty space
+- [x] A click on an icon selects its channel, and a click on empty space
       clears the selection. The selected channel's icon is ringed and
       drawn over the others.
-- [ ] Scroll zooms about the pointer, which keeps the metre under it in
+- [x] Scroll zooms about the pointer, which keeps the metre under it in
       place, and middle-drag pans. Both stay within limits the plan sets.
-- [ ] Keys 1 and 2 focus the top and front views, and 3 selects the 3D
+      *2 m to 200 m across (D-143).*
+- [x] Keys 1 and 2 focus the top and front views, and 3 selects the 3D
       tab.
-- [ ] The views read their colours from the theme, and a theme switch
-      repaints them. Offscreen grabs of both views are recorded.
+- [x] The views read their colours from the theme, and a theme switch
+      repaints them. Offscreen grabs of both views are recorded. *Looked
+      at; see the Notes.*
 
 ## Implements
 
@@ -49,3 +51,23 @@ tabbed* in [04-ui-spec.md](../04-ui-spec.md); D-49.
 ## Notes
 
 Appended while building.
+
+**Built (2026-09-30)** in four steps: the shared scale, the view drawn,
+selecting, and the views in the window.
+
+**The front view has lines of height.** The first grab of it showed
+nothing to judge height by but the ear-level line, and height is what the
+front view is for dragging. So it draws a faint line every metre of height,
+labelled, as the top view draws rings, and ear level is stronger. 04's
+front view says so. The same grab showed a source at the listener's own
+position covering the head glyph, which is where it is, and is left so.
+
+**Looked at.** Grabs of both views with a linked pair, a free pair, two
+points, a source in the centre, a selected channel and a bypassed one; and
+of the whole window, where the selected channel is ringed in both views and
+marked in its header and the pane at once.
+
+**What D-143 shares.** Metres across a view's shorter side, not pixels per
+metre, so "8 m across" holds in each view whatever its size. Two views of
+the same size, as the splitter starts them, are then the same scale in
+pixels too.

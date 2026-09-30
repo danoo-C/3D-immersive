@@ -1,6 +1,6 @@
 # Plan — M5 · Phase 1 — The ortho views, drawn
 
-**Written:** 2026-09-30 · **Status:** in progress
+**Written:** 2026-09-30 · **Status:** ✅ built
 
 ## Approach
 
@@ -130,4 +130,17 @@ the pointer; middle-drag pans, scroll zooms.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, with one thing added and one merged:
+
+- **The front view has lines of height**, a metre apart, and ear level is
+  stronger. The grab showed there was nothing else to judge height by.
+- **Selecting came with the view**: the view's step and the selecting step
+  were committed together, since the click lands on the icons the view
+  draws.
+
+Fifteen mutations were run, all fifteen named, and all were caught the
+first time.
+
+What phase 2 needs: `OrthoView.icon_at` returns the side hit, 0 or 1 for a
+pair, so a drag knows which side leads. `Scale.metres` turns the pointer
+into metres in the view's plane.
