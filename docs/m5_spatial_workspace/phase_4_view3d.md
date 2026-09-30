@@ -1,6 +1,6 @@
 # M5 · Phase 4 — The 3D view
 
-**Status:** in progress · **Plan:** [plans/phase_4_view3d.md](plans/phase_4_view3d.md)
+**Status:** ✅ · **Plan:** [plans/phase_4_view3d.md](plans/phase_4_view3d.md)
 
 ## Goal
 
@@ -21,12 +21,13 @@ changes.
 
 ## Acceptance
 
-- [ ] A source at a known position is drawn where the projection puts it,
-      within a pixel, and above the grid by its height.
-- [ ] Sources are drawn back to front, so a nearer one covers a farther
-      one.
-- [ ] The view takes no mouse input that changes anything, and an
-      offscreen grab is recorded.
+- [x] A source at a known position is drawn where the projection puts it,
+      within a pixel, and above the grid by its height. *D-148's formula;
+      the drop line meets the ground straight below it.*
+- [x] Sources are drawn back to front, so a nearer one covers a farther
+      one. *And the head covers what is behind it.*
+- [x] The view takes no mouse input that changes anything, and an
+      offscreen grab is recorded. *Looked at; see the Notes.*
 
 ## Implements
 
@@ -35,3 +36,24 @@ changes.
 ## Notes
 
 Appended while building.
+
+**Built (2026-09-30)** in three steps: the projection and its fit, the
+drawing, and the view in its tab. The icons are drawn by one `draw_icon`
+that the ortho views now share, so the two cannot disagree about a
+glow, an opacity or a letter.
+
+**The first grab showed the scene small.** The fit kept room for heights
+of R above and below the ground, which only a source R high at the
+ground's far corner needs, so the ground took a third of the view. Up and
+down it now fits the sources farthest up and down the screen, in steps of
+a quarter of R, so it still holds still while a source moves. 04 says so.
+
+**A source at ear level has no drop line.** Its icon covers its own foot,
+which showed through a faint icon as a stray dot.
+
+**Looked at.** Standalone: a linked pair ahead, a source high on the
+right, one behind and low hanging under the ground, one high and ahead,
+a quiet one behind, and one in line with the head and nearer the camera,
+which covers it. In the window's tab with R at 8: a solo glowing, the
+silenced at a quarter, the selected ringed, and a bypassed channel
+absent.

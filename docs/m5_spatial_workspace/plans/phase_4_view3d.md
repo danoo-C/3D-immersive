@@ -1,6 +1,6 @@
 # Plan — M5 · Phase 4 — The 3D view
 
-**Written:** 2026-09-30 · **Status:** in progress
+**Written:** 2026-09-30 · **Status:** ✅ built
 
 ## Approach
 
@@ -21,8 +21,9 @@ square of ground about it, from −R to +R metres in X and Y. R is the
 smallest of 2, 4, 8, 16 ... metres that holds every placed source in X, Y
 and Z, so the view rescales only when a source crosses a step, not as it
 moves. `s` fits the ground's diamond, and heights of ±R above and below
-it, inside the view with a margin. There is no zoom and no pan, since the
-view has no controls (04).
+it, inside the view with a margin. *(Built otherwise: up and down it fits
+the sources, in quarters of R. See the Outcome.)* There is no zoom and no
+pan, since the view has no controls (04).
 
 **What is drawn**, back to front:
 
@@ -114,4 +115,17 @@ their left, the head at its centre and the ground fitted in steps.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, with one change the first grab asked for: the fit kept
+room for heights of ±R, which only a source R high at the ground's far
+corner needs, and the ground filled a third of the view. Up and down it
+now fits the source farthest up or down the screen, in steps of a quarter
+of R, so the view still holds still while a source moves within a step.
+`depth` became a module function, `nearness`, since a widget's `depth()`
+is Qt's own.
+
+Twelve mutations were run, the eleven named and one more, *no drop
+lines*, caught by the drop line's foot. All were caught the first time.
+
+What phase 5 needs: three views that repaint on every edit and every
+movement of a drag, and the 3D view that repaints only while its tab is
+shown.

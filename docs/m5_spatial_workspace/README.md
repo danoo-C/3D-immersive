@@ -11,7 +11,7 @@ D-135 · Workflow: [09-workflow.md](../09-workflow.md)
 | [1 — The ortho views, drawn](phase_1_ortho_views.md) | ✅ |
 | [2 — Dragging, heard](phase_2_dragging.md) | ✅ |
 | [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | ✅ |
-| [4 — The 3D view](phase_4_view3d.md) | in progress |
+| [4 — The 3D view](phase_4_view3d.md) | ✅ |
 | [5 — Measured with the views playing](phase_5_measured.md) | not started |
 | [6 — Heard](phase_6_heard.md) | not started |
 
@@ -102,3 +102,9 @@ window too, where it is also Stop, and an edit made mid-drag drops it.
 and a channel not heard, muted or silenced by a solo, is at a quarter; a
 soloed one glows (D-146). Bypassed channels are chips in a strip under the
 top view, wrapping into rows, hidden when there are none (D-147).
+
+**Phase 4.** The 3D tab shows the scene from a fixed true isometric camera
+behind the listener and to their left (D-148): the ground at ear level,
+stepped to hold every source, a drop line for each source's height, and
+the icons drawn farthest first by the ortho views' own rules. It takes no
+input.
