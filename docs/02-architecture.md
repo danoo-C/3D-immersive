@@ -82,7 +82,9 @@ src/immersive/
     device.py            sounddevice stream lifecycle, device enumeration
     scheduler.py         timeline → which clips are active this block
     spatial.py           each non-bypassed channel heard from where it is
-                         (D-121, D-122, M4)
+                         (D-121, D-122, M4); compiled (D-138)
+    compiled.py          how the audio thread's work is compiled: without the
+                         GIL, cached, no runtime (D-138, D-139, M4)
     dsp.py               gain, pan, fades, resampling
     limiter.py           the master limiter, and the latency it costs
                          (D-123, D-124, M4)

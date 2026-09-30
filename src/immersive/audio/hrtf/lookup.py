@@ -28,9 +28,9 @@ from typing import Final, overload
 
 import numpy as np
 import numpy.typing as npt
-from numba import njit
 from scipy.spatial import ConvexHull, cKDTree
 
+from immersive.audio.compiled import kernel
 from immersive.core.progress import Part
 
 #: Cells along each edge of each of the cube map's six faces.
@@ -193,7 +193,7 @@ class Lookup:
             )
 
 
-@njit(cache=True, nogil=True)
+@kernel
 def locate(
     faces: npt.NDArray[np.int64],
     inverses: npt.NDArray[np.float64],
@@ -233,7 +233,7 @@ def locate(
     return face, max(a, 0.0), max(b, 0.0), c if c > 0.0 else 1e-12
 
 
-@njit(cache=True, nogil=True)
+@kernel
 def _coordinates(
     inverses: npt.NDArray[np.float64], face: int, x: float, y: float, z: float
 ) -> tuple[float, float, float]:
@@ -245,7 +245,7 @@ def _coordinates(
     )
 
 
-@njit(cache=True, nogil=True)
+@kernel
 def _cell(x: float, y: float, z: float, cells: int) -> int:
     """The cube-map cell `(x, y, z)` falls in: its largest component picks
     the cube face and its sign, and the other two, divided by it, the cell."""
