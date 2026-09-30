@@ -22,6 +22,7 @@ class Recorded:
 
     def __init__(self) -> None:
         self.steps: list[tuple[str, float]] = []
+        self.windows: list[Any] = []
 
     def step(self, name: str) -> None:
         self.steps.append((name, sys.getswitchinterval()))
@@ -48,6 +49,8 @@ def recorded(monkeypatch: pytest.MonkeyPatch) -> Recorded:
     class Window:
         def __init__(self, player: Any, unavailable: str) -> None:
             record.step("window")
+            self.settle: Any = None
+            windows.append(self)
 
         def notices(self) -> Any:
             raise AssertionError("nothing was said")
@@ -65,6 +68,12 @@ def recorded(monkeypatch: pytest.MonkeyPatch) -> Recorded:
         record.step("backend")
         return object()
 
+    def settle_memory() -> None:
+        record.step("settle")
+
+    windows: list[Any] = []
+    record.windows = windows
+
     # The interval is read back through the recorder, not the interpreter's:
     # the test process keeps CPython's default.
     monkeypatch.setattr(sys, "setswitchinterval", set_interval)
@@ -77,6 +86,7 @@ def recorded(monkeypatch: pytest.MonkeyPatch) -> Recorded:
     )
     monkeypatch.setattr(app, "Player", Player)
     monkeypatch.setattr(app, "MainWindow", Window)
+    monkeypatch.setattr(app, "settle_memory", settle_memory)
     return record
 
 
@@ -86,7 +96,7 @@ def test_the_switch_interval_is_1_ms_before_the_output_is_looked_for(
     assert app.run([]) == 0
 
     names = [name for name, _ in recorded.steps]
-    assert names == ["switch interval", "backend", "player", "window", "exec"]
+    assert names == ["switch interval", "backend", "player", "window", "settle", "exec"]
     assert app.SWITCH_INTERVAL == 0.001
     for name, interval in recorded.steps[1:]:
         assert interval == 0.001, f"{name} ran at {interval}"
@@ -102,3 +112,38 @@ def test_building_the_application_leaves_the_interval_alone(
     app.build_application([])
 
     assert calls == []
+
+
+def test_a_launch_settles_memory_once_the_window_is_up_and_after_each_load(
+    recorded: Recorded,
+) -> None:
+    """D-142: the window is given the launch's `settle_memory`, which it
+    calls after New and Open, and the launch calls it once the window is
+    shown."""
+    app.run([])
+
+    [window] = recorded.windows
+    assert window.settle is app.settle_memory
+    assert [name for name, _ in recorded.steps].count("settle") == 1
+
+
+def test_settling_memory_collects_then_freezes() -> None:
+    """What was garbage in a cycle is freed, and what is left is frozen, so
+    a later collection passes it by. Unfrozen after, for the tests that
+    follow in this process."""
+    import gc
+    import weakref
+
+    class Node:
+        other: object = None
+
+    first, second = Node(), Node()
+    first.other, second.other = second, first
+    gone = weakref.ref(first)
+    del first, second
+    try:
+        app.settle_memory()
+        assert gone() is None, "the cycle was collected"
+        assert gc.get_freeze_count() > 0
+    finally:
+        gc.unfreeze()

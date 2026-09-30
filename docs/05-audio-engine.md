@@ -684,7 +684,9 @@ traced memory's peak by 2 KiB:
 - No allocation, no `append`, no f-strings, no `logging` inside `process()`.
 - No locks. UI→audio is the command ring; structural changes are an atomic
   snapshot swap.
-- `gc.freeze()` after load; explicit collection on the UI thread only.
+- `gc.freeze()` after load (D-142). The collector otherwise runs as Python
+  runs it: with the block compiled, steady playback makes no collection,
+  measured, so none is moved to the UI thread by hand.
 - Every numpy op writes into a preallocated buffer via `out=`.
 - **Compiled kernels run without numba's runtime** (D-138). A kernel that
   tried to make an array would not compile, and a call makes no record for

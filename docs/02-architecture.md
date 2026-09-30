@@ -356,7 +356,8 @@ feed, on the UI thread, that frees one.
 ### Keeping the callback honest
 
 - All buffers preallocated at stream start; every numpy op uses `out=`.
-- `gc.freeze()` after project load; GC runs explicitly on the UI thread.
+- `gc.freeze()` after project load (D-142); with the block compiled, steady
+  playback makes no collection, so GC is otherwise left as Python runs it.
 - No `try`/logging/string formatting inside `process()`.
 - An xrun counter is exposed in the UI so dropouts are visible, not mysterious.
 

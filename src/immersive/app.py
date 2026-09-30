@@ -7,6 +7,7 @@ the process.
 
 from __future__ import annotations
 
+import gc
 import sys
 from typing import Final
 
@@ -42,6 +43,16 @@ def build_application(argv: list[str] | None = None) -> QApplication:
     return app
 
 
+def settle_memory() -> None:
+    """Collect what is garbage now, then freeze the rest (D-142): a later
+    collection scans only what was made since, where a full one of a
+    32-channel window's heap held the GIL for 67 ms, six blocks. Unfrozen
+    first, so what the previous project left in cycles is still freed."""
+    gc.unfreeze()
+    gc.collect()
+    gc.freeze()
+
+
 def run(
     argv: list[str] | None = None,
     *,
@@ -74,9 +85,11 @@ def run(
             player = Player(backend, settled.output)
 
     window = MainWindow(player=player, unavailable=unavailable)
+    window.settle = settle_memory
     for problem in problems:
         window.notices().add(Severity.WARN, problem)
     window.show()
+    settle_memory()
     # The HRTF set, on a worker (D-120): here, where a real launch is, and
     # never in the window's constructor, where every test is.
     window.prepare_hrtf()

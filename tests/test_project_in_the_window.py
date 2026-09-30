@@ -380,3 +380,26 @@ def test_a_real_dialog_fails_the_test_rather_than_hanging_it(
         window._ask_about_unsaved()
     with pytest.raises(AssertionError, match="real modal dialog"):
         window._choose_open_path()
+
+
+def test_memory_is_settled_after_new_and_a_good_open_only(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    """Once a project has loaded (D-142): not after an open that failed,
+    which left the project as it was."""
+    settled: list[int] = []
+    window.settle = lambda: settled.append(1)
+    good = tmp_path / "good.3dim"
+    project_io.save(Project(), good)
+    bad = tmp_path / "bad.3dim"
+    bad.write_bytes(b"{ not json")
+    answering(window, Unsaved.DISCARD)
+
+    assert window.new_project()
+    assert settled == [1]
+    choosing(window, open=bad)
+    assert not window.open_project()
+    assert settled == [1]
+    choosing(window, open=good)
+    assert window.open_project()
+    assert settled == [1, 1]
