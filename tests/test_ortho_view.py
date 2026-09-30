@@ -234,6 +234,39 @@ def test_a_muted_icon_and_one_silenced_by_a_solo_are_at_a_quarter() -> None:
     assert close(pixel(top, at_silenced), blend("#F472B6", 0.25))
 
 
+def test_a_pairs_line_is_as_faint_as_its_icons() -> None:
+    """In the front view, clear of the lines of height: the middle of a
+    muted pair's line is nearer the background than a heard pair's."""
+    heard = channel(1, Position(-1.0, 1.0, 1.5), stereo=True, mode=Pairing.LINKED)
+    muted = channel(
+        2, Position(-1.0, 1.0, -1.5), stereo=True, mode=Pairing.LINKED, mute=True
+    )
+    _, front = views(document_with(heard, muted))
+    background = pixel(front, QPointF(W - 3, 3))
+
+    def middle(left: int) -> QColor:
+        icons = front.icons()
+        return pixel(front, (icons[left].centre + icons[left + 1].centre) / 2)
+
+    assert _apart(middle(2), background) < 0.5 * _apart(middle(0), background)
+
+
+def test_the_selected_ring_is_not_faint_with_its_channel() -> None:
+    """It is the selection's: the same around a muted icon as a heard one."""
+    heard = channel(1, Position(-1.5, 1.0, 0.5))
+    muted = channel(2, Position(1.5, 1.0, 0.5), mute=True)
+    document = document_with(heard, muted)
+    document.selection.select(Kind.CHANNELS, [heard, muted])
+    _, front = views(document)
+
+    def on_ring(icon: int) -> QColor:
+        [*_, at] = [i for i in front.icons() if i.channel is (heard, muted)[icon]]
+        return pixel(front, at.centre + QPointF(0, -(at.radius + 3.0)))
+
+    assert on_ring(0) == on_ring(1)
+    assert _apart(on_ring(1), QColor(theme.group_color("spatial", "selected"))) < 60
+
+
 def test_a_soloed_icon_glows_beyond_its_edge() -> None:
     soloed = channel(1, Position(1.5, 1.5, 0.5), colour="#34D399", solo=True)
     plain = channel(2, Position(-1.5, 1.5, 0.5), colour="#34D399", solo=True)
@@ -364,3 +397,7 @@ def _xy(point: QPointF) -> tuple[float, float]:
 
 def _rgb(colour: QColor) -> tuple[int, int, int]:
     return colour.red(), colour.green(), colour.blue()
+
+
+def _apart(one: QColor, other: QColor) -> int:
+    return sum(abs(a - b) for a, b in zip(_rgb(one), _rgb(other), strict=True))
