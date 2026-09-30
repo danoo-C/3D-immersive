@@ -3,7 +3,8 @@
     python -m immersive.benchmark blocks [--block 512] [--count 3000] [--rounds 3]
     python -m immersive.benchmark contention [--seconds 8] [--rounds 3] [--one-wait]
     python -m immersive.benchmark live [--device NAME] [--block 512] [--seconds 60]
-                                       [--load playing|scrolling|repainting]
+                                       [--load playing|scrolling|repainting|dragging]
+    python -m immersive.benchmark views [--count 200]
 
 **`blocks`** times the engine a block at a time, with no window and no
 device. The HRTF set is the one the application ships, prepared at the
@@ -16,8 +17,9 @@ under half the budget.
 **`contention`** plays 32 sources in the application's window through a
 **stand-in stream**: a thread that calls the engine's callback on a clock of
 its own, as PortAudio does, and counts the blocks that were late. The UI
-thread meanwhile plays (its own tick), scrolls the timeline, or repaints the
-whole window without pause. Each load runs at CPython's 5 ms switch interval
+thread meanwhile plays (its own tick), scrolls the timeline, repaints the
+whole window without pause, or drags a source round the head in the top
+view as a hand does (M5 phase 5). Each load runs at CPython's 5 ms switch interval
 and at D-39's 1 ms, in turn, round after round. `--one-wait` puts in the
 engine's place a sleep as long as its median block: an engine that waits
 for the GIL once a block, which is what D-39 assumed the engine was.
@@ -27,6 +29,10 @@ window on the real output, chosen as the application chooses it, 32 sources
 moving for a minute, and the engine's own xrun count at the end, which is
 what PortAudio reported. The window is on screen, and a person may use it
 meanwhile; `--load` scrolls or repaints it without one.
+
+**`views`** times each spatial view's repaint with 32 sources placed, as
+points and as linked pairs: the top, the front, the bypass strip, the 3D
+view on its own tab, and the whole window beside them.
 
 **A source is a slot**: a channel placed as a pair is two (D-132), and each
 costs the FFT what a point does. Every arrangement is the finished graph.
@@ -105,8 +111,8 @@ SHAPES: Final = ((1, False), (8, False), (16, False), (32, False), (32, True))
 MEDIA_ID: Final = "m-0000be00"
 
 #: What the UI thread does while `contention` listens: plays, scrolls the
-#: timeline, or repaints the whole window without pause.
-LOADS: Final = ("playing", "scrolling", "repainting")
+#: timeline, repaints the whole window without pause, or drags a source.
+LOADS: Final = ("playing", "scrolling", "repainting", "dragging")
 
 #: CPython's default switch interval, and D-39's.
 INTERVALS: Final = (0.005, 0.001)
@@ -120,6 +126,16 @@ MOVES_HZ: Final = 30
 #: scroll bar.
 SCROLL_PX: Final = 7
 SCROLL_MS: Final = 16
+
+#: How the pointer goes while `dragging`: round a circle this many metres
+#: about the head in the top view, once in this many seconds, moving each
+#: `DRAG_MS` - a hand on the mouse.
+DRAG_REACH_M: Final = 2.0
+DRAG_TURN_S: Final = 4.0
+DRAG_MS: Final = 16
+
+#: The views `views` times, in the order it prints them.
+VIEWS: Final = ("top", "front", "strip", "3d", "window")
 
 
 def budget(block: int) -> float:
@@ -506,14 +522,16 @@ def _until(condition: Callable[[], bool], timeout: float = 60.0) -> None:
             raise TimeoutError("the HRTF set was not prepared")
 
 
-def _arrange(window: Any, channels: int, decoded: Decoded) -> None:
+def _arrange(
+    window: Any, channels: int, decoded: Decoded, *, paired: bool = False
+) -> None:
     """The arrangement, pushed into the window's project as edits, its
     sample in the window's store as an import leaves one."""
     from immersive.core.edits import AddChannel, AddMedia
     from immersive.core.io.peaks import build as pyramid
     from immersive.core.media_store import Prepared
 
-    arranged = arrangement(channels, False, decoded)
+    arranged = arrangement(channels, paired, decoded)
     [media] = arranged.media_pool
     window.store().keep(
         media.id, Prepared(Path(media.path), decoded, "", pyramid(decoded.audio))
@@ -567,6 +585,7 @@ def _load(window: Any, load: str, seconds: float) -> None:
             window.repaint()
             QApplication.processEvents()
         return
+    dragging = _drag(window) if load == "dragging" else None
     scrolling = None
     if load == "scrolling":
         axis = window.timeline().axis
@@ -589,6 +608,115 @@ def _load(window: Any, load: str, seconds: float) -> None:
     loop.exec()
     if scrolling is not None:
         scrolling.stop()
+    if dragging is not None:
+        dragging.stop()
+
+
+class _Drag:
+    """A hand dragging a source in the top view until `stop()`."""
+
+    def __init__(self, timer: Any, release: Callable[[], None]) -> None:
+        self._timer = timer
+        self._release = release
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self._release()
+
+
+def _drag(window: Any) -> _Drag:
+    """Press on the second source's icon in the top view - the first is
+    inside the centre - and move the pointer each `DRAG_MS` round a circle
+    `DRAG_REACH_M` about the head, through the view's own mouse handling:
+    `Placing`, the feed, both views and the pane."""
+    from PySide6.QtCore import QEvent, QPointF, Qt, QTimer
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    top, _ = window.spatial_views()
+    second = window.document().project.channels[1]
+    [grabbed] = [icon for icon in top.icons() if icon.channel is second]
+    head = top.point_of(Position())
+    reach = DRAG_REACH_M * (top.point_of(Position(1.0, 0.0, 0.0)).x() - head.x())
+    left = Qt.MouseButton.LeftButton
+    at = [grabbed.centre]
+
+    def send(kind: QEvent.Type, button: Qt.MouseButton, held: Qt.MouseButton) -> None:
+        event = QMouseEvent(
+            kind,
+            at[0],
+            top.mapToGlobal(at[0]),
+            button,
+            held,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(top, event)
+
+    began = time.monotonic()
+
+    def move() -> None:
+        turned = 2.0 * math.pi * (time.monotonic() - began) / DRAG_TURN_S
+        at[0] = head + QPointF(reach * math.sin(turned), -reach * math.cos(turned))
+        send(QEvent.Type.MouseMove, Qt.MouseButton.NoButton, left)
+
+    send(QEvent.Type.MouseButtonPress, left, left)
+    timer = QTimer()
+    timer.setInterval(DRAG_MS)
+    timer.timeout.connect(move)
+    timer.start()
+    return _Drag(
+        timer,
+        lambda: send(QEvent.Type.MouseButtonRelease, left, Qt.MouseButton.NoButton),
+    )
+
+
+@dataclass(frozen=True)
+class Painted:
+    """One view's repaints: how long each took, and how many paint events
+    it got, which is as many as it was timed for only if it was shown."""
+
+    times: npt.NDArray[np.float64]
+    paints: int
+
+    def at(self, fraction: float) -> float:
+        return float(np.quantile(self.times, fraction))
+
+
+def views(
+    count: int, channels: int = 32, *, paired: bool = False
+) -> dict[str, Painted]:
+    """Each of `VIEWS` repainted `count` times, synchronously, in the window
+    with `channels` sources placed: points, or linked pairs. The 3D view
+    is timed on its own tab, since a hidden widget paints nothing."""
+    from PySide6.QtWidgets import QApplication, QTabWidget
+
+    from immersive.app import build_application
+    from immersive.ui.main_window import MainWindow
+
+    build_application([])
+    window = MainWindow()
+    window.show()
+    try:
+        _arrange(window, channels, sample(2.0), paired=paired)
+        QApplication.processEvents()
+        top, front = window.spatial_views()
+        [workspace] = window.findChildren(QTabWidget)
+        widgets = {
+            "top": top,
+            "front": front,
+            "strip": window.bypass_strip(),
+            "3d": window.view3d(),
+            "window": window,
+        }
+        timed: dict[str, Painted] = {}
+        for name in VIEWS:
+            workspace.setCurrentIndex(1 if name == "3d" else 0)
+            QApplication.processEvents()
+            timed[name] = _repaints(widgets[name], count)
+        return timed
+    finally:
+        window.stop_work()
+        window.deleteLater()
 
 
 def machine() -> str:
@@ -740,6 +868,57 @@ def run_contention(seconds: float, rounds: int, one_wait: bool) -> int:
     return 0
 
 
+def _repaints(widget: Any, count: int) -> Painted:
+    """`widget` repainted `count` times, each timed, its paint events
+    counted."""
+    from PySide6.QtCore import QEvent, QObject
+
+    class Counter(QObject):
+        paints = 0
+
+        def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+            if watched is widget and event.type() == QEvent.Type.Paint:
+                self.paints += 1
+            return False
+
+    counter = Counter()
+    widget.installEventFilter(counter)
+    times = []
+    for _ in range(count):
+        began = time.perf_counter()
+        widget.repaint()
+        times.append(time.perf_counter() - began)
+    widget.removeEventFilter(counter)
+    return Painted(np.array(times), counter.paints)
+
+
+def run_views(count: int) -> int:
+    """Each view's repaint, with 32 sources as points and as pairs."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    points = views(count)
+    pairs = views(count, paired=True)
+    print(machine())
+    print(
+        f"{_title()}: each view repainted {count} times in the window at its "
+        "first size, 32 sources placed as points and as linked pairs, and one "
+        "bypassed. A frame at 60 Hz is 16.7 ms."
+    )
+    print()
+    print("view         points p50      p99    worst   pairs p50      p99    worst")
+    for name in VIEWS:
+        row = [name.ljust(10)]
+        for timed in (points[name], pairs[name]):
+            if timed.paints != count:
+                row.append(f"  painted {timed.paints} of {count}".ljust(31))
+                continue
+            row.append(
+                f"  {_ms(timed.at(0.5))}  {_ms(timed.at(0.99))}  "
+                f"{_ms(float(timed.times.max()))}"
+            )
+        print("".join(row))
+    return 0
+
+
 def run_live(device: str | None, block: str | None, seconds: float, load: str) -> int:
     """The live count, on the output the application would use: 0 when the
     engine counted no xrun."""
@@ -796,9 +975,13 @@ def main(argv: list[str] | None = None) -> int:
     played.add_argument("--block", help="as the application takes it")
     played.add_argument("--seconds", type=float, default=60.0)
     played.add_argument("--load", choices=LOADS, default="playing")
+    painted = what.add_parser("views", help="each spatial view's repaint (M5)")
+    painted.add_argument("--count", type=int, default=200)
     options = parser.parse_args(argv)
     if options.what == "live":
         return run_live(options.device, options.block, options.seconds, options.load)
+    if options.what == "views":
+        return run_views(options.count)
     if options.what == "contention":
         return run_contention(options.seconds, options.rounds, options.one_wait)
     return run_blocks(options.block, options.count, options.rounds)

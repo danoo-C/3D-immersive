@@ -228,3 +228,58 @@ def test_live_says_why_there_is_no_output_rather_than_raising(
     monkeypatch.setattr(device, "settle", lambda backend, name, block: unusable)
     assert benchmark.run_live(None, None, 1.0, "playing") == 2
     assert capsys.readouterr().out == "no device\n"
+
+
+# ------------------------------------------------------ the views (M5 phase 5)
+
+
+@pytest.mark.gui
+def test_the_dragging_load_drags_the_second_source_and_makes_one_edit() -> None:
+    """Pressed on the second source (the first is inside the centre), moved
+    while it runs - the icon, not the model - and released at the end, as
+    one edit. Nothing else moves."""
+    from PySide6.QtCore import QEventLoop, QTimer
+
+    from immersive.app import build_application
+    from immersive.ui.main_window import MainWindow
+
+    build_application([])
+    window = MainWindow()
+    window.show()
+    try:
+        benchmark._arrange(window, 8, benchmark.sample(1.0))
+        document = window.document()
+        project = document.project
+        second = project.channels[1]
+        before = [channel.position for channel in project.channels]
+        top, _ = window.spatial_views()
+
+        drag = benchmark._drag(window)
+        loop = QEventLoop()
+        QTimer.singleShot(300, loop.quit)
+        loop.exec()
+        [icon] = [icon for icon in top.icons() if icon.channel is second]
+        assert icon.centre != top.point_of(second.position), "moving"
+        assert second.position == before[1], "no edit while it drags"
+        assert document.selection.channels() == [second]
+        drag.stop()
+
+        assert second.position != before[1]
+        assert [c.position for c in project.channels if c is not second] == [
+            where for n, where in enumerate(before) if n != 1
+        ]
+        assert document.undo()
+        assert second.position == before[1], "one edit"
+    finally:
+        window.stop_work()
+        window.deleteLater()
+
+
+@pytest.mark.gui
+def test_each_view_is_timed_as_often_as_asked_and_painted_each_time() -> None:
+    timed = benchmark.views(3, channels=4)
+
+    assert list(timed) == list(benchmark.VIEWS)
+    for name, painted in timed.items():
+        assert len(painted.times) == 3, name
+        assert painted.paints == 3, f"{name} painted {painted.paints} times"
