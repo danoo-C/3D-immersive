@@ -34,8 +34,8 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from immersive.audio.device import CHANNELS, Output
 from immersive.audio import engine as compiled
+from immersive.audio.device import CHANNELS, Output
 from immersive.audio.engine import Engine, Voice
 from immersive.core.time import SAMPLE_RATE
 

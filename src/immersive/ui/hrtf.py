@@ -57,15 +57,17 @@ class _Job(QRunnable):
 
     def run(self) -> None:
         try:
+            # The engine's block kernel first, compiled here or loaded from
+            # numba's cache, never on the audio thread (D-139, D-141). It
+            # needs no bank, and the flat path plays before there is one:
+            # 9 s the first time after an install, 0.5 s after.
+            engine.warm(self.block)
             hrirs = builtin(self.set_id)
             result: Bank | Refused | Cancelled = (
                 hrirs
                 if isinstance(hrirs, Refused)
-                else prepare(hrirs, self.block, progress=self.progress.part(0.0, 0.9))
+                else prepare(hrirs, self.block, progress=self.progress.part(0.0, 1.0))
             )
-            # The engine's block kernel, compiled here or loaded from
-            # numba's cache, never on the audio thread (D-139, D-141).
-            engine.warm(self.block)
         except Exception as unexpected:  # a job that raised would never deliver
             result = Refused(self.set_id, f"could not be prepared ({unexpected})")
         self.progress.reach(1.0)

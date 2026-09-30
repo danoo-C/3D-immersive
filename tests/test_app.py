@@ -128,9 +128,10 @@ def test_a_launch_settles_memory_once_the_window_is_up_and_after_each_load(
 
 
 def test_settling_memory_collects_then_freezes() -> None:
-    """What was garbage in a cycle is freed, and what is left is frozen, so
-    a later collection passes it by. Unfrozen after, for the tests that
-    follow in this process."""
+    """What was frozen by one load and has since become garbage in a cycle
+    - a project replaced - is freed by the next, which unfreezes before it
+    collects; and what is left is frozen, so a later collection passes it
+    by. Unfrozen after, for the tests that follow in this process."""
     import gc
     import weakref
 
@@ -140,10 +141,14 @@ def test_settling_memory_collects_then_freezes() -> None:
     first, second = Node(), Node()
     first.other, second.other = second, first
     gone = weakref.ref(first)
-    del first, second
     try:
+        app.settle_memory()  # alive, so frozen
+        assert gone() is not None and gc.get_freeze_count() > 0
+        del first, second  # now garbage, in a cycle, and frozen
+        gc.collect()
+        assert gone() is not None, "a frozen cycle outlives a collection"
         app.settle_memory()
-        assert gone() is None, "the cycle was collected"
+        assert gone() is None, "the next load's settle freed it"
         assert gc.get_freeze_count() > 0
     finally:
         gc.unfreeze()
