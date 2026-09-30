@@ -2,8 +2,9 @@
 
 A set is loaded, then decomposed and indexed - 6.5 s cold for SADIE II D1,
 0.2 s from the cache - and transformed at the output's block size. Then the
-spatial kernel is compiled for it, 5.5 s the first time and 0.4 s from
-numba's cache, so the audio thread never compiles (D-139). None of
+engine's block kernel is compiled, or loaded from numba's cache, so the
+audio thread never compiles (D-139, D-141); the player compiles it too if
+a Play comes first. None of
 that may happen on the UI thread, which it would freeze, nor when a test
 merely builds a window: `app.run` asks for it once the window is up, and so
 does opening a project whose set is another.
@@ -21,7 +22,7 @@ from typing import Final
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
 
-from immersive.audio import spatial
+from immersive.audio import engine
 from immersive.audio.hrtf.bank import Bank, prepare
 from immersive.audio.hrtf.sofa import builtin
 from immersive.core.io.media import Refused
@@ -62,10 +63,9 @@ class _Job(QRunnable):
                 if isinstance(hrirs, Refused)
                 else prepare(hrirs, self.block, progress=self.progress.part(0.0, 0.9))
             )
-            if isinstance(result, Bank):
-                # The spatial kernel, compiled here or loaded from numba's
-                # cache, never on the audio thread (D-139).
-                spatial.warm(result)
+            # The engine's block kernel, compiled here or loaded from
+            # numba's cache, never on the audio thread (D-139, D-141).
+            engine.warm(self.block)
         except Exception as unexpected:  # a job that raised would never deliver
             result = Refused(self.set_id, f"could not be prepared ({unexpected})")
         self.progress.reach(1.0)

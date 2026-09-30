@@ -155,6 +155,13 @@ class Snapshot:
     lane_first: npt.NDArray[np.int64] = field(
         default_factory=lambda: np.zeros(1, dtype=np.int64), repr=False
     )
+    #: `slots` and `paired` as arrays, which the block kernel reads.
+    slot_of: npt.NDArray[np.int64] = field(
+        default_factory=lambda: np.zeros(0, dtype=np.int64), repr=False
+    )
+    pairs_of: npt.NDArray[np.bool_] = field(
+        default_factory=lambda: np.zeros(0, dtype=np.bool_), repr=False
+    )
 
 
 def positioned(project: Project, channel: Channel) -> tuple[Position, Position]:
@@ -336,6 +343,10 @@ def build(
         clips=clips,
         clip_gains=clip_gains,
         lane_first=lane_first,
+        slot_of=np.array(
+            [slot_of.get(index, -1) for index in range(len(lanes))], dtype=np.int64
+        ),
+        pairs_of=np.array(pairs, dtype=np.bool_).reshape(len(lanes)),
     )
 
 

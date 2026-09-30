@@ -121,7 +121,7 @@ def render(
         np.add(space.total[ear], own.half, out=space.total[ear])
     np.fft.irfft(space.total, n=bank.nfft, axis=1, norm="ortho", out=space.inverse)  # type: ignore[arg-type]
     np.add(space.tail, space.inverse, out=space.tail)
-    space.drain(bus_l, bus_r)
+    drain(space, bus_l, bus_r)
     np.copyto(space.previous_left, space.left)
     np.copyto(space.previous_right, space.right)
 
@@ -214,3 +214,17 @@ def _delay(space: Space, samples: float) -> None:
     np.multiply(space.bins_, -2.0 * math.pi * samples / space.bank.nfft, out=own.angle)
     np.cos(own.angle, out=space.delay.real)
     np.sin(own.angle, out=space.delay.imag)
+
+
+def drain(space: Space, bus_l: Samples, bus_r: Samples) -> None:
+    """The accumulator's next block into the bus, and the rest moved up
+    a block: what a stopped transport still does, so a pause decays
+    rather than cuts, and a resume does not replay it."""
+    block = space.block
+    tail = space.tail
+    np.add(bus_l, tail[0, :block], out=bus_l)
+    np.add(bus_r, tail[1, :block], out=bus_r)
+    keep = tail.shape[1] - block
+    np.copyto(space.shifted[:, :keep], tail[:, block:])
+    np.copyto(tail[:, :keep], space.shifted[:, :keep])
+    tail[:, keep:].fill(0.0)

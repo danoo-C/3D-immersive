@@ -10,12 +10,14 @@ from __future__ import annotations
 import gc
 import weakref
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
 import pytest
 
 from hearing import Tape, listen
+from immersive.audio import engine as playing_module
 from immersive.audio.dsp import db_to_gain, ramp_steps
 from immersive.audio.engine import RING, Engine, Voice
 from immersive.audio.scheduler import Snapshot, build, even
@@ -586,19 +588,23 @@ def test_a_voice_that_has_finished_is_not_played_again_to_fall() -> None:
     assert not tape.heard(1, 1).any()
 
 
-def test_a_falling_voice_is_held_until_its_block_is_played() -> None:
+def test_a_falling_voice_is_held_until_its_block_is_played(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The UI thread frees what the engine no longer holds, so a voice that
     has stopped being the voice but still has a block to fall through must
-    count as held while that block is played."""
+    count as held while that block is played: while the block kernel runs,
+    which reads it by address (D-140)."""
     first = Voice(level(0.25))
     held_while_falling: list[bool] = []
+    engine = Engine(BLOCK)
+    real = playing_module._block
 
-    class Watched(Engine):
-        def _audition(self) -> None:
-            held_while_falling.append(self.holds_voice(first))
-            super()._audition()
+    def watched(*arguments: Any) -> None:
+        held_while_falling.append(engine.holds_voice(first))
+        real(*arguments)
 
-    engine = Watched(BLOCK)
+    monkeypatch.setattr(playing_module, "_block", watched)
     engine.audition(first)
     block(engine)
     engine.audition(None)

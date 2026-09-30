@@ -4,12 +4,16 @@ do the same float32 operations in the same order."""
 
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 import pytest
 
 import reference_engine
+from immersive.audio.dsp import balance, pan_law
+from immersive.audio.engine import Engine, Voice
 from immersive.audio.limiter import LOOKAHEAD, Limiter
-from immersive.audio.scheduler import MONO, build, fill
+from immersive.audio.scheduler import MONO, Snapshot, build, even, fill
 from immersive.core.io.media import Decoded
 from immersive.core.model import Channel, Clip, MediaFile, Project
 from test_realtime import arrangement
@@ -71,3 +75,95 @@ def test_the_limiter_equals_the_reference(block: int) -> None:
         compiled.process(mine[0], mine[1], switch[n], switch[n + 1])
         python.process(theirs[0], theirs[1], switch[n], switch[n + 1])
         np.testing.assert_allclose(mine, theirs, rtol=2e-6, atol=1e-7)
+
+
+def drive(
+    engine: Engine, first: Snapshot, second: Snapshot, voices: list[Voice], n: int
+) -> None:
+    """The zero-allocation test's UI cycle, step `n` of 100: gains, a mute,
+    a seek, a swap, loops wrapping inside a block and shorter than one, an
+    audition replaced and stopped, a repeat, pan, and the master's gain and
+    limiter switched off and on."""
+    generation = second.generation if engine.holds(second) else first.generation
+    engine.take_peaks()
+    engine.take_channel_peaks()
+    if n % 7 == 0:
+        engine.send_gain(generation, 1, even(0.25 + (n % 5) / 10))
+    if n == 40:
+        engine.send_gain(generation, 0, even(0.0))
+    if n == 45:
+        engine.send_gain(generation, 0, even(1.0))
+    if n % 11 == 0:
+        pan = -1.0 + (n % 21) / 10
+        engine.send_gain(generation, 4, (*pan_law(pan), *balance(pan)))
+        engine.send_gain(generation, 5, (*pan_law(-pan), *balance(-pan)))
+    if n % 13 == 0:
+        engine.send_master(generation, 2.0 + (n % 3), True)
+    if n == 65:
+        engine.send_master(generation, 4.0, False)
+    if n == 67:
+        engine.send_master(generation, 4.0, True)
+    if n == 60:
+        engine.seek(12_345)
+    if n == 80:
+        engine.install(second)
+    if n == 20:
+        engine.set_loop(40_000, 40_000 + 3_000, True)
+    if n == 30:
+        engine.audition(voices[0])
+    if n == 35:
+        engine.audition(voices[1])
+    if n == 38:
+        engine.audition(None)
+    if n == 50:
+        engine.set_loop(40_000, 40_100, True)
+    if n == 70:
+        engine.set_loop(0, 0, False)
+    if n == 72:
+        engine.set_repeat(12_345 + 20 * SIZE + 100, True)
+    if n == 85:
+        engine.set_repeat(0, False)
+    if n == 90:
+        engine.set_playing(False)
+    if n == 95:
+        engine.set_playing(True)
+
+
+def test_the_engine_equals_the_reference_through_every_path() -> None:
+    """Two engines on the same project and the same UI cycle: the kernel's
+    and the Python block's, compared block by block - what comes out, the
+    master's meter and each channel's. The master is 12 dB up, so the
+    limiter works on every block, and it goes through `log10` and `10 **`,
+    so they agree to float32 rounding rather than exactly."""
+    project, store = arrangement()
+    engines, snapshots, voices = [], [], []
+    for _ in range(2):
+        engine = Engine(SIZE)
+        first = build(project, store.get)
+        project.channels[0].gain_db = -1.0
+        second = build(project, store.get, first)
+        project.channels[0].gain_db = 0.0
+        engine.install(first)
+        engine.set_playing(True)
+        engines.append(engine)
+        snapshots.append((first, second))
+        voices.append(
+            [Voice(store["m-00000001"].audio), Voice(store["m-00000002"].audio)]
+        )
+    python = engines[1]
+    python.process = partial(reference_engine.process, python)  # type: ignore[method-assign]
+    outs = [np.zeros((SIZE, 2), dtype=np.float32) for _ in range(2)]
+    heard = 0.0
+    for n in range(200):
+        peaks = []
+        for engine, (first, second), voice, out in zip(
+            engines, snapshots, voices, outs, strict=True
+        ):
+            drive(engine, first, second, voice, n % 100)
+            engine.process(out)
+            peaks.append((engine._peaks.copy(), engine._current.peaks.copy()))
+        np.testing.assert_allclose(outs[0], outs[1], rtol=2e-6, atol=1e-6)
+        np.testing.assert_allclose(peaks[0][0], peaks[1][0], rtol=2e-6, atol=1e-6)
+        np.testing.assert_allclose(peaks[0][1], peaks[1][1], rtol=2e-6, atol=1e-6)
+        heard = max(heard, float(np.abs(outs[1]).max()))
+    assert heard > 0.5, "the limiter had work to do"

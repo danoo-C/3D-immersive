@@ -16,7 +16,7 @@ from PySide6.QtCore import QEventLoop
 from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
-from immersive.audio import spatial
+from immersive.audio import engine as playing
 from immersive.audio.device import Output
 from immersive.audio.hrtf import lookup
 from immersive.audio.hrtf.bank import Bank
@@ -216,17 +216,18 @@ def test_a_request_replaced_is_never_handed_over_late(
 def test_the_bank_arrives_with_its_kernel_compiled(
     window: MainWindow, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Compiled on the worker, before the bank is handed over (D-139)."""
+    """The engine's block kernel is compiled on the worker, before the bank
+    is handed over (D-139, D-141)."""
     standing_in(monkeypatch)
-    warmed: list[Bank] = []
-    real = spatial.warm
+    warmed: list[int] = []
+    real = playing.warm
 
-    def warm(bank: Bank) -> None:
-        real(bank)
-        warmed.append(bank)
+    def warm(block: int = 512) -> None:
+        real(block)
+        warmed.append(block)
 
-    monkeypatch.setattr(spatial, "warm", warm)
+    monkeypatch.setattr(playing, "warm", warm)
     window.prepare_hrtf()
     until(lambda: window.bank() is not None)
 
-    assert warmed == [window.bank()]
+    assert warmed == [256], "at the output's block size"

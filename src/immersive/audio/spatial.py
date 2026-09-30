@@ -66,7 +66,7 @@ from rocket_fft import c2r, r2c
 from immersive.audio.compiled import kernel
 from immersive.audio.dsp import ramp_steps
 from immersive.audio.hrtf.bank import Bank
-from immersive.audio.hrtf.lookup import locate
+from immersive.audio.hrtf.lookup import Lookup, locate
 from immersive.core.io.loudness import pink_weights
 from immersive.core.model import Distance
 
@@ -87,6 +87,53 @@ Samples = npt.NDArray[np.float32]
 Spectra = npt.NDArray[np.complex64]
 Floats = npt.NDArray[np.float64]
 Indices = npt.NDArray[np.int64]
+
+#: What `_render` takes after a block's positions, meters, bus and its two
+#: switches: `Space.arguments`, in `_render`'s order.
+Arguments = tuple[
+    Indices,
+    Indices,
+    Indices,
+    Spectra,
+    Spectra,
+    Spectra,
+    float,
+    float,
+    float,
+    bool,
+    Indices,
+    Floats,
+    Indices,
+    Indices,
+    Indices,
+    int,
+    Floats,
+    Floats,
+    Spectra,
+    Samples,
+    Samples,
+    Spectra,
+    Spectra,
+    Spectra,
+    Spectra,
+    Spectra,
+    Spectra,
+    Samples,
+    Samples,
+    Indices,
+    Floats,
+    Floats,
+    Floats,
+    Floats,
+    Floats,
+    Floats,
+    Samples,
+    Samples,
+    Samples,
+    Samples,
+    Spectra,
+    Indices,
+]
 
 #: A pair's left, right and shared spectra at the bank's bins, divided by
 #: the stem as mixed (D-133).
@@ -268,21 +315,13 @@ class Space:
 
     # ------------------------------------------------------------ a block
 
-    def render(
-        self,
-        positions: npt.NDArray[np.float64],
-        peaks: npt.NDArray[np.float64],
-        bus_l: Samples,
-        bus_r: Samples,
-    ) -> None:
-        """Every source's `src`, placed, summed into the bus: `_render`,
-        with the GIL released for all of it (D-138)."""
+    @property
+    def arguments(self) -> Arguments:
+        """What `_render` takes after a block's positions, meters, bus and
+        its two switches, in its order: every array made here, and the
+        bank's. The engine's block kernel hands them on as one tuple."""
         lookup = self.bank.lookup
-        _render(
-            positions,
-            peaks,
-            bus_l,
-            bus_r,
+        return (
             self.of_channel,
             self.of_side,
             self.pair_slots,
@@ -293,8 +332,6 @@ class Space:
             self.min_distance,
             self.ref_distance,
             self.keep_level,
-            self.fresh,
-            self.crossfade,
             lookup.faces,
             lookup.inverses,
             lookup.neighbours,
@@ -328,6 +365,20 @@ class Space:
             self.delay,
             self.axes,
         )
+
+    def render(
+        self,
+        positions: npt.NDArray[np.float64],
+        peaks: npt.NDArray[np.float64],
+        bus_l: Samples,
+        bus_r: Samples,
+    ) -> None:
+        """Every source's `src`, placed, summed into the bus: `_render`,
+        with the GIL released for all of it (D-138). The engine calls the
+        kernel from its own; this is for anything else that plays a space."""
+        _render(
+            positions, peaks, bus_l, bus_r, self.fresh, self.crossfade, *self.arguments
+        )
         # The first block after a seek or a swap is fresh in its filters;
         # every block after it crossfades from the last.
         self.fresh = False
@@ -336,28 +387,40 @@ class Space:
         """The accumulator's next block into the bus, and the rest moved up
         a block: what a stopped transport still does, so a pause decays
         rather than cuts, and a resume does not replay it."""
-        block = self.block
-        tail = self.tail
-        np.add(bus_l, tail[0, :block], out=bus_l)
-        np.add(bus_r, tail[1, :block], out=bus_r)
-        keep = tail.shape[1] - block
-        np.copyto(self.shifted[:, :keep], tail[:, block:])
-        np.copyto(tail[:, :keep], self.shifted[:, :keep])
-        tail[:, keep:].fill(0.0)
+        _drain(self.tail, bus_l, bus_r)
 
 
-def warm(bank: Bank) -> None:
-    """Compile the kernel for `bank`, or load it from numba's cache, by
-    rendering a block of silence through a space of one point and one pair.
-    On the worker that prepares the bank, before it is handed over, so the
-    first block the audio thread plays compiles nothing (D-139). The arrays
-    are the kinds a snapshot and the engine give it, so it is the one
-    signature they will call."""
-    positions = np.zeros((2, 2, 3))
-    space = Space.build(bank, (0, 1, 1), positions, Distance(), (POINT, 0, 1))
-    silence = np.zeros((2, bank.block), dtype=np.float32)
-    space.render(positions, np.zeros((2, 2)), silence[0], silence[1])
+def nothing(block: int) -> Space:
+    """A space of no sources, made from an empty bank: what the engine's
+    block kernel is handed when a snapshot has no space, so that it sees
+    arrays of the same kinds either way and has one signature (D-141)."""
+    made = _nothing.get(block)
+    if made is None:
+        lookup = Lookup.assemble(
+            np.zeros((0, 3), dtype=np.int64),
+            np.zeros((0, 3, 3)),
+            np.zeros((0, 3), dtype=np.int64),
+            np.zeros(0, dtype=np.int64),
+            np.zeros(7, dtype=np.int64),
+            1,
+        )
+        bank = Bank(
+            title="",
+            hash="",
+            block=block,
+            nfft=block,
+            taps=0,
+            max_itd=0.0,
+            directions=np.zeros((0, 3)),
+            lookup=lookup,
+            itd=np.zeros(0),
+            filters=np.zeros((0, 2, block // 2 + 1), dtype=np.complex64),
+        )
+        made = _nothing[block] = Space.build(bank, (), np.zeros((0, 2, 3)), Distance())
+    return made
 
+
+_nothing: dict[int, Space] = {}
 
 # --------------------------------------------------------------- the kernel
 
@@ -368,6 +431,8 @@ def _render(
     peaks: Floats,
     bus_l: Samples,
     bus_r: Samples,
+    fresh: bool,
+    crossfade: bool,
     of_channel: Indices,
     of_side: Indices,
     pair_slots: Indices,
@@ -378,8 +443,6 @@ def _render(
     min_distance: float,
     ref_distance: float,
     keep_level: bool,
-    fresh: bool,
-    crossfade: bool,
     faces: Indices,
     inverses: Floats,
     neighbours: Indices,
@@ -541,18 +604,10 @@ def _render(
 
     # 5. Overlap-add: the tail gains the block's inverse, gives its first
     # block to the bus, and moves up a block.
-    keep = nfft - block
     for ear in range(2):
         for i in range(nfft):
             tail[ear, i] += inverse[ear, i]
-    for i in range(block):
-        bus_l[i] += tail[0, i]
-        bus_r[i] += tail[1, i]
-    for ear in range(2):
-        for i in range(keep):
-            tail[ear, i] = tail[ear, i + block]
-        for i in range(keep, nfft):
-            tail[ear, i] = 0.0
+    _drain(tail, bus_l, bus_r)
     _copy(left, previous_left)
     _copy(right, previous_right)
 
@@ -643,6 +698,22 @@ def _pair_gain(
         )
         loud += (np.conj(shared[k]) * cross).real
     return PAIR_CAP if loud <= 1.0 / PAIR_CAP**2 else 1.0 / math.sqrt(loud)
+
+
+@kernel
+def _drain(tail: Samples, bus_l: Samples, bus_r: Samples) -> None:
+    """The tail's next block into the bus, and the rest moved up a block."""
+    block = bus_l.shape[0]
+    nfft = tail.shape[1]
+    keep = nfft - block
+    for i in range(block):
+        bus_l[i] += tail[0, i]
+        bus_r[i] += tail[1, i]
+    for ear in range(2):
+        for i in range(keep):
+            tail[ear, i] = tail[ear, i + block]
+        for i in range(keep, nfft):
+            tail[ear, i] = 0.0
 
 
 @kernel

@@ -3,17 +3,26 @@
 
 Each function is the package's as it stood at phase 11, with a lane's clip
 ends worked out from its clips, which the compiled lane no longer keeps.
-Nothing in the package imports this; the kernels are what play.
+`process(engine, out)` is `Engine.process` as it was: it keeps the
+engine's own bookkeeping, which is still Python (taking up a snapshot or a
+voice, the ring, the plan), and does the rest in numpy as it did, with the
+spatial path through `reference_spatial` and its own Python limiter. The
+scratch rows it needs and the engine no longer has are made here, once an
+engine. Nothing in the package imports this; the kernels are what play.
 """
 
 from __future__ import annotations
 
 import bisect
 import math
+from types import SimpleNamespace
 
 import numpy as np
+import numpy.typing as npt
 
+import reference_spatial
 from immersive.audio.dsp import Samples, ramp_steps
+from immersive.audio.engine import Engine, Voice
 from immersive.audio.limiter import (
     CEILING_DB,
     KNEE_DB,
@@ -22,7 +31,7 @@ from immersive.audio.limiter import (
     RELEASE,
     SETTLED_DB,
 )
-from immersive.audio.scheduler import MONO, STEREO, Lane, Placed
+from immersive.audio.scheduler import MONO, STEREO, Lane, Placed, Snapshot
 from immersive.core.time import SAMPLE_RATE
 
 
@@ -243,3 +252,217 @@ class Limiter:
         np.copyto(delay[:, :ahead], delay[:, block:])
         np.copyto(self._need[:ahead], self._need[block:])
         np.copyto(self._release[:ahead], self._release[block:])
+
+
+# ------------------------------------------------------------- the engine
+
+_own: dict[int, SimpleNamespace] = {}
+
+
+def own(engine: Engine) -> SimpleNamespace:
+    """What the Python block needed and the engine no longer keeps."""
+    made = _own.get(id(engine))
+    if made is None or made.engine is not engine:
+        block = engine.block
+        made = SimpleNamespace(
+            engine=engine,
+            ramp=np.zeros(block, dtype=np.float32),
+            scratch=np.zeros(block, dtype=np.float32),
+            limiter=Limiter(block),
+        )
+        _own[id(engine)] = made
+    return made
+
+
+def process(engine: Engine, out: npt.NDArray[np.float32]) -> None:
+    """`Engine.process` as it was at phase 11."""
+    snapshot = engine._next
+    if snapshot is not engine._current:
+        engine._take_up(snapshot)
+    if engine._next_voice is not engine._voice:
+        engine._fading = engine._voice
+        engine._voice = engine._next_voice
+    engine._drain(snapshot)
+
+    bus_l, bus_r = engine._bus_l, engine._bus_r
+    bus_l.fill(0)
+    bus_r.fill(0)
+    space = snapshot.space
+    if engine._playing:
+        _mix(engine, snapshot, engine._plan())
+        if space is not None:
+            reference_spatial.render(
+                space, snapshot.positions, snapshot.peaks, bus_l, bus_r
+            )
+    else:
+        np.copyto(snapshot.levels, snapshot.targets)
+        if space is not None:
+            reference_spatial.drain(space, bus_l, bus_r)
+    _audition(engine)
+    _master(engine, snapshot)
+
+    _peak(engine, bus_l, 0)
+    _peak(engine, bus_r, 1)
+    np.copyto(out[:, 0], bus_l)
+    np.copyto(out[:, 1], bus_r)
+
+
+def _mix(engine: Engine, snapshot: Snapshot, pieces: int) -> None:
+    bus_l, bus_r = engine._bus_l, engine._bus_r
+    lane_l, lane_r, lane_m = engine._lane_l, engine._lane_r, engine._lane_m
+    targets, levels, peaks = snapshot.targets, snapshot.levels, snapshot.peaks
+    lanes = snapshot.lanes
+    slots = snapshot.slots
+    space = snapshot.space
+    if space is not None:
+        space.src.fill(0.0)
+    start = int(engine._pieces[0, 0])
+    for index in range(len(lanes)):
+        now = targets[index]
+        was = levels[index]
+        if not (now.any() or was.any()):
+            continue
+        if pieces == 1:
+            wrote = fill(lanes[index], start, lane_l, lane_r, lane_m)
+        else:
+            wrote = _fill_pieces(engine, lanes[index], pieces)
+        if not wrote:
+            np.copyto(was, now)
+            continue
+        if wrote & STEREO:
+            _gain(engine, lane_l, lane_l, float(was[2]), float(now[2]), add=False)
+            _gain(engine, lane_r, lane_r, float(was[3]), float(now[3]), add=False)
+        if wrote & MONO:
+            add = bool(wrote & STEREO)
+            _gain(engine, lane_l, lane_m, float(was[0]), float(now[0]), add=add)
+            _gain(engine, lane_r, lane_m, float(was[1]), float(now[1]), add=add)
+        np.copyto(was, now)
+        slot = slots[index]
+        if space is not None and slot >= 0:
+            if snapshot.paired[index]:
+                np.copyto(space.src[slot], lane_l)
+                np.copyto(space.src[slot + 1], lane_r)
+            else:
+                row = space.src[slot]
+                np.add(lane_l, lane_r, out=row)
+                np.multiply(row, 0.5, out=row)
+            continue
+        _raise(engine, peaks, index, 0, lane_l)
+        _raise(engine, peaks, index, 1, lane_r)
+        np.add(bus_l, lane_l, out=bus_l)
+        np.add(bus_r, lane_r, out=bus_r)
+
+
+def _fill_pieces(engine: Engine, lane: Lane, pieces: int) -> int:
+    engine._lane.fill(0)
+    wrote = 0
+    for piece in range(pieces):
+        t, at, length = (int(value) for value in engine._pieces[piece])
+        wrote |= fill(
+            lane,
+            t,
+            engine._lane_l[at : at + length],
+            engine._lane_r[at : at + length],
+            engine._lane_m[at : at + length],
+        )
+    return wrote
+
+
+def _gain(
+    engine: Engine,
+    into: npt.NDArray[np.float32],
+    row: npt.NDArray[np.float32],
+    was: float,
+    now: float,
+    *,
+    add: bool,
+) -> None:
+    mine = own(engine)
+    if was != now:
+        ramp = mine.ramp
+        np.multiply(engine._steps, now - was, out=ramp)
+        np.add(ramp, was, out=ramp)
+        if add:
+            np.multiply(row, ramp, out=mine.scratch)
+            np.add(into, mine.scratch, out=into)
+        else:
+            np.multiply(row, ramp, out=into)
+    elif add:
+        np.multiply(row, now, out=mine.scratch)
+        np.add(into, mine.scratch, out=into)
+    elif now != 1.0 or into is not row:
+        np.multiply(row, now, out=into)
+
+
+def _master(engine: Engine, snapshot: Snapshot) -> None:
+    mine = own(engine)
+    was = float(engine._state[0])
+    now = float(snapshot.master[0])
+    if was != now:
+        ramp = mine.ramp
+        np.multiply(engine._steps, now - was, out=ramp)
+        np.add(ramp, was, out=ramp)
+        np.multiply(engine._bus_l, ramp, out=engine._bus_l)
+        np.multiply(engine._bus_r, ramp, out=engine._bus_r)
+        engine._state[0] = now
+    elif now != 1.0:
+        np.multiply(engine._bus_l, now, out=engine._bus_l)
+        np.multiply(engine._bus_r, now, out=engine._bus_r)
+    switch = float(snapshot.master[1])
+    mine.limiter.process(engine._bus_l, engine._bus_r, float(engine._state[1]), switch)
+    engine._state[1] = switch
+
+
+def _audition(engine: Engine) -> None:
+    fading = engine._fading
+    if fading is not None:
+        _sound(engine, fading, falling=True)
+        engine._fading = None
+    voice = engine._voice
+    if voice is not None:
+        _sound(engine, voice, falling=False)
+
+
+def _sound(engine: Engine, voice: Voice, *, falling: bool) -> None:
+    read = voice.position
+    if read >= voice.frames:
+        return
+    count = min(engine.block, voice.frames - read)
+    sample = voice.audio
+    into_l = engine._bus_l[:count]
+    into_r = engine._bus_r[:count]
+    left = sample[read : read + count, 0]
+    right = sample[read : read + count, voice.last]
+    if falling:
+        fall = engine._fall[:count]
+        scratch = own(engine).scratch[:count]
+        np.multiply(left, fall, out=scratch)
+        np.add(into_l, scratch, out=into_l)
+        np.multiply(right, fall, out=scratch)
+        np.add(into_r, scratch, out=into_r)
+    else:
+        np.add(into_l, left, out=into_l)
+        np.add(into_r, right, out=into_r)
+    voice.position = read + count
+
+
+def _peak(engine: Engine, side: npt.NDArray[np.float32], which: int) -> None:
+    scratch = own(engine).scratch
+    np.abs(side, out=scratch)
+    loudest = scratch.max()
+    if loudest > engine._peaks[which]:
+        engine._peaks[which] = loudest
+
+
+def _raise(
+    engine: Engine,
+    peaks: npt.NDArray[np.float64],
+    channel: int,
+    which: int,
+    side: npt.NDArray[np.float32],
+) -> None:
+    scratch = own(engine).scratch
+    np.abs(side, out=scratch)
+    loudest = scratch.max()
+    if loudest > peaks[channel, which]:
+        peaks[channel, which] = loudest

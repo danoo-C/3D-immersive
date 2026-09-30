@@ -3,7 +3,8 @@ Python render it replaced, to float32 rounding.
 
 Each test plays one arrangement twice, through two engines built alike. One
 renders through the kernel, as the application does. The other renders
-through `reference_spatial.render`, the Python that played until phase 10.
+through `reference_engine.process`, the Python block that played until
+phase 10, whose space renders through `reference_spatial.render`.
 They are compared block by block, what they send to the bus and what they
 leave on the meters, while every source moves.
 """
@@ -19,9 +20,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import reference_spatial
-from immersive.audio import spatial
-from immersive.audio.engine import Engine
+import reference_engine
+from immersive.audio import engine as playing
+from immersive.audio.engine import Engine, Voice
 from immersive.audio.hrtf import lookup
 from immersive.audio.hrtf.bank import Bank, prepare
 from immersive.audio.scheduler import Snapshot, build
@@ -102,6 +103,7 @@ class Twins:
         self.bank, self.project, self.store = bank, project, store
         self.kernel = Engine(BLOCK)
         self.python = Engine(BLOCK)
+        self.python.process = partial(reference_engine.process, self.python)  # type: ignore[method-assign]
         self.snapshots: list[Snapshot] = []
         self.install()
         for engine in (self.kernel, self.python):
@@ -110,16 +112,12 @@ class Twins:
         self.block = 0
 
     def install(self) -> None:
-        """A snapshot of the project for each, the reference's rendering in
-        Python."""
+        """A snapshot of the project for each."""
         made = []
         for engine in (self.kernel, self.python):
             snapshot = build(self.project, self.store.get, None, self.bank)
             engine.install(snapshot)
             made.append(snapshot)
-        space = made[1].space
-        assert space is not None
-        space.render = partial(reference_spatial.render, space)  # type: ignore[method-assign]
         self.snapshots = made
 
     def spaces(self) -> list[object]:
@@ -211,23 +209,27 @@ def test_a_seek_and_a_swap_equal_the_reference(bank: Bank) -> None:
 
 
 def test_after_warming_no_arrangement_compiles_anything(bank: Bank) -> None:
-    """One signature (D-139): what `warm` compiles is what every snapshot
-    an engine plays calls, so no block on the audio thread compiles."""
-    spatial.warm(bank)
-    warmed = list(spatial._render.signatures)  # type: ignore[attr-defined]
-    for modes, keep_level in (
-        ([Pairing.POINT] * 3, True),
-        ([Pairing.LINKED, Pairing.FREE], True),
-        ([Pairing.POINT, Pairing.LINKED], False),
-        ([], True),
+    """One signature (D-139, D-141): what `warm` compiles is what every
+    engine calls, with a space or without one, playing or stopped, with an
+    audition or not, so no block on the audio thread compiles."""
+    playing.warm()
+    warmed = list(playing._block.signatures)  # type: ignore[attr-defined]
+    for modes, keep_level, heard in (
+        ([Pairing.POINT] * 3, True, bank),
+        ([Pairing.LINKED, Pairing.FREE], True, bank),
+        ([Pairing.POINT, Pairing.LINKED], False, bank),
+        ([], True, bank),
+        ([Pairing.POINT], True, None),
     ):
         project, store = arrangement(modes, mono_pair=not modes, keep_level=keep_level)
         engine = Engine(BLOCK)
-        engine.install(build(project, store.get, None, bank))
-        engine.set_playing(True)
+        engine.install(build(project, store.get, None, heard))
+        engine.audition(Voice(np.full((BLOCK * 2, 2), 0.1, dtype=np.float32)))
         out = np.zeros((BLOCK, 2), dtype=np.float32)
+        engine.process(out)
+        engine.set_playing(True)
         for _ in range(3):
             engine.process(out)
 
     assert len(warmed) == 1
-    assert list(spatial._render.signatures) == warmed  # type: ignore[attr-defined]
+    assert list(playing._block.signatures) == warmed  # type: ignore[attr-defined]
