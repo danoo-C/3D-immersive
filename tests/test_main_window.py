@@ -55,11 +55,13 @@ def test_layout_is_splitters_not_docks(app: object) -> None:
 
 
 def test_every_region_is_present(app: object) -> None:
+    from immersive.ui.spatial.ortho_view import OrthoView
     from immersive.ui.widgets.placeholder import Panel
 
     window = MainWindow()
     panels = window.findChildren(Panel)
-    assert len(panels) == 7  # pool, params, top, front, 3d, keyframes, timeline
+    assert len(panels) == 5  # pool, params, 3d, keyframes, timeline
+    assert len(window.findChildren(OrthoView)) == 2  # top, front (M5)
 
 
 def test_workspace_is_two_tabs(app: object) -> None:
@@ -77,17 +79,21 @@ def test_workspace_is_two_tabs(app: object) -> None:
 
 
 def test_the_ortho_views_share_the_first_tab(app: object) -> None:
-    from PySide6.QtWidgets import QTabWidget
+    from PySide6.QtWidgets import QSplitter, QTabWidget
 
+    from immersive.ui.spatial.ortho_view import OrthoView
     from immersive.ui.widgets.placeholder import Placeholder
 
     window = MainWindow()
     workspace = window.findChildren(QTabWidget)[0]
     ortho, view3d = workspace.widget(0), workspace.widget(1)
     assert ortho is not None and view3d is not None
-    assert len(ortho.findChildren(Placeholder)) == 2
-    assert view3d.findChildren(Placeholder) == []  # the 3D tab *is* the panel
-    assert isinstance(view3d, Placeholder)
+    assert isinstance(ortho, QSplitter)
+    top, front = ortho.widget(0), ortho.widget(1)
+    assert isinstance(top, OrthoView) and isinstance(front, OrthoView)
+    assert (top.plane, front.plane) == ("top", "front"), "top on the left"
+    assert window.spatial_views() == (top, front)
+    assert isinstance(view3d, Placeholder), "until M5 phase 4"
 
 
 def test_transport_buttons_have_icons_not_ascii(app: object) -> None:

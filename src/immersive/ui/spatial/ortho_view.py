@@ -107,6 +107,10 @@ class OrthoView(QWidget):
     def plane(self) -> Plane:
         return self._plane
 
+    def retheme(self) -> None:
+        """A theme switch: the colours are read when it paints."""
+        self.update()
+
     # ------------------------------------------------------------ geometry
 
     def point_of(self, position: Position) -> QPointF:

@@ -10,12 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QTabWidget
 
 from immersive.app import build_application
 from immersive.core.document import Document
+from immersive.core.edits import SetAttribute
 from immersive.core.model import (
     Channel,
     Clip,
@@ -26,6 +28,8 @@ from immersive.core.model import (
     sides,
 )
 from immersive.core.selection import Kind
+from immersive.ui import theme, theme_io
+from immersive.ui.main_window import MainWindow
 from immersive.ui.spatial.ortho_view import OrthoView
 from immersive.ui.spatial.scale import Scale
 
@@ -192,6 +196,85 @@ def test_a_click_selects_ctrl_click_toggles_and_nothing_clears() -> None:
     assert document.selection.channels() == [second]
     QTest.mouseClick(top, Qt.MouseButton.LeftButton, pos=top.rect().topLeft())
     assert document.selection.kind is None
+
+
+# ------------------------------------------------------------- the window
+
+
+def shortcut(window: MainWindow, key: str) -> None:
+    """Trigger the window's action bound to `key`, as pressing it would."""
+    [action] = [
+        a for a in window.findChildren(QAction) if a.shortcut().toString() == key
+    ]
+    assert action.isEnabled(), f"{key} does something now"
+    action.trigger()
+
+
+def test_keys_1_and_2_focus_the_views_and_3_shows_the_3d_tab() -> None:
+    window = MainWindow()
+    window.show()
+    window.activateWindow()
+    top, front = window.spatial_views()
+    [workspace] = window.findChildren(QTabWidget)
+
+    shortcut(window, "3")
+    assert workspace.currentIndex() == 1
+    shortcut(window, "2")
+    assert workspace.currentIndex() == 0
+    assert window.focusWidget() is front, "the window's own: offscreen none is active"
+    shortcut(window, "1")
+    assert window.focusWidget() is top
+
+
+def test_an_edit_repaints_the_views() -> None:
+    """A position typed anywhere - here an edit pushed, as the pane pushes
+    one - is drawn: the views are asked to repaint, not left showing where
+    the source was."""
+    window = MainWindow()
+    window.show()
+    document = window.document()
+    document.project.media_pool += document_with().project.media_pool
+    placed = channel(1, Position(1.0, 1.0, 0.0))
+    document.project.channels.append(placed)
+    QApplication.processEvents()
+    top, front = window.spatial_views()
+    painted = {top: 0, front: 0}
+
+    class Counter(QObject):
+        def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+            if event.type() == QEvent.Type.Paint and watched in painted:
+                painted[watched] += 1
+            return False
+
+    counter = Counter()
+    for view in (top, front):
+        view.installEventFilter(counter)
+    document.push(SetAttribute(placed, "position", Position(-2.0, 0.5, 1.0)))
+    QApplication.processEvents()
+
+    assert painted[top] >= 1 and painted[front] >= 1
+    [icon] = top.icons()
+    assert near(icon.centre, *_xy(top.point_of(Position(-2.0, 0.5, 1.0))))
+
+
+def test_a_theme_switch_changes_what_the_views_paint() -> None:
+    top, _ = views(document_with())
+    corner = QPointF(2, 2)
+    before = pixel(top, corner)
+    original = theme.active()
+    try:
+        theme.use(
+            theme.Theme(
+                name="Green",
+                tokens={**theme_io.builtin().tokens, "surface.panel": "#00FF00"},
+                channels=theme_io.builtin().channels,
+                groups=theme_io.builtin().groups,
+            )
+        )
+        top.retheme()
+        assert pixel(top, corner) == QColor("#00FF00") != before
+    finally:
+        theme.use(original)
 
 
 def pixel(view: OrthoView, at: QPointF) -> QColor:

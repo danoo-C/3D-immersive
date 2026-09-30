@@ -67,6 +67,8 @@ from immersive.ui.notices import NoticeLog, Severity
 from immersive.ui.notices import worst as notices_worst
 from immersive.ui.parameters.pane import ParametersPane
 from immersive.ui.parameters.views import LONGEST, TEMPO_CEILING, TEMPO_FLOOR, TIME_STEP
+from immersive.ui.spatial.ortho_view import OrthoView
+from immersive.ui.spatial.scale import Scale
 from immersive.ui.theme_menu import ThemeMenu
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit, snap_text
@@ -118,7 +120,7 @@ _PARAMS_H = 220
 # milestone rather than a dozen scattered strings - and so that a grep for
 # "M3" finds everything the timeline milestone switches on. The milestones
 # themselves are defined in docs/06-roadmap.md.
-_M5 = "the spatial views arrive at M5"
+_M5_3D = "the 3D view arrives at M5 phase 4"
 _M6 = "automation arrives at M6"
 _M7 = "rendering arrives at M7"
 _M8 = "the help surfaces arrive at M8"
@@ -348,9 +350,12 @@ class MainWindow(QMainWindow):
         self._split.triggered.connect(self.split_clips)
 
         view_menu = self._menu(bar, "&View")
-        self._add(view_menu, "Focus &Top View", "1", arrives=_M5)
-        self._add(view_menu, "Focus &Front View", "2", arrives=_M5)
-        self._add(view_menu, "Focus &3D View", "3", arrives=_M5)
+        focus_top = self._add(view_menu, "Focus &Top View", "1")
+        focus_top.triggered.connect(lambda: self.focus_view("top"))
+        focus_front = self._add(view_menu, "Focus &Front View", "2")
+        focus_front.triggered.connect(lambda: self.focus_view("front"))
+        focus_3d = self._add(view_menu, "Focus &3D View", "3")
+        focus_3d.triggered.connect(lambda: self.focus_view("3d"))
         view_menu.addSeparator()
         # One checked pair: the ruler counts in one unit at a time (F-19).
         self._ruler_units = QActionGroup(self)
@@ -635,19 +640,22 @@ class MainWindow(QMainWindow):
         # reading the scene, never for editing, so it does not compete for the
         # same pixels.
         ortho = QSplitter(Qt.Orientation.Horizontal)
-        ortho.addWidget(Placeholder("Top view", "X / Y — drag to position"))
-        ortho.addWidget(Placeholder("Front view", "X / Z — drag for height"))
+        # One scale for both, so their X and their zoom move together
+        # (D-143).
+        self._scale = Scale()
+        self._top = OrthoView(self._document, self._scale, "top")
+        self._front = OrthoView(self._document, self._scale, "front")
+        ortho.addWidget(self._top)
+        ortho.addWidget(self._front)
         ortho.setSizes([600, 600])
 
         workspace = QTabWidget()
         workspace.setDocumentMode(True)
         workspace.addTab(ortho, "Top / Front")
-        workspace.addTab(Placeholder("3D view", "read-only, fixed camera"), "3D")
+        workspace.addTab(Placeholder("3D view", _M5_3D), "3D")
         workspace.setTabToolTip(0, "The editable orthographic views  (1, 2)")
         workspace.setTabToolTip(1, "Read-only isometric view  (3)")
-        # No reference kept: the 1/2/3 actions stay disabled until M5, because
-        # selecting the tab is only half of what "Focus Top View" says it does
-        # and there is no view to focus yet. M5 wires both halves at once.
+        self._workspace = workspace
 
         upper = QSplitter(Qt.Orientation.Horizontal)
         upper.addWidget(left)
@@ -833,6 +841,19 @@ class MainWindow(QMainWindow):
 
     def timeline(self) -> TimelinePanel:
         return self._timeline
+
+    def spatial_views(self) -> tuple[OrthoView, OrthoView]:
+        """The top view and the front view."""
+        return self._top, self._front
+
+    def focus_view(self, which: str) -> None:
+        """Keys 1, 2 and 3 (04, *The workspace is tabbed*): the top or the
+        front view focused, on the first tab; or the 3D tab shown."""
+        if which == "3d":
+            self._workspace.setCurrentIndex(1)
+            return
+        self._workspace.setCurrentIndex(0)
+        (self._top if which == "top" else self._front).setFocus()
 
     def pool(self) -> MediaPool:
         return self._pool
