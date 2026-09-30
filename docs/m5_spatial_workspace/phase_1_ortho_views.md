@@ -1,6 +1,6 @@
 # M5 · Phase 1 — The ortho views, drawn
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:** [plans/phase_1_ortho_views.md](plans/phase_1_ortho_views.md)
 
 ## Goal
 
