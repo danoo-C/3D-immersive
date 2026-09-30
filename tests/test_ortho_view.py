@@ -13,7 +13,7 @@ import pytest
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QTabWidget
+from PySide6.QtWidgets import QApplication, QTabWidget, QWidget
 
 from immersive.app import build_application
 from immersive.core.document import Document
@@ -397,7 +397,7 @@ def test_a_theme_switch_changes_what_the_views_paint() -> None:
         theme.use(original)
 
 
-def pixel(view: OrthoView, at: QPointF) -> QColor:
+def pixel(view: QWidget, at: QPointF) -> QColor:
     return view.grab().toImage().pixelColor(at.toPoint())
 
 

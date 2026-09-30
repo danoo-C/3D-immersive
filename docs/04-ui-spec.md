@@ -435,7 +435,7 @@ the built-in paints each in its channel's:
 | `fade.handle` | `text.secondary` | the square at a fade's end, on a selected clip, as the worked example under *The file* named it |
 
 The spatial views', built at M5 phase 1: the top and front views, and the
-3D view after them; the bypass strip's at phase 3. `icon` and `pair` are the reserved `channel` value, so
+3D view after them at phase 4; the bypass strip's at phase 3. `icon` and `pair` are the reserved `channel` value, so
 a source is drawn in its channel's colour, as its clips are, unless a theme
 paints them all one colour:
 
@@ -451,6 +451,7 @@ paints them all one colour:
 | `pair` | `channel` | the line joining a pair's two sides |
 | `selected` | `accent` | the ring around a selected channel's icons; a selected chip's outline; the ⊘ under the pointer |
 | `strip` | `surface.raised` | behind the bypass strip's chips |
+| `grid` | `border` | the 3D view's ground, at ear level |
 | `chip` | `surface.hover` | a bypassed channel's chip |
 | `chip.text` | `text.primary` | a chip's name |
 | `chip.glyph` | `text.secondary` | a chip's ⊘ |
@@ -653,6 +654,20 @@ that could be knocked out of place mid-take.
 Drawn with `QPainter` under an orthographic projection, not OpenGL: no extra
 dependency, and it is not on a latency path. A real GL scene stays possible
 later if we add video export.
+
+**The camera** (D-148) is a true isometric, a metre the same length along
+every axis, from behind the listener and to their left: their right goes
+up and to the right, their front up and to the left, and up is up. The
+head stays at the centre. The ground, a grid at ear level labelled
+*front* at its front edge, runs from −R to +R metres, R the smallest of 2,
+4, 8 ... holding every placed source, and up and down the view fits the
+highest and lowest source in steps of a quarter of R, so the view holds
+still while a source moves within a step. Each source has a drop line to
+its point on the ground, which shows its height. The head and the icons
+are drawn farthest from the camera first, so a nearer one covers a
+farther one, and the selected channels' rings last. The icons follow the
+ortho views' rules (*Icons and depth*, below). The view takes no mouse
+input and no focus.
 
 ### Bypassed channels
 

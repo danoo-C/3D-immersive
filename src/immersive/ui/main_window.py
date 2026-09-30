@@ -72,6 +72,7 @@ from immersive.ui.spatial.bypass_strip import BypassStrip
 from immersive.ui.spatial.ortho_view import OrthoView
 from immersive.ui.spatial.placing import Placing
 from immersive.ui.spatial.scale import Scale
+from immersive.ui.spatial.view3d import View3D
 from immersive.ui.theme_menu import ThemeMenu
 from immersive.ui.time_axis import TimeAxis
 from immersive.ui.timeline.grid import Unit, snap_text
@@ -123,7 +124,6 @@ _PARAMS_H = 220
 # milestone rather than a dozen scattered strings - and so that a grep for
 # "M3" finds everything the timeline milestone switches on. The milestones
 # themselves are defined in docs/06-roadmap.md.
-_M5_3D = "the 3D view arrives at M5 phase 4"
 _M6 = "automation arrives at M6"
 _M7 = "rendering arrives at M7"
 _M8 = "the help surfaces arrive at M8"
@@ -670,7 +670,8 @@ class MainWindow(QMainWindow):
         workspace = QTabWidget()
         workspace.setDocumentMode(True)
         workspace.addTab(ortho, "Top / Front")
-        workspace.addTab(Placeholder("3D view", _M5_3D), "3D")
+        self._view3d = View3D(self._document, self._placing)
+        workspace.addTab(self._view3d, "3D")
         workspace.setTabToolTip(0, "The editable orthographic views  (1, 2)")
         workspace.setTabToolTip(1, "Read-only isometric view  (3)")
         self._workspace = workspace
@@ -863,6 +864,10 @@ class MainWindow(QMainWindow):
     def spatial_views(self) -> tuple[OrthoView, OrthoView]:
         """The top view and the front view."""
         return self._top, self._front
+
+    def view3d(self) -> View3D:
+        """The read-only 3D view, on the second tab."""
+        return self._view3d
 
     def bypass_strip(self) -> BypassStrip:
         """The strip of bypassed channels, under the top view."""

@@ -94,8 +94,8 @@ DRAG_THRESHOLD: Final = 4
 @dataclass(frozen=True)
 class Icon:
     """One drawn icon: whose, which side (-1 for a channel's one point, 0 for
-    a pair's left, 1 for its right), where, how big, how strong, and
-    whether it glows (D-146)."""
+    a pair's left, 1 for its right), where, how big, how strong, whether it
+    glows (D-146), and the position it is drawn for."""
 
     channel: Channel
     side: int
@@ -103,6 +103,7 @@ class Icon:
     radius: float
     opacity: float = 1.0
     glow: bool = False
+    position: Position | None = None
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,7 @@ class OrthoView(QWidget):
                         look.radius(where),
                         strength,
                         channel.solo,
+                        where,
                     )
                 )
         return drawn + on_top
@@ -241,7 +243,7 @@ class OrthoView(QWidget):
             + abs(centre.x() - self.width() / 2)
             + abs(centre.y() - self.height() / 2)
         )
-        painter.setFont(_small(painter.font()))
+        painter.setFont(small_font(painter.font()))
         ring = QPen(QColor(group_color("spatial", "ring")), 1.0)
         label = QColor(group_color("spatial", "ring.label"))
         metres = step
@@ -265,7 +267,7 @@ class OrthoView(QWidget):
         _, bottom = self._scale.metres(
             self._plane, self.width(), self.height(), 0, self.height()
         )
-        painter.setFont(_small(painter.font()))
+        painter.setFont(small_font(painter.font()))
         label = QColor(group_color("spatial", "ring.label"))
         height = step * int(bottom // step)
         while height <= top:
@@ -314,39 +316,12 @@ class OrthoView(QWidget):
         painter.setOpacity(1.0)
 
     def _draw_icon(self, painter: QPainter, icon: Icon, *, selected: bool) -> None:
-        colour = QColor(channel_group_color("spatial", "icon", icon.channel.color))
         if selected:
             painter.setPen(QPen(QColor(group_color("spatial", "selected")), RING))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             around = icon.radius + RING_GAP
             painter.drawEllipse(icon.centre, around, around)
-        painter.setOpacity(icon.opacity)
-        painter.setPen(Qt.PenStyle.NoPen)
-        if icon.glow:
-            reach = icon.radius + GLOW
-            halo = QRadialGradient(icon.centre, reach)
-            edge, faded = QColor(colour), QColor(colour)
-            edge.setAlphaF(0.6)
-            faded.setAlphaF(0.0)
-            halo.setColorAt(icon.radius / reach, edge)
-            halo.setColorAt(1.0, faded)
-            painter.setBrush(halo)
-            painter.drawEllipse(icon.centre, reach, reach)
-        painter.setBrush(colour)
-        painter.drawEllipse(icon.centre, icon.radius, icon.radius)
-        if icon.side >= 0:
-            painter.setPen(QColor(group_color("spatial", "background")))
-            letters = _small(painter.font(), bold=True)
-            letters.setPixelSize(max(round(icon.radius * 1.3), 6))
-            painter.setFont(letters)
-            box = QRectF(
-                icon.centre.x() - icon.radius,
-                icon.centre.y() - icon.radius,
-                2 * icon.radius,
-                2 * icon.radius,
-            )
-            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "LR"[icon.side])
-        painter.setOpacity(1.0)
+        draw_icon(painter, icon)
 
     # --------------------------------------------------------------- mouse
 
@@ -472,7 +447,40 @@ class OrthoView(QWidget):
         event.accept()
 
 
-def _small(font: QFont, *, bold: bool = False) -> QFont:
+def draw_icon(painter: QPainter, icon: Icon) -> None:
+    """One icon, as every view draws it (D-146): its glow if soloed, its
+    disc at its opacity, and a pair's side lettered L or R."""
+    colour = QColor(channel_group_color("spatial", "icon", icon.channel.color))
+    painter.setOpacity(icon.opacity)
+    painter.setPen(Qt.PenStyle.NoPen)
+    if icon.glow:
+        reach = icon.radius + GLOW
+        halo = QRadialGradient(icon.centre, reach)
+        edge, faded = QColor(colour), QColor(colour)
+        edge.setAlphaF(0.6)
+        faded.setAlphaF(0.0)
+        halo.setColorAt(icon.radius / reach, edge)
+        halo.setColorAt(1.0, faded)
+        painter.setBrush(halo)
+        painter.drawEllipse(icon.centre, reach, reach)
+    painter.setBrush(colour)
+    painter.drawEllipse(icon.centre, icon.radius, icon.radius)
+    if icon.side >= 0:
+        painter.setPen(QColor(group_color("spatial", "background")))
+        letters = small_font(painter.font(), bold=True)
+        letters.setPixelSize(max(round(icon.radius * 1.3), 6))
+        painter.setFont(letters)
+        box = QRectF(
+            icon.centre.x() - icon.radius,
+            icon.centre.y() - icon.radius,
+            2 * icon.radius,
+            2 * icon.radius,
+        )
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "LR"[icon.side])
+    painter.setOpacity(1.0)
+
+
+def small_font(font: QFont, *, bold: bool = False) -> QFont:
     smaller = QFont(font)
     smaller.setPointSizeF(max(font.pointSizeF() - 2, 6.0))
     smaller.setBold(bold)

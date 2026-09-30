@@ -137,6 +137,7 @@
       "chip": "surface.hover",
       "chip.glyph": "text.secondary",
       "chip.text": "text.primary",
+      "grid": "border",
       "head": "text.secondary",
       "head.fill": "surface.raised",
       "icon": "channel",
