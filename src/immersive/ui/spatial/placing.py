@@ -83,11 +83,12 @@ class Placing:
             self._sides = (left, right)
             self._tell()
 
-    def end(self) -> Command | None:
-        """The drag released: the one edit it makes, or None when it moved
-        nothing. Nothing is being placed after."""
+    def edit(self) -> Command | None:
+        """The one edit the drag would make if it ended now, or None when it
+        has moved nothing. The drag goes on: a release pushes this, then
+        `clear()`s, so whatever is told of the clearing finds the model
+        already where the drag put it."""
         channel, placed, side = self._channel, self._sides, self._side
-        self._clear()
         if channel is None or placed is None or placed == sides(channel):
             return None
         left, right = placed
@@ -96,9 +97,22 @@ class Placing:
             return SetAttribute(channel, "placement", replace(placement, right=right))
         return SetAttribute(channel, "position", left)
 
+    def end(self) -> Command | None:
+        """`edit()`, and nothing placed after."""
+        made = self.edit()
+        self.clear()
+        return made
+
+    def clear(self) -> None:
+        """Nothing placed any more: the drag's edit pushed, or Esc."""
+        if self._channel is None:
+            return
+        self._channel, self._side, self._sides = None, POINT, None
+        self._tell()
+
     def cancel(self) -> None:
         """Esc: nothing placed, and no edit."""
-        self._clear()
+        self.clear()
 
     def observe(self, callback: Callable[[], None]) -> None:
         """Call `callback` whenever what is placed changes, and when a drag
@@ -106,12 +120,6 @@ class Placing:
         self._observers.append(callback)
 
     # ------------------------------------------------------------ internal
-
-    def _clear(self) -> None:
-        if self._channel is None:
-            return
-        self._channel, self._side, self._sides = None, POINT, None
-        self._tell()
 
     def _tell(self) -> None:
         for callback in list(self._observers):

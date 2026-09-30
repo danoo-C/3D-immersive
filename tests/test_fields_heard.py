@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import pytest
-from PySide6.QtCore import QEventLoop
+from PySide6.QtCore import QEventLoop, QPoint
 from PySide6.QtWidgets import QApplication
 
 from hearing import Tape
@@ -34,6 +34,7 @@ from immersive.core.model import (
     Clip,
     MediaFile,
     Pairing,
+    Placement,
     Position,
     new_channel,
 )
@@ -43,6 +44,7 @@ from immersive.ui import hrtf, theme
 from immersive.ui.main_window import MainWindow, Unsaved
 from immersive.ui.parameters.views import MODES, ChannelView, ProjectView
 from standin import Backend, Stream
+from test_dragging_sources import H, W, move, per_metre, press, release
 from test_parameters import type_into
 from test_spatial import head
 
@@ -252,3 +254,59 @@ def test_level_as_mixed_switched_off_is_heard(window: MainWindow) -> None:
     before, after = level(tape.heard(3, 1)), level(tape.heard(6, 1))
     for was, now in zip(before, after, strict=True):
         assert 20 * np.log10(now / was) == pytest.approx(6.02, abs=0.05)
+
+
+# --------------------------------------------------------------------------- #
+# dragged in the views, heard (M5 phase 2, D-144)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_panes_fields_follow_the_drag(window: MainWindow) -> None:
+    placed = with_channel(window, 0.25, where=Position(0.0, 1.0, 0.0))
+    placed.placement = Placement()  # one point: the pane shows Position X
+    window.document().selection.select(Kind.CHANNELS, [placed])
+    top, _ = window.spatial_views()
+    top.resize(W, H)
+    per = per_metre(top)
+    [icon] = [icon for icon in top.icons() if icon.channel is placed]
+
+    start = press(top, icon.centre)
+    move(top, start + QPoint(40, 0))
+
+    view = window.parameters().view()
+    assert isinstance(view, ChannelView)
+    assert view.position[0].value() == pytest.approx(40 / per, abs=1e-3)
+    assert placed.position.x == 0.0, "the pane shows it; the model has not moved"
+    release(top, start + QPoint(40, 0))
+
+
+def test_a_dragged_source_is_heard_moving_before_the_release(
+    window: MainWindow,
+) -> None:
+    """While the transport plays, each movement reaches the engine at the
+    next block, and there is no edit until the release."""
+    placed = with_channel(window, 0.25, where=Position(0.0, 1.0, 0.0))
+    placed.placement = Placement()
+    tape = playing(window)
+    top, _ = window.spatial_views()
+    top.resize(W, H)
+    per = per_metre(top)
+    [icon] = [icon for icon in top.icons() if icon.channel is placed]
+    edits = window.document().can_undo
+
+    start = press(top, icon.centre)
+    move(top, start + QPoint(60, 0))
+    tape.play(2)
+
+    engine = window._player.engine  # type: ignore[union-attr]
+    index = window.document().project.channels.index(placed)
+    heard = engine._current.positions[index, 0]
+    assert heard[0] == pytest.approx(60 / per, abs=1e-3), "heard where it is dragged"
+    assert placed.position.x == 0.0
+    assert window.document().can_undo == edits, "no edit yet"
+
+    release(top, start + QPoint(60, 0))
+    sent = engine.sent()
+    tape.play(1)
+    assert placed.position.x == pytest.approx(60 / per, abs=1e-3)
+    assert engine.sent() == sent, "the edit found the engine already there"

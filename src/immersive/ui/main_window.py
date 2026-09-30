@@ -68,6 +68,7 @@ from immersive.ui.notices import worst as notices_worst
 from immersive.ui.parameters.pane import ParametersPane
 from immersive.ui.parameters.views import LONGEST, TEMPO_CEILING, TEMPO_FLOOR, TIME_STEP
 from immersive.ui.spatial.ortho_view import OrthoView
+from immersive.ui.spatial.placing import Placing
 from immersive.ui.spatial.scale import Scale
 from immersive.ui.theme_menu import ThemeMenu
 from immersive.ui.time_axis import TimeAxis
@@ -624,12 +625,17 @@ class MainWindow(QMainWindow):
             else f"Cannot be heard: {self._unavailable or 'no audio output'}"
         )
         left.addWidget(self._pool)
+        #: A source being dragged in the views: the views draw it, the pane
+        #: shows it, and the feed sends it to the engine (D-144).
+        self._placing = Placing()
+        self._placing.observe(self._placed)
         self._parameters = ParametersPane(
             self._document,
             unit=lambda: self._timeline.unit(),
             peaks=self._store.peaks,
             audition=self.audition_media if self._player is not None else None,
             unavailable=self._unavailable,
+            placing=self._placing,
         )
         left.addWidget(self._parameters)
         left.setSizes([_POOL_H, _PARAMS_H])
@@ -643,8 +649,8 @@ class MainWindow(QMainWindow):
         # One scale for both, so their X and their zoom move together
         # (D-143).
         self._scale = Scale()
-        self._top = OrthoView(self._document, self._scale, "top")
-        self._front = OrthoView(self._document, self._scale, "front")
+        self._top = OrthoView(self._document, self._scale, "top", self._placing)
+        self._front = OrthoView(self._document, self._scale, "front", self._placing)
         ortho.addWidget(self._top)
         ortho.addWidget(self._front)
         ortho.setSizes([600, 600])
@@ -1573,6 +1579,20 @@ class MainWindow(QMainWindow):
     def _feed_update(self) -> None:
         if self._feed is not None:
             self._feed.update(self._document.project)
+
+    def _placed(self) -> None:
+        """A source dragged (D-144): where it is now, heard at the next
+        block. A drag that ends has pushed its edit before it clears, so the
+        update then finds the engine already there; a drag dropped by Esc
+        has the model's position sent back."""
+        if self._feed is None:
+            return
+        channel = self._placing.channel
+        placed = self._placing.sides(channel) if channel is not None else None
+        if channel is None or placed is None:
+            self._feed.update(self._document.project)
+            return
+        self._feed.preview(self._document.project, channel, *placed)
 
     def _ruler_unit(self) -> Unit:
         """What the ruler counts in - bars while the window is still being

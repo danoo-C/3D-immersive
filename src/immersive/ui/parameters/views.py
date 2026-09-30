@@ -74,6 +74,7 @@ from immersive.core.model import (
 )
 from immersive.core.time import SAMPLE_RATE
 from immersive.ui import theme
+from immersive.ui.spatial.placing import Placing
 from immersive.ui.timeline.grid import Unit, snap_text
 from immersive.ui.timeline.headers import BYPASS_TIP
 from immersive.ui.timeline.snap_menu import fill_snap_menu
@@ -590,8 +591,11 @@ class ChannelView(View):
     never wanted, and giving it loses every other name at once.
     """
 
-    def __init__(self, document: Document) -> None:
+    def __init__(self, document: Document, placing: Placing | None = None) -> None:
         super().__init__(document, "Channel")
+        #: A source being dragged in the views: its sides are shown as the
+        #: drag has them (D-144).
+        self._placing = placing if placing is not None else Placing()
         self.name = TextField()
         self.name.setObjectName("PaneText")
         self.name.setToolTip("The channel's name — type, then Enter")
@@ -778,7 +782,7 @@ class ChannelView(View):
         self.mode.setCurrentIndex(list(MODES).index(mode) if same and mode else -1)
         pairs = all(paired(project, channel) for channel in channels)
         linked = pairs and all(mode is Pairing.LINKED for mode in modes)
-        placed = [sides(channel) for channel in channels]
+        placed = [self._placing.sides(c) or sides(c) for c in channels]
         for (axis, label, _), left, right, pivot, box, tip in zip(
             AXES,
             self.position,

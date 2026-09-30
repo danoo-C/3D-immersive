@@ -367,9 +367,12 @@ class OrthoView(QWidget):
         if event.button() is Qt.MouseButton.LeftButton and self._press is not None:
             self._press = None
             if self._placing.channel is not None:
-                edit = self._placing.end()
+                # The edit first, then the clearing: whatever is told of the
+                # drag ending finds the model already where it put the source.
+                edit = self._placing.edit()
                 if edit is not None:
                     self._document.push(edit)
+                self._placing.clear()
             event.accept()
             return
         super().mouseReleaseEvent(event)

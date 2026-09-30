@@ -32,6 +32,7 @@ from immersive.ui.parameters.views import (
     ProjectView,
     View,
 )
+from immersive.ui.spatial.placing import Placing
 from immersive.ui.timeline.grid import Unit
 from immersive.ui.widgets.placeholder import Panel
 
@@ -55,6 +56,7 @@ class ParametersPane(Panel):
         peaks: Callable[[str], Pyramid | None] = lambda _media_id: None,
         audition: Callable[[str], bool] | None = None,
         unavailable: str = "",
+        placing: Placing | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(TITLE, parent)
@@ -80,8 +82,12 @@ class ParametersPane(Panel):
         header.installEventFilter(self)
         self._show_header()
 
+        #: A source being dragged in the views, whose fields follow the drag
+        #: (D-144).
+        self._placing = placing if placing is not None else Placing()
         document.observe(self._changed)
         document.selection.observe(self._changed)
+        self._placing.observe(self._dragged)
         self._changed()
         self.retheme()
 
@@ -140,6 +146,11 @@ class ParametersPane(Panel):
             self._scroll.setWidget(self._view)
         self._view.show_values()
 
+    def _dragged(self) -> None:
+        """A source dragged in the views: its fields show where it is now."""
+        if isinstance(self._view, ChannelView):
+            self._view.show_values()
+
     def _build(self, kind: Kind | None) -> View:
         document = self._document
         if kind is None:
@@ -147,5 +158,5 @@ class ParametersPane(Panel):
         if kind is Kind.CLIPS:
             return ClipView(document, self._unit)
         if kind is Kind.CHANNELS:
-            return ChannelView(document)
+            return ChannelView(document, self._placing)
         return MediaView(document, self._peaks, self._audition, self._unavailable)
