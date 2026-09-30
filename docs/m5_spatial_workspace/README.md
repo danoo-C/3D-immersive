@@ -12,7 +12,7 @@ D-135 · Workflow: [09-workflow.md](../09-workflow.md)
 | [2 — Dragging, heard](phase_2_dragging.md) | ✅ |
 | [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | ✅ |
 | [4 — The 3D view](phase_4_view3d.md) | ✅ |
-| [5 — Measured with the views playing](phase_5_measured.md) | not started |
+| [5 — Measured with the views playing](phase_5_measured.md) | in progress |
 | [6 — Heard](phase_6_heard.md) | not started |
 
 The order is dependency order. The top and front views are drawn first,

@@ -1,6 +1,6 @@
 # M5 · Phase 5 — Measured with the views playing
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:** [plans/phase_5_measured.md](plans/phase_5_measured.md)
 
 ## Goal
 
