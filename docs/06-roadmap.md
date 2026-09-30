@@ -396,7 +396,9 @@ with the port seam still tiny, rather than after the UI is built on top.
 - Top (X/Y) and front (X/Z) ortho views, sharing the workspace's first tab
   (D-49): head glyph, rings, channel icons
 - Drag to position, live during playback
-- Motion trails and keyframe diamonds drawn from the curves
+- ~~Motion trails and keyframe diamonds drawn from the curves~~ - moved to
+  M6 before M5 started: nothing can make a curve until M6, and the trail's
+  "now" dot would move while the sound, played from curves only at M6, did not
 - Read-only isometric 3D view via `QPainter`, in the workspace's second tab
 - Distance-as-radius, gain-as-opacity, mute/solo states
 - The bypass strip under the top view, and bypassed channels leaving the canvases
@@ -410,6 +412,9 @@ move.
 
 ## M6 — Automation
 - Keyframe editor panel: axes, curves, diamonds, bezier handles
+- Motion trails and keyframe diamonds in the spatial views, and the dot where
+  the source is now. *Moved here from M5*, to be built with the curves they
+  are drawn from
 - Time axis locked to the timeline's scroll and zoom
 - Insert, move, box-select, group drag, delete, interpolation menu
 - Multi-curve overlay with per-parameter visibility

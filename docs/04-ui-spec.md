@@ -595,7 +595,10 @@ they do.
 
 ## Workspace (centre)
 
-Three panes side by side, each independently resizable.
+Two tabs (D-49; *The workspace is tabbed*, above): the top and front views
+share the first, split so each can be resized, and the 3D view has the
+second. This section said "three panes side by side" until M5 started,
+after D-49 had already made them tabs.
 
 ### Top view — X / Y — editable
 
@@ -641,14 +644,15 @@ The strip hides itself entirely when nothing is bypassed, so the normal case
 costs no space.
 
 ```
-┌─────────────────────────────┬──────────┬──────────┐
-│          TOP  (X / Y)       │  FRONT   │    3D    │
-│              ,---.          │          │          │
-│             ( o_o )         │  --o--   │   ╱o╲    │
-│           o        o        │   (o)    │  (o_o)   │
-│                             │          │          │
-│ ⊘ ●Backing mix  ⊘ ●Sub 808  │          │          │
-└─────────────────────────────┴──────────┴──────────┘
+ Top / Front │ 3D
+┌──────────────────────────────┬──────────────────────┐
+│          TOP  (X / Y)        │    FRONT  (X / Z)    │
+│              ,---.           │                      │
+│             ( o_o )          │  o      (o_o)     o  │
+│           o         o        │ ─────── ear level ── │
+│                              │                      │
+│ ⊘ ●Backing mix  ⊘ ●Sub 808   │                      │
+└──────────────────────────────┴──────────────────────┘
 ```
 
 Clicking a chip selects that channel, exactly as clicking its icon would.

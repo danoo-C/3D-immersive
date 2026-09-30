@@ -69,7 +69,7 @@ milestone nobody has opened yet:
 | `m2_media/` | **in progress** |
 | `m3_timeline/` | **in progress** |
 | `m4_binaural_engine/` | **in progress** |
-| `m5_spatial_workspace/` | |
+| `m5_spatial_workspace/` | **in progress** |
 | `m6_automation/` | |
 | `m7_render/` | |
 | `m8_polish_and_ship/` | |
