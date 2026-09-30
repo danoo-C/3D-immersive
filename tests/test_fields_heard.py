@@ -16,7 +16,8 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import pytest
-from PySide6.QtCore import QEventLoop, QPoint
+from PySide6.QtCore import QEventLoop, QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from hearing import Tape
@@ -315,3 +316,27 @@ def test_a_dragged_source_is_heard_moving_before_the_release(
         "the release sends no position: the engine is already there, and the "
         "old position is never sent back on the way"
     )
+
+
+def test_a_dragged_source_dropped_by_esc_is_heard_where_it_was(
+    window: MainWindow,
+) -> None:
+    placed = with_channel(window, 0.25, where=Position(0.0, 1.0, 0.0))
+    placed.placement = Placement()
+    tape = playing(window)
+    top, _ = window.spatial_views()
+    top.resize(W, H)
+    [icon] = [icon for icon in top.icons() if icon.channel is placed]
+    engine = window._player.engine  # type: ignore[union-attr]
+    index = window.document().project.channels.index(placed)
+
+    start = press(top, icon.centre)
+    move(top, start + QPoint(60, 0))
+    tape.play(2)
+    assert engine._current.positions[index, 0, 0] > 0.5, "heard dragged"
+    QTest.keyClick(top, Qt.Key.Key_Escape)
+    release(top, start + QPoint(60, 0))
+    tape.play(2)
+
+    assert list(engine._current.positions[index, 0]) == [0.0, 1.0, 0.0]
+    assert placed.position == Position(0.0, 1.0, 0.0)

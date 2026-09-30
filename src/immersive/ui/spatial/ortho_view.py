@@ -36,7 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Final
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -376,6 +376,19 @@ class OrthoView(QWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def event(self, event: QEvent) -> bool:
+        """Esc is the window's Stop too: during a drag this view claims it,
+        so it drops the drag, as the timeline's drags claim it."""
+        if (
+            self._press is not None
+            and event.type() == QEvent.Type.ShortcutOverride
+            and isinstance(event, QKeyEvent)
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            event.accept()
+            return True
+        return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape and self._press is not None:
