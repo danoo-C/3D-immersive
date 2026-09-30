@@ -1,6 +1,6 @@
 # M5 · Phase 4 — The 3D view
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:** [plans/phase_4_view3d.md](plans/phase_4_view3d.md)
 
 ## Goal
 
