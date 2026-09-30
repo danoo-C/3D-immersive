@@ -122,7 +122,7 @@ strict_equality = true
 
 # These ship no type information.
 [[tool.mypy.overrides]]
-module = ["sounddevice.*", "soundfile.*", "soxr.*", "sofar.*", "scipy.*"]
+module = ["sounddevice.*", "soundfile.*", "soxr.*", "sofar.*", "scipy.*", "llvmlite.*"]
 ignore_missing_imports = true
 
 # --------------------------------------------------------------------------- #

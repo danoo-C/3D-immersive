@@ -37,7 +37,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final, TypeVar
 
-from numba import njit
+from llvmlite import ir
+from numba import njit, types
+from numba.extending import intrinsic
 
 Function = TypeVar("Function", bound=Callable[..., object])
 
@@ -57,6 +59,23 @@ def kernel(function: Function) -> Function:
     and without numba's runtime."""
     compiled: Function = njit(**OPTIONS)(function)
     return compiled
+
+
+@intrinsic
+def _read(typing: object, address: object, index: object) -> object:
+    def load(context: Any, builder: Any, signature: Any, arguments: Any) -> Any:
+        pointer = builder.inttoptr(arguments[0], ir.PointerType(ir.FloatType()))
+        return builder.load(builder.gep(pointer, [arguments[1]]))
+
+    return types.float32(types.int64, types.int64), load
+
+
+#: `read(address, index)`: the float32 `index` places past `address`, in a
+#: kernel (D-140). How a kernel reads a sample or a fade table: without
+#: numba's runtime it can be handed no list of arrays, nor make a view of
+#: one. Nothing is checked: the address must be an array's that is alive,
+#: and the index inside it, which is the caller's to keep.
+read: Callable[[int, int], float] = _read  # type: ignore[assignment]
 
 
 def fresh_cache(package: Path = PACKAGE) -> bool:
