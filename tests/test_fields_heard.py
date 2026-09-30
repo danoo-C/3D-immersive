@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication
 from hearing import Tape
 from immersive.app import build_application
 from immersive.audio.device import Output
+from immersive.audio.engine import POSITION, RING
 from immersive.audio.hrtf import lookup
 from immersive.audio.limiter import CEILING_DB
 from immersive.audio.player import Player
@@ -305,8 +306,12 @@ def test_a_dragged_source_is_heard_moving_before_the_release(
     assert placed.position.x == 0.0
     assert window.document().can_undo == edits, "no edit yet"
 
-    release(top, start + QPoint(60, 0))
     sent = engine.sent()
+    release(top, start + QPoint(60, 0))
+    kinds = [float(engine._ring[n % RING, 0]) for n in range(sent, engine.sent())]
     tape.play(1)
     assert placed.position.x == pytest.approx(60 / per, abs=1e-3)
-    assert engine.sent() == sent, "the edit found the engine already there"
+    assert POSITION not in kinds, (
+        "the release sends no position: the engine is already there, and the "
+        "old position is never sent back on the way"
+    )
