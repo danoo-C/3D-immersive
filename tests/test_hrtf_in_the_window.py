@@ -16,6 +16,7 @@ from PySide6.QtCore import QEventLoop
 from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
+from immersive.audio import spatial
 from immersive.audio.device import Output
 from immersive.audio.hrtf import lookup
 from immersive.audio.hrtf.bank import Bank
@@ -210,3 +211,22 @@ def test_a_request_replaced_is_never_handed_over_late(
     assert window._hrtf._pool.waitForDone(int(GATE_TIMEOUT * 1000))
     QApplication.processEvents()
     assert window.notices().newest_first() == [], "the first's refusal, ignored"
+
+
+def test_the_bank_arrives_with_its_kernel_compiled(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compiled on the worker, before the bank is handed over (D-139)."""
+    standing_in(monkeypatch)
+    warmed: list[Bank] = []
+    real = spatial.warm
+
+    def warm(bank: Bank) -> None:
+        real(bank)
+        warmed.append(bank)
+
+    monkeypatch.setattr(spatial, "warm", warm)
+    window.prepare_hrtf()
+    until(lambda: window.bank() is not None)
+
+    assert warmed == [window.bank()]

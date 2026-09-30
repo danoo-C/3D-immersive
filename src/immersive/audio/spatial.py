@@ -346,6 +346,19 @@ class Space:
         tail[:, keep:].fill(0.0)
 
 
+def warm(bank: Bank) -> None:
+    """Compile the kernel for `bank`, or load it from numba's cache, by
+    rendering a block of silence through a space of one point and one pair.
+    On the worker that prepares the bank, before it is handed over, so the
+    first block the audio thread plays compiles nothing (D-139). The arrays
+    are the kinds a snapshot and the engine give it, so it is the one
+    signature they will call."""
+    positions = np.zeros((2, 2, 3))
+    space = Space.build(bank, (0, 1, 1), positions, Distance(), (POINT, 0, 1))
+    silence = np.zeros((2, bank.block), dtype=np.float32)
+    space.render(positions, np.zeros((2, 2)), silence[0], silence[1])
+
+
 # --------------------------------------------------------------- the kernel
 
 

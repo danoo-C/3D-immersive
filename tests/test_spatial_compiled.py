@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 import reference_spatial
+from immersive.audio import spatial
 from immersive.audio.engine import Engine
 from immersive.audio.hrtf import lookup
 from immersive.audio.hrtf.bank import Bank, prepare
@@ -207,3 +208,26 @@ def test_a_seek_and_a_swap_equal_the_reference(bank: Bank) -> None:
     twins.install()
 
     assert twins.play(10) > 0.01
+
+
+def test_after_warming_no_arrangement_compiles_anything(bank: Bank) -> None:
+    """One signature (D-139): what `warm` compiles is what every snapshot
+    an engine plays calls, so no block on the audio thread compiles."""
+    spatial.warm(bank)
+    warmed = list(spatial._render.signatures)  # type: ignore[attr-defined]
+    for modes, keep_level in (
+        ([Pairing.POINT] * 3, True),
+        ([Pairing.LINKED, Pairing.FREE], True),
+        ([Pairing.POINT, Pairing.LINKED], False),
+        ([], True),
+    ):
+        project, store = arrangement(modes, mono_pair=not modes, keep_level=keep_level)
+        engine = Engine(BLOCK)
+        engine.install(build(project, store.get, None, bank))
+        engine.set_playing(True)
+        out = np.zeros((BLOCK, 2), dtype=np.float32)
+        for _ in range(3):
+            engine.process(out)
+
+    assert len(warmed) == 1
+    assert list(spatial._render.signatures) == warmed  # type: ignore[attr-defined]
