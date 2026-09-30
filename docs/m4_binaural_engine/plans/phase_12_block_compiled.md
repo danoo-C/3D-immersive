@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 12 — The whole block, compiled
 
-**Written:** 2026-09-30 · **Status:** in progress
+**Written:** 2026-09-30 · **Status:** ✅ built
 
 ## Approach
 
@@ -149,4 +149,38 @@ compiled
 
 ## Outcome
 
-Filled in at the end.
+Built as planned in its shape: the lanes as a table read by address,
+`fill` and the limiter compiled, then the whole block as one kernel,
+compiled before any stream, and collections settled on the numbers. What
+the plan did not foresee:
+
+- **`carray` needs the runtime too.** The spike tried it first. Without
+  numba's runtime a kernel cannot return an array it made, not even a view.
+  So `compiled.read` loads one float32 from an address, and nothing else is
+  made.
+- **Reading `ndarray.ctypes` every block kept memory**, 48 bytes a block
+  while a voice sounded. A voice works out its address when it is made.
+- **The spatial twins had to move.** The block kernel calls the spatial
+  kernel directly, so phase 11's tests, which put the Python render on
+  `Space.render`, would have compared the kernel with itself. They now
+  compare the engine with the whole Python block.
+- **The HRTF worker compiles the block kernel before the bank**, not
+  after: it takes 9 s from a cold cache and needs no bank.
+- **Collections were not what phase 11 thought.** With the block compiled,
+  steady playback makes none. The freeze after a load (D-142) is insurance
+  for edits made during playback, measured at 67 ms for one full
+  collection.
+
+With the window repainting without pause, 32 moving sources miss 1 block
+in 2255 and 0 in 2256 at 1 ms. 32 sources take 8% of the budget.
+
+Nineteen mutations were run: the fifteen named and four more. All were
+caught the first time. "A missing sample read anyway" was caught rather
+than crashing: a missing sample has no frames, so the read's clamp read
+nothing, and the silence was the wrong silence. The suite also passes
+with bounds checking on.
+
+What phase 13 needs: the live count on the listening machine, hands off
+and loaded, as its Notes describe. The engine it hears is the compiled one.
+The first launch after an install compiles for 9 s on the HRTF worker, so
+wait for the HRTF set to be ready before judging the first seconds.

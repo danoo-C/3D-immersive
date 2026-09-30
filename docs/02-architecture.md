@@ -23,8 +23,10 @@ Two things make that risk acceptable:
 
 M4 phase 10 measured the risk. Throughput has room: N-1 passes at 28% of
 the budget (D-136). The GIL is the real risk. With the UI thread busy, the
-audio thread waits for it at every numpy call, and a window repainting
-without pause costs it nearly every block (D-137).
+audio thread waited for it at every numpy call, and a window repainting
+without pause cost it nearly every block (D-137). Phases 11 and 12 compiled
+the block with numba, one kernel that releases the GIL for all of it
+(D-138): the same load now costs 1 block in 2255.
 
 ## Layering
 

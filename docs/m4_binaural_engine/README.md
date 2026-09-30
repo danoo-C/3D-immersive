@@ -24,7 +24,7 @@ channel and project views of the *Parameters pane* in
 | [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
 | [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | ✅ |
 | [11 — The spatial path, compiled](phase_11_spatial_compiled.md) | ✅ |
-| [12 — The whole block, compiled](phase_12_block_compiled.md) | in progress |
+| [12 — The whole block, compiled](phase_12_block_compiled.md) | ✅ |
 | [13 — Heard](phase_13_heard.md) | not started |
 
 The order is dependency order, and it is the spike's order. The spike
@@ -229,3 +229,12 @@ Kernels run without numba's runtime, which cost 48 bytes an array per
 call, over D-106's line, and a kernel then cannot make an array at all.
 numba's cache keeps stale code when a called kernel's file changes, so the
 audio package clears it whenever its sources change.
+
+**Phase 12.** The whole block is one kernel: `process` keeps its
+bookkeeping in Python and calls it once, so the audio thread waits for the
+GIL once a block. Lanes are read through a table of addresses the
+snapshot holds alive (D-140). The kernel is compiled before any stream
+opens (D-141), and memory is frozen after each load (D-142). With the
+window repainting without pause, 32 moving sources miss 1 block in 2255 at
+1 ms, where phase 10's engine missed 413 of 417. 32 sources take 8% of the
+budget.

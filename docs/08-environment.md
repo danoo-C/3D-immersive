@@ -472,7 +472,9 @@ its own. M4 phase 10's plan set out the choice
 ([Outcome](m4_binaural_engine/plans/phase_10_benchmark.md#outcome)). The
 user chose a third form of row 4: numba kernels, compiled from the engine's
 own Python and releasing the GIL for a whole block, with no build step
-(D-138). They are built in M4 phases 11 and 12.
+(D-138). They are built in M4 phases 11 and 12. With the whole block one
+kernel, the window repainting without pause costs 1 block in 2255 at 1 ms,
+and 5 to 11 at 5 ms: row 0 now does what it was meant to.
 
 Note that #1 touches four lines, while the nuclear option at #4 is still
 bounded and pre-planned. That ladder is why choosing Python was safe.

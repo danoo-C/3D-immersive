@@ -718,6 +718,14 @@ block for 32 sources. So while the UI thread runs Python, a block is late
 by about that many switch intervals, whatever the interval is (D-137). The
 port above answers that too, if the extension releases the GIL for the
 whole block rather than call by call. So would an engine in a process of
-its own, with no port. Neither has been chosen yet. And "a few hundred lines"
-is stale: by the end of M4 the engine, the spatial path, the scheduler's
-reads and the limiter are about 1,800 lines, docstrings included.
+its own, with no port. And "a few hundred lines" is stale: by the end of
+M4 the engine, the spatial path, the scheduler's reads and the limiter are
+about 1,800 lines, docstrings included.
+
+**What was built instead** (D-138 to D-141): the block compiled by numba
+from the engine's own Python, one kernel a block that releases the GIL for
+all of it, so the callback waits for the GIL once. With the window
+repainting without pause, 32 moving sources miss 1 block in 2255 at 1 ms,
+where they missed 413 of 417. And 32 sources take a p99 of 0.8 ms, 8% of
+the budget. The seam is where it was: `Engine.process`, now bookkeeping in
+Python and one call into `_block`.
