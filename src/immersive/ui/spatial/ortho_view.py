@@ -21,17 +21,26 @@ be the reserved `channel` value, as the clips' are.
 **Selecting.** A click selects the channel under the pointer, the one drawn
 on top first; Ctrl-click toggles it; a click on nothing clears. It goes
 through the document's selection, so the headers and the pane follow.
+
+**Dragging** (D-144, D-145). A press on an icon selects it, and once the
+pointer has moved `DRAG_THRESHOLD` pixels the drag begins: the side grabbed
+follows the pointer at the offset it was grabbed at, the top view setting X
+and Y and the front view X and Z. Where it would be is held by the
+`Placing` both views and the pane share, and both views draw the channel
+being dragged from it. The model is left alone until the release, which
+pushes the one edit the drag makes. Esc drops the drag.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QKeyEvent,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -44,6 +53,7 @@ from PySide6.QtWidgets import QWidget
 from immersive.core.document import Document
 from immersive.core.model import Channel, Position, paired, sides
 from immersive.core.selection import Kind
+from immersive.ui.spatial.placing import Placing
 from immersive.ui.spatial.scale import Plane, Scale
 from immersive.ui.theme import channel_group_color, group_color
 
@@ -69,6 +79,10 @@ RING_STEPS: Final = (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0)
 #: One notch of a mouse wheel zooms by this much.
 WHEEL_ZOOM: Final = 1.15
 
+#: How far a press must move, in pixels, before it is a drag and not a
+#: click: the timeline's own threshold.
+DRAG_THRESHOLD: Final = 4
+
 
 @dataclass(frozen=True)
 class Icon:
@@ -81,6 +95,17 @@ class Icon:
     radius: float
 
 
+@dataclass(frozen=True)
+class _Press:
+    """A press on an icon: where, the side's position then, and how far from
+    it in metres the press was, so a drag does not make the icon jump."""
+
+    icon: Icon
+    at: QPointF
+    grabbed: Position
+    offset: tuple[float, float]
+
+
 class OrthoView(QWidget):
     """One plane of the scene, drawn around the listener."""
 
@@ -89,6 +114,7 @@ class OrthoView(QWidget):
         document: Document,
         scale: Scale,
         plane: Plane,
+        placing: Placing | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -99,9 +125,12 @@ class OrthoView(QWidget):
         self._scale = scale
         self._plane: Plane = plane
         self._panning: QPointF | None = None
+        self._placing = placing if placing is not None else Placing()
+        self._press: _Press | None = None
         document.observe(self.update)
         document.selection.observe(self.update)
         scale.observe(self.update)
+        self._placing.observe(self.update)
 
     @property
     def plane(self) -> Plane:
@@ -131,12 +160,13 @@ class OrthoView(QWidget):
             if channel.hrtf_bypass:
                 continue
             into = on_top if channel in selection else drawn
+            placed = self._placing.sides(channel) or sides(channel)
             if paired(project, channel):
-                left, right = sides(channel)
+                left, right = placed
                 into.append(Icon(channel, 0, self.point_of(left), SIDE_RADIUS))
                 into.append(Icon(channel, 1, self.point_of(right), SIDE_RADIUS))
             else:
-                centre = self.point_of(channel.position)
+                centre = self.point_of(placed[0])
                 into.append(Icon(channel, -1, centre, POINT_RADIUS))
         return drawn + on_top
 
@@ -293,7 +323,16 @@ class OrthoView(QWidget):
         elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             selection.toggle(Kind.CHANNELS, icon.channel)
         else:
-            selection.select(Kind.CHANNELS, [icon.channel])
+            if icon.channel not in selection:
+                selection.select(Kind.CHANNELS, [icon.channel])
+            grabbed = sides(icon.channel)[max(icon.side, 0)]
+            across, up = self._metres(event.position())
+            self._press = _Press(
+                icon,
+                event.position(),
+                grabbed,
+                (grabbed.x - across, self._up(grabbed) - up),
+            )
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -305,14 +344,59 @@ class OrthoView(QWidget):
             )
             event.accept()
             return
-        super().mouseMoveEvent(event)
+        press = self._press
+        if press is None:
+            super().mouseMoveEvent(event)
+            return
+        if self._placing.channel is None:
+            moved = event.position() - press.at
+            if abs(moved.x()) + abs(moved.y()) < DRAG_THRESHOLD:
+                return
+            self._placing.begin(press.icon.channel, press.icon.side)
+        across, up = self._metres(event.position())
+        self._placing.move(
+            self._placed(press.grabbed, across + press.offset[0], up + press.offset[1])
+        )
+        event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() is Qt.MouseButton.MiddleButton:
             self._panning = None
             event.accept()
             return
+        if event.button() is Qt.MouseButton.LeftButton and self._press is not None:
+            self._press = None
+            if self._placing.channel is not None:
+                edit = self._placing.end()
+                if edit is not None:
+                    self._document.push(edit)
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and self._press is not None:
+            self._press = None
+            self._placing.cancel()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _metres(self, point: QPointF) -> tuple[float, float]:
+        """The metres across and up under `point`."""
+        return self._scale.metres(
+            self._plane, self.width(), self.height(), point.x(), point.y()
+        )
+
+    def _up(self, position: Position) -> float:
+        return position.y if self._plane == "top" else position.z
+
+    def _placed(self, grabbed: Position, across: float, up: float) -> Position:
+        """`grabbed` moved to `across` and `up` in this view's plane: its
+        third axis left where it was."""
+        if self._plane == "top":
+            return replace(grabbed, x=across, y=up)
+        return replace(grabbed, x=across, z=up)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         notches = event.angleDelta().y() / 120
