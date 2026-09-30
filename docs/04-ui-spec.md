@@ -434,6 +434,23 @@ the built-in paints each in its channel's:
 | `fade` | `text.primary` | a fade's gain curve, over the whole height of the clip |
 | `fade.handle` | `text.secondary` | the square at a fade's end, on a selected clip, as the worked example under *The file* named it |
 
+The spatial views', built at M5 phase 1: the top and front views, and the
+3D view after them. `icon` and `pair` are the reserved `channel` value, so
+a source is drawn in its channel's colour, as its clips are, unless a theme
+paints them all one colour:
+
+| `spatial` key | Default | For |
+|---|---|---|
+| `background` | `surface.panel` | behind the scene |
+| `ring` | `border` | the top view's distance rings, and the front view's lines of height |
+| `ring.label` | `text.secondary` | a ring's distance, and a height line's |
+| `level` | `text.disabled` | the front view's ear-level line, Z = 0: stronger than the lines of height either side |
+| `head` | `text.secondary` | the head glyph's outline |
+| `head.fill` | `surface.raised` | inside the head glyph |
+| `icon` | `channel` | a source's icon: a channel's point, or a pair's side |
+| `pair` | `channel` | the line joining a pair's two sides |
+| `selected` | `accent` | the ring around a selected channel's icons |
+
 The check box's, built at M3 phase 7. It paints itself, so its state is a
 tick or a dash as well as a fill:
 
@@ -615,8 +632,10 @@ brought to front.
 
 ### Front view — X / Z — editable
 
-Looking at the listener from the front. Same head glyph, same icons, same
-trails. Horizontal line at Z = 0 marks ear level.
+Looking towards the front, from behind the listener, so screen-right is
++X here as in the top view (03). Same head glyph, seen from behind, and the
+same icons. A faint line every metre of height, labelled, as the top view
+has rings, and the one at Z = 0 marks ear level.
 
 - Drag an icon → sets `pos.x` and `pos.z`. Y is untouched.
 

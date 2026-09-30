@@ -132,6 +132,17 @@
       "handle": "surface.hover",
       "hover.handle": "accent.pressed"
     },
+    "spatial": {
+      "background": "surface.panel",
+      "head": "text.secondary",
+      "head.fill": "surface.raised",
+      "icon": "channel",
+      "level": "text.disabled",
+      "pair": "channel",
+      "ring": "border",
+      "ring.label": "text.secondary",
+      "selected": "accent"
+    },
     "splitter": {
       "handle": "border",
       "hover.handle": "accent"
