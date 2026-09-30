@@ -1,6 +1,6 @@
 # Plan — M5 · Phase 3 — What an icon says, and the bypass strip
 
-**Written:** 2026-09-30 · **Status:** in progress
+**Written:** 2026-09-30 · **Status:** ✅ built
 
 ## Approach
 
@@ -122,4 +122,26 @@ bypass strip is a widget of its own under the top view, its chips wrapping.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, in the four steps. Two things the approach said were
+not in the table, and were named and tested before the sweep: a pair's
+line takes the channel's opacity, and the selected ring does not.
+
+Nineteen mutations were run, the fifteen named with 13 split in two, and
+three more. All were caught the first time:
+
+| # | Mutation | Caught by |
+|---|---|---|
+| 1-12, 14, 15 | as named | as named |
+| 13a, 13b | Ctrl not toggling; a chip's click not selecting | a click selects, Ctrl toggles |
+| + | the strip's height not fitted | hidden when none, and the window's strip |
+| + | a pair's line at full strength | a pair's line is as faint as its icons |
+| + | the selected ring faint with its channel | the selected ring is not faint |
+
+The sweep showed one test was fragile. Mutation 2 changed the icons'
+radii, and the selected-ring test failed with it: it read one pixel at the
+ring's radius, which the ring may half cover, depending on where the
+radius falls. The test now takes the pixel across the ring's width nearest
+its colour, and mutation 2 is caught by its own test alone.
+
+What phase 4 needs: `look.radius` and `look.opacity`, and the ortho view's
+`Icon`, so the 3D view draws the same icons by the same rules.

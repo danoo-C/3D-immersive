@@ -10,7 +10,7 @@ D-135 · Workflow: [09-workflow.md](../09-workflow.md)
 |---|---|
 | [1 — The ortho views, drawn](phase_1_ortho_views.md) | ✅ |
 | [2 — Dragging, heard](phase_2_dragging.md) | ✅ |
-| [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | in progress |
+| [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | ✅ |
 | [4 — The 3D view](phase_4_view3d.md) | not started |
 | [5 — Measured with the views playing](phase_5_measured.md) | not started |
 | [6 — Heard](phase_6_heard.md) | not started |
@@ -97,3 +97,8 @@ release: the drag is held apart from the model and sent to the engine at
 each movement, and the release is one edit (D-144). A pair is dragged by
 either side, the side grabbed leading (D-145). Esc drops a drag in the
 window too, where it is also Stop, and an edit made mid-drag drops it.
+
+**Phase 3.** An icon's radius says how near it is and its opacity how loud,
+and a channel not heard, muted or silenced by a solo, is at a quarter; a
+soloed one glows (D-146). Bypassed channels are chips in a strip under the
+top view, wrapping into rows, hidden when there are none (D-147).

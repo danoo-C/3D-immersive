@@ -259,12 +259,22 @@ def test_the_selected_ring_is_not_faint_with_its_channel() -> None:
     document.selection.select(Kind.CHANNELS, [heard, muted])
     _, front = views(document)
 
+    ring = QColor(theme.group_color("spatial", "selected"))
+
     def on_ring(icon: int) -> QColor:
+        """Above the icon, across the ring's width, the pixel it covers
+        most: one pixel alone may be half covered, by where the radius
+        falls."""
         [*_, at] = [i for i in front.icons() if i.channel is (heard, muted)[icon]]
-        return pixel(front, at.centre + QPointF(0, -(at.radius + 3.0)))
+        grab = front.grab().toImage()
+        across = [
+            grab.pixelColor((at.centre + QPointF(0, -(at.radius + gap))).toPoint())
+            for gap in (1.5, 2.5, 3.5, 4.5)
+        ]
+        return min(across, key=lambda colour: _apart(colour, ring))
 
     assert on_ring(0) == on_ring(1)
-    assert _apart(on_ring(1), QColor(theme.group_color("spatial", "selected"))) < 60
+    assert _apart(on_ring(1), ring) < 30
 
 
 def test_a_soloed_icon_glows_beyond_its_edge() -> None:
