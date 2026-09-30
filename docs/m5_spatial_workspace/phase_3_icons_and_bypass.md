@@ -1,6 +1,6 @@
 # M5 · Phase 3 — What an icon says, and the bypass strip
 
-**Status:** not started · **Plan:** not written yet
+**Status:** in progress · **Plan:** [plans/phase_3_icons_and_bypass.md](plans/phase_3_icons_and_bypass.md)
 
 ## Goal
 
