@@ -184,16 +184,13 @@ def blend(colour: str, opacity: float) -> QColor:
     return QColor(
         *(
             round(opacity * a + (1 - opacity) * b)
-            for a, b in zip(over.getRgb()[:3], under.getRgb()[:3], strict=True)
+            for a, b in zip(_rgb(over), _rgb(under), strict=True)
         )
     )
 
 
 def close(one: QColor, other: QColor) -> bool:
-    return all(
-        abs(a - b) <= 2
-        for a, b in zip(one.getRgb()[:3], other.getRgb()[:3], strict=True)
-    )
+    return all(abs(a - b) <= 2 for a, b in zip(_rgb(one), _rgb(other), strict=True))
 
 
 def test_a_nearer_icon_is_drawn_larger_in_both_views() -> None:
@@ -363,3 +360,7 @@ def pixel(view: OrthoView, at: QPointF) -> QColor:
 
 def _xy(point: QPointF) -> tuple[float, float]:
     return point.x(), point.y()
+
+
+def _rgb(colour: QColor) -> tuple[int, int, int]:
+    return colour.red(), colour.green(), colour.blue()
