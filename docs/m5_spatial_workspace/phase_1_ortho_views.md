@@ -1,6 +1,6 @@
 # M5 · Phase 1 — The ortho views, drawn
 
-**Status:** in progress · **Plan:** [plans/phase_1_ortho_views.md](plans/phase_1_ortho_views.md)
+**Status:** ✅ · **Plan:** [plans/phase_1_ortho_views.md](plans/phase_1_ortho_views.md)
 
 ## Goal
 
@@ -28,7 +28,7 @@ solo, the bypass strip → phase 3. The 3D view → phase 4.
 
 - [ ] A channel at (1, 2, 0) is drawn 1 m right of and 2 m ahead of the
       head in the top view, and 1 m right at ear level in the front view,
-      at whatever zoom and pan, within a pixel.
+      at whatever zoom and pan, within a pixel. *`test_ortho_view.py`.*
 - [ ] A linked or free pair is two points, each where its side is, joined
       by a line in the channel's colour. A bypassed channel is not drawn.
 - [ ] A click on an icon selects its channel, and a click on empty space
