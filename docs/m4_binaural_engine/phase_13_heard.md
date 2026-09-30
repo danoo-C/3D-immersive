@@ -69,3 +69,14 @@ found that the audio thread waits for the GIL at every numpy call (D-137),
 so a busy UI costs it blocks, and these two runs say how much on the
 machine that matters. `python -m immersive.benchmark blocks` gives N-1's
 timings there too.
+
+**First listening (2026-09-30).** After phases 11 and 12, the user listened
+to their own project's stems (`test-samples/`) placed in the application,
+and approved: "it sounds great and quite realistic". That covers what this
+phase most wants heard, sources where their positions put them, on real
+material. The rest of the acceptance is still open, and prepared when the
+listening machine is to hand: the crossfade's A/B renders, the candidate
+sets and QA-30's choice, the test project's named positions, and the live
+xrun count. M5 starts meanwhile, as M4 started with M2's and M3's last
+boxes open.
+
