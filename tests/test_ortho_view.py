@@ -30,6 +30,7 @@ from immersive.core.model import (
 from immersive.core.selection import Kind
 from immersive.ui import theme, theme_io
 from immersive.ui.main_window import MainWindow
+from immersive.ui.spatial import look
 from immersive.ui.spatial.ortho_view import OrthoView
 from immersive.ui.spatial.scale import Scale
 
@@ -172,6 +173,85 @@ def test_the_selected_channel_is_drawn_over_the_others() -> None:
     document.selection.select(Kind.CHANNELS, [first])
     assert pixel(top, at) == QColor("#F472B6")
     assert top.icon_at(at).channel is first  # type: ignore[union-attr]
+
+
+# ------------------------------------------------------ what an icon says
+
+
+def blend(colour: str, opacity: float) -> QColor:
+    """`colour` painted at `opacity` over the views' background."""
+    over, under = QColor(colour), QColor(theme.group_color("spatial", "background"))
+    return QColor(
+        *(
+            round(opacity * a + (1 - opacity) * b)
+            for a, b in zip(over.getRgb()[:3], under.getRgb()[:3], strict=True)
+        )
+    )
+
+
+def close(one: QColor, other: QColor) -> bool:
+    return all(
+        abs(a - b) <= 2
+        for a, b in zip(one.getRgb()[:3], other.getRgb()[:3], strict=True)
+    )
+
+
+def test_a_nearer_icon_is_drawn_larger_in_both_views() -> None:
+    """By its distance in three dimensions, the same in either view."""
+    near, far = Position(-1.0, 0.5, 0.5), Position(1.5, 3.0, 2.5)
+    top, front = views(
+        document_with(
+            channel(1, near, colour="#F472B6"), channel(2, far, colour="#34D399")
+        )
+    )
+    for view in (top, front):
+        big, small = view.icons()
+        assert big.radius == look.radius(near) > small.radius == look.radius(far)
+        inside_big = big.centre + QPointF(big.radius - 1.5, 0)
+        beyond_small = small.centre + QPointF(big.radius - 1.5, 0)
+        assert pixel(view, inside_big) == QColor("#F472B6")
+        assert pixel(view, beyond_small) != QColor("#34D399")
+
+
+def test_a_quieter_icon_is_fainter() -> None:
+    loud = channel(1, Position(-1.5, 1.5, 0.5), colour="#F472B6")
+    quiet = channel(2, Position(1.5, 1.5, 0.5), colour="#F472B6", gain_db=-20.0)
+    for view in views(document_with(loud, quiet)):
+        at_loud, at_quiet = (icon.centre for icon in view.icons())
+        assert pixel(view, at_loud) == QColor("#F472B6")
+        assert close(pixel(view, at_quiet), blend("#F472B6", 0.55))
+
+
+def test_a_muted_icon_and_one_silenced_by_a_solo_are_at_a_quarter() -> None:
+    muted = channel(1, Position(-1.5, 1.5, 0.5), colour="#F472B6", mute=True)
+    top, front = views(document_with(muted))
+    for view in (top, front):
+        [icon] = view.icons()
+        assert close(pixel(view, icon.centre), blend("#F472B6", 0.25))
+
+    soloed = channel(2, Position(1.5, 1.5, 0.5), colour="#34D399", solo=True)
+    silenced = channel(3, Position(-1.5, 1.5, 0.5), colour="#F472B6", gain_db=6.0)
+    top, _ = views(document_with(soloed, silenced))
+    at_soloed, at_silenced = (icon.centre for icon in top.icons())
+    assert pixel(top, at_soloed) == QColor("#34D399")
+    assert close(pixel(top, at_silenced), blend("#F472B6", 0.25))
+
+
+def test_a_soloed_icon_glows_beyond_its_edge() -> None:
+    soloed = channel(1, Position(1.5, 1.5, 0.5), colour="#34D399", solo=True)
+    plain = channel(2, Position(-1.5, 1.5, 0.5), colour="#34D399", solo=True)
+    document = document_with(soloed, plain)
+    top, _ = views(document)
+    background = pixel(top, QPointF(2, 2))
+
+    def beyond(icon_index: int) -> QColor:
+        icon = top.icons()[icon_index]
+        return pixel(top, icon.centre + QPointF(icon.radius + 3, 0))
+
+    assert beyond(0) != background and beyond(1) != background
+    document.push(SetAttribute(plain, "solo", False))
+    assert beyond(0) != background, "still soloed"
+    assert beyond(1) == background, "no glow"
 
 
 # ------------------------------------------------------------- selecting

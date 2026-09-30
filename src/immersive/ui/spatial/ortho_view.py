@@ -12,7 +12,14 @@ line; the head, fixed at the centre and a fixed size, since it marks where
 the listener is rather than how big a head is; then every channel that is
 not bypassed, its point or its pair's two sides joined, in the channel's
 colour; and the selected channels last, ringed, so they are drawn over the
-others. A bypassed channel has no position, and so is on no canvas (D-36).
+others. A bypassed channel has no position, and so is on no canvas (D-36):
+the bypass strip under the top view has it.
+
+**What an icon says** (D-146, `look`): its radius its distance from the
+listener, each side of a pair its own; its opacity the channel's gain, or
+a quarter when it is not heard; and a glow when it is soloed. The line
+joining a pair takes the channel's opacity too, and the selected ring
+does not, since it is the selection's.
 
 **A painted group** (D-92): the colours are the `spatial` group's, read when
 it paints, so a theme switch only asks for a repaint. `icon` and `pair` may
@@ -46,27 +53,27 @@ from PySide6.QtGui import (
     QPainterPath,
     QPaintEvent,
     QPen,
+    QRadialGradient,
     QWheelEvent,
 )
 from PySide6.QtWidgets import QWidget
 
 from immersive.core.document import Document
-from immersive.core.model import Channel, Position, paired, sides
+from immersive.core.model import Channel, Position, audible, paired, sides
 from immersive.core.selection import Kind
+from immersive.ui.spatial import look
 from immersive.ui.spatial.placing import Placing
 from immersive.ui.spatial.scale import Plane, Scale
 from immersive.ui.theme import channel_group_color, group_color
-
-#: An icon's radius in pixels: a channel's one point, and each side of a
-#: pair. Phase 3 makes them say distance; here they are one size.
-POINT_RADIUS: Final = 7.0
-SIDE_RADIUS: Final = 6.0
 
 #: How far beyond an icon a click still takes it, and the selected ring's
 #: width and gap, in pixels.
 REACH: Final = 3.0
 RING: Final = 2.0
 RING_GAP: Final = 3.0
+
+#: How far a soloed icon's glow reaches beyond its edge, pixels.
+GLOW: Final = 8.0
 
 #: The head glyph's radius, pixels.
 HEAD: Final = 12.0
@@ -87,12 +94,15 @@ DRAG_THRESHOLD: Final = 4
 @dataclass(frozen=True)
 class Icon:
     """One drawn icon: whose, which side (-1 for a channel's one point, 0 for
-    a pair's left, 1 for its right), where, and how big."""
+    a pair's left, 1 for its right), where, how big, how strong, and
+    whether it glows (D-146)."""
 
     channel: Channel
     side: int
     centre: QPointF
     radius: float
+    opacity: float = 1.0
+    glow: bool = False
 
 
 @dataclass(frozen=True)
@@ -166,18 +176,25 @@ class OrthoView(QWidget):
         selection = self._document.selection
         drawn: list[Icon] = []
         on_top: list[Icon] = []
-        for channel in project.channels:
+        heard = audible(project.channels)
+        for channel, is_heard in zip(project.channels, heard, strict=True):
             if channel.hrtf_bypass:
                 continue
             into = on_top if channel in selection else drawn
             placed = self._placing.sides(channel) or sides(channel)
-            if paired(project, channel):
-                left, right = placed
-                into.append(Icon(channel, 0, self.point_of(left), SIDE_RADIUS))
-                into.append(Icon(channel, 1, self.point_of(right), SIDE_RADIUS))
-            else:
-                centre = self.point_of(placed[0])
-                into.append(Icon(channel, -1, centre, POINT_RADIUS))
+            strength = look.opacity(channel.gain_db, heard=is_heard)
+            each = [(0, placed[0]), (1, placed[1])]
+            for side, where in each if paired(project, channel) else [(-1, placed[0])]:
+                into.append(
+                    Icon(
+                        channel,
+                        side,
+                        self.point_of(where),
+                        look.radius(where),
+                        strength,
+                        channel.solo,
+                    )
+                )
         return drawn + on_top
 
     def icon_at(self, point: QPointF) -> Icon | None:
@@ -291,8 +308,10 @@ class OrthoView(QWidget):
                 left[icon.channel.id] = icon
             elif icon.side == 1 and icon.channel.id in left:
                 colour = channel_group_color("spatial", "pair", icon.channel.color)
+                painter.setOpacity(icon.opacity)
                 painter.setPen(QPen(QColor(colour), 1.5))
                 painter.drawLine(left[icon.channel.id].centre, icon.centre)
+        painter.setOpacity(1.0)
 
     def _draw_icon(self, painter: QPainter, icon: Icon, *, selected: bool) -> None:
         colour = QColor(channel_group_color("spatial", "icon", icon.channel.color))
@@ -301,12 +320,25 @@ class OrthoView(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             around = icon.radius + RING_GAP
             painter.drawEllipse(icon.centre, around, around)
+        painter.setOpacity(icon.opacity)
         painter.setPen(Qt.PenStyle.NoPen)
+        if icon.glow:
+            reach = icon.radius + GLOW
+            halo = QRadialGradient(icon.centre, reach)
+            edge, faded = QColor(colour), QColor(colour)
+            edge.setAlphaF(0.6)
+            faded.setAlphaF(0.0)
+            halo.setColorAt(icon.radius / reach, edge)
+            halo.setColorAt(1.0, faded)
+            painter.setBrush(halo)
+            painter.drawEllipse(icon.centre, reach, reach)
         painter.setBrush(colour)
         painter.drawEllipse(icon.centre, icon.radius, icon.radius)
         if icon.side >= 0:
             painter.setPen(QColor(group_color("spatial", "background")))
-            painter.setFont(_small(painter.font(), bold=True))
+            letters = _small(painter.font(), bold=True)
+            letters.setPixelSize(max(round(icon.radius * 1.3), 6))
+            painter.setFont(letters)
             box = QRectF(
                 icon.centre.x() - icon.radius,
                 icon.centre.y() - icon.radius,
@@ -314,6 +346,7 @@ class OrthoView(QWidget):
                 2 * icon.radius,
             )
             painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "LR"[icon.side])
+        painter.setOpacity(1.0)
 
     # --------------------------------------------------------------- mouse
 

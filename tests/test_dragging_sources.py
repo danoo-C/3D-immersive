@@ -16,6 +16,7 @@ from immersive.app import build_application
 from immersive.core.document import Document
 from immersive.core.edits import SetAttribute
 from immersive.core.model import Pairing, Position, mirror, sides
+from immersive.ui.spatial import look
 from immersive.ui.spatial.ortho_view import OrthoView
 from immersive.ui.spatial.placing import Placing
 from immersive.ui.spatial.scale import Scale
@@ -126,6 +127,23 @@ def test_the_other_view_shows_the_drag_before_the_release() -> None:
     [during] = front.icons()
     assert during.centre.x() == pytest.approx(before.centre.x() + 60, abs=1.0)
     assert placed.position.x == 0.0
+
+
+def test_a_dragged_icon_grows_as_it_comes_nearer() -> None:
+    """Its radius is from where the drag has it (D-146), in the other view
+    too."""
+    placed = channel(1, Position(0.0, 4.0, 0.0))
+    document = document_with(placed)
+    top, front = views(document)
+    [icon] = top.icons()
+    [before] = front.icons()
+
+    start = press(top, icon.centre)
+    move(top, start + QPoint(0, int(3 * per_metre(top))))
+
+    [during] = front.icons()
+    assert during.radius == pytest.approx(look.radius(Position(0.0, 1.0, 0.0)))
+    assert during.radius > before.radius
 
 
 def test_esc_drops_the_drag_and_makes_no_edit() -> None:
