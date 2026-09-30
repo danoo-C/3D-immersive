@@ -5,8 +5,10 @@ do the same float32 operations in the same order."""
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import reference_engine
+from immersive.audio.limiter import LOOKAHEAD, Limiter
 from immersive.audio.scheduler import MONO, build, fill
 from immersive.core.io.media import Decoded
 from immersive.core.model import Channel, Clip, MediaFile, Project
@@ -49,3 +51,23 @@ def test_a_clip_past_its_samples_end_plays_silence_there() -> None:
     assert fill(snapshot.lanes[0], 0, left, right, mono) == MONO
     assert (mono[:500] == 0.25).all()
     assert (mono[500:] == 0.0).all()
+
+
+@pytest.mark.parametrize("block", [512, LOOKAHEAD - 8])
+def test_the_limiter_equals_the_reference(block: int) -> None:
+    """Loud stretches it must turn down and quiet ones it must leave, with
+    the switch held on, faded off, held off and faded back on (D-126); and
+    a block shorter than the lookahead, which the rows' moves must survive.
+    The reduction goes through `log10` and `10 **` in float64, whose last
+    bits may differ between numpy and numba, so the two agree to float32
+    rounding rather than exactly."""
+    rng = np.random.default_rng(7)
+    compiled, python = Limiter(block), reference_engine.Limiter(block)
+    switch = [1.0] * 20 + [0.0] * 10 + [1.0] * 30
+    for n in range(len(switch) - 1):
+        loud = 3.0 if (n // 7) % 2 == 0 else 0.3
+        signal = (loud * rng.standard_normal((2, block))).astype(np.float32)
+        mine, theirs = signal.copy(), signal.copy()
+        compiled.process(mine[0], mine[1], switch[n], switch[n + 1])
+        python.process(theirs[0], theirs[1], switch[n], switch[n + 1])
+        np.testing.assert_allclose(mine, theirs, rtol=2e-6, atol=1e-7)
