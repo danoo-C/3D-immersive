@@ -1,6 +1,6 @@
 # Plan — M5 · Phase 5 — Measured with the views playing
 
-**Written:** 2026-09-30 · **Status:** in progress
+**Written:** 2026-09-30 · **Status:** ✅ built
 
 ## Approach
 
@@ -77,4 +77,14 @@ next free D-number.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned. The counts asked for one change, and not where the plan
+guessed: the 3D view's paint, which worked out its camera once for each
+point it drew, 43 ms at the median with 32 pairs. It works it out once a
+paint now, 7.1 ms. No decision was needed; the camera is D-148's as it
+was.
+
+Dragging missed no block at either interval. Five mutations were run,
+the five named, and all were caught the first time.
+
+What phase 6 needs: `live --load dragging` on the listening machine, and
+the user's ears.

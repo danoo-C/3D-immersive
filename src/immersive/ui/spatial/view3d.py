@@ -27,6 +27,7 @@ channel is not drawn (D-36).
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Final
 
 from PySide6.QtCore import QPointF, Qt
@@ -67,6 +68,25 @@ GRID_LINES: Final = 8
 #: pixels.
 MARGIN: Final = 24.0
 FOOT: Final = 2.5
+
+
+@dataclass(frozen=True)
+class Projection:
+    """The camera as it is for one paint: pixels a metre, where the head
+    is, and R. Worked out once a paint, since each costs a pass over every
+    source."""
+
+    per: float
+    cx: float
+    cy: float
+    half: float
+
+    def point(self, position: Position) -> QPointF:
+        """Where `position` is drawn."""
+        return QPointF(
+            self.cx + self.per * COS_30 * (position.x - position.y),
+            self.cy - self.per * (SIN_30 * (position.x + position.y) + position.z),
+        )
 
 
 class View3D(QWidget):
@@ -124,17 +144,19 @@ class View3D(QWidget):
         up = (self.height() / 2 - MARGIN) / self.reach()
         return max(min(across, up), 0.0)
 
+    def projection(self) -> Projection:
+        return Projection(
+            self.per_metre(), self.width() / 2, self.height() / 2, self.half_size()
+        )
+
     def point_of(self, position: Position) -> QPointF:
         """Where `position` is drawn."""
-        per = self.per_metre()
-        return QPointF(
-            self.width() / 2 + per * COS_30 * (position.x - position.y),
-            self.height() / 2 - per * (SIN_30 * (position.x + position.y) + position.z),
-        )
+        return self.projection().point(position)
 
     def icons(self) -> list[Icon]:
         """Every icon, in the order it is drawn: farthest first."""
-        return [icon for _, icon in sorted(self._icons(), key=lambda item: item[0])]
+        icons = self._icons(self.projection())
+        return [icon for _, icon in sorted(icons, key=lambda item: item[0])]
 
     # ------------------------------------------------------------- drawing
 
@@ -142,18 +164,19 @@ class View3D(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(group_color("spatial", "background")))
-        self._draw_grid(painter)
-        icons = self._icons()
-        self._draw_drops(painter, icons)
+        camera = self.projection()
+        self._draw_grid(painter, camera)
+        icons = self._icons(camera)
+        self._draw_drops(painter, icons, camera)
         self._draw_pairs(painter, [icon for _, icon in icons])
         head_drawn = False
         for near, icon in sorted(icons, key=lambda item: item[0]):
             if not head_drawn and near > 0.0:
-                self._draw_head(painter)
+                self._draw_head(painter, camera)
                 head_drawn = True
             draw_icon(painter, icon)
         if not head_drawn:
-            self._draw_head(painter)
+            self._draw_head(painter, camera)
         selection = self._document.selection
         painter.setPen(QPen(QColor(group_color("spatial", "selected")), RING))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -163,37 +186,39 @@ class View3D(QWidget):
                 painter.drawEllipse(icon.centre, around, around)
         painter.end()
 
-    def _draw_grid(self, painter: QPainter) -> None:
+    def _draw_grid(self, painter: QPainter, camera: Projection) -> None:
         """The ground at ear level: a line every step, and *front* at its
         front edge."""
-        half = self.half_size()
+        half = camera.half
         step = next((s for s in GRID_STEPS if half / s <= GRID_LINES), GRID_STEPS[-1])
         painter.setPen(QPen(QColor(group_color("spatial", "grid")), 1.0))
         lines = int(half // step)
         for n in range(-lines, lines + 1):
             at = n * step
             painter.drawLine(
-                self.point_of(Position(at, -half, 0.0)),
-                self.point_of(Position(at, half, 0.0)),
+                camera.point(Position(at, -half, 0.0)),
+                camera.point(Position(at, half, 0.0)),
             )
             painter.drawLine(
-                self.point_of(Position(-half, at, 0.0)),
-                self.point_of(Position(half, at, 0.0)),
+                camera.point(Position(-half, at, 0.0)),
+                camera.point(Position(half, at, 0.0)),
             )
         painter.setPen(QColor(group_color("spatial", "ring.label")))
         painter.setFont(small_font(painter.font()))
-        edge = self.point_of(Position(0.0, half, 0.0))
+        edge = camera.point(Position(0.0, half, 0.0))
         painter.drawText(QPointF(edge.x() - 30, edge.y() - 4), "front")
 
-    def _draw_drops(self, painter: QPainter, icons: list[tuple[float, Icon]]) -> None:
+    def _draw_drops(
+        self, painter: QPainter, icons: list[tuple[float, Icon]], camera: Projection
+    ) -> None:
         """Each source's line to its point on the ground, and a dot there:
         its height, and whether it is ahead and high or behind and low."""
         painter.setBrush(Qt.BrushStyle.NoBrush)
         for _, icon in icons:
             where = icon.position
-            if where is None or abs(where.z) * self.per_metre() <= icon.radius:
+            if where is None or abs(where.z) * camera.per <= icon.radius:
                 continue  # at ear level: the icon covers its own foot
-            foot = self.point_of(Position(where.x, where.y, 0.0))
+            foot = camera.point(Position(where.x, where.y, 0.0))
             colour = QColor(channel_group_color("spatial", "icon", icon.channel.color))
             painter.setOpacity(icon.opacity * 0.6)
             painter.setPen(QPen(colour, 1.0))
@@ -217,10 +242,10 @@ class View3D(QWidget):
                 painter.drawLine(left[icon.channel.id].centre, icon.centre)
         painter.setOpacity(1.0)
 
-    def _draw_head(self, painter: QPainter) -> None:
+    def _draw_head(self, painter: QPainter, camera: Projection) -> None:
         """The listener at the origin: the head, the far ear behind it and
         the near one before it, and the nose toward their front."""
-        centre = self.point_of(Position())
+        centre = camera.point(Position())
         right = QPointF(COS_30, -SIN_30)  # +X on screen, a unit
         front = QPointF(-COS_30, -SIN_30)  # +Y on screen, a unit
         painter.setPen(QPen(QColor(group_color("spatial", "head")), 1.5))
@@ -248,7 +273,7 @@ class View3D(QWidget):
             made += placed if paired(project, channel) else placed[:1]
         return made
 
-    def _icons(self) -> list[tuple[float, Icon]]:
+    def _icons(self, camera: Projection) -> list[tuple[float, Icon]]:
         """Every icon with its nearness to the camera, in channel order."""
         project = self._document.project
         heard = audible(project.channels)
@@ -263,7 +288,7 @@ class View3D(QWidget):
                 icon = Icon(
                     channel,
                     side,
-                    self.point_of(where),
+                    camera.point(where),
                     look.radius(where),
                     strength,
                     channel.solo,

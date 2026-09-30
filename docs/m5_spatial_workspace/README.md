@@ -12,7 +12,7 @@ D-135 · Workflow: [09-workflow.md](../09-workflow.md)
 | [2 — Dragging, heard](phase_2_dragging.md) | ✅ |
 | [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | ✅ |
 | [4 — The 3D view](phase_4_view3d.md) | ✅ |
-| [5 — Measured with the views playing](phase_5_measured.md) | in progress |
+| [5 — Measured with the views playing](phase_5_measured.md) | ✅ |
 | [6 — Heard](phase_6_heard.md) | not started |
 
 The order is dependency order. The top and front views are drawn first,
@@ -108,3 +108,8 @@ behind the listener and to their left (D-148): the ground at ear level,
 stepped to hold every source, a drop line for each source's height, and
 the icons drawn farthest first by the ortho views' own rules. It takes no
 input.
+
+**Phase 5.** A source dragged round the head during playback, with 32
+placed, misses no block at 1 ms or 5 ms. Each view's repaint is recorded;
+the 3D view's was made five times cheaper first, since it had worked out
+its camera once for every point it drew.
