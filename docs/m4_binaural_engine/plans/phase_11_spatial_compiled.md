@@ -1,6 +1,6 @@
 # Plan — M4 · Phase 11 — The spatial path, compiled
 
-**Written:** 2026-09-29 · **Status:** in progress
+**Written:** 2026-09-29 · **Status:** ✅ built
 
 ## Approach
 
@@ -112,7 +112,7 @@ beside the module.
 | 10 | the transform along the wrong axis | equals the reference |
 | 11 | the walk crossing the edge opposite the largest weight | `test_lookup`: containment |
 | 12 | `warm` not called on the worker | the window's bank arrives warm |
-| 13 | the pairs given as `int32` | rendering every arrangement compiles nothing new |
+| 13 | the pairs given as `int32` *(amended: `warm`'s positions as `float32`, see the Outcome)* | rendering every arrangement compiles nothing new |
 
 ## Risks and unknowns
 
@@ -136,4 +136,46 @@ beside the module.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned: the walk compiled and shared, the spatial path as one
+kernel held to the Python it replaced, compiled on the worker, measured.
+What the plan did not foresee:
+
+- **`audio/compiled.py`**, the one place a kernel's options live. It was
+  needed twice over. numba's runtime cost every array argument a 48-byte
+  record, 2.8 KiB a block, over D-106's line, so kernels run without it,
+  and then cannot make an array at all. And numba's cache keeps a kernel's
+  stale code when a kernel it calls changes in another file, so the
+  module clears the package's cached kernels whenever a source changes.
+  Both are in the phase's Notes, with what was measured.
+- **Two slice copies became loops.** Without the runtime, a slice
+  assignment of one array into another has no compiled form.
+- **Named mutation 13 was wrong.** "The pairs given as `int32`" cannot be
+  caught and cannot do harm: `warm` builds its space with the same
+  `Space.build`, so it compiles the very type the engine will call. The
+  real hazard is `warm` giving the kernel a type the engine does not, so
+  the sweep made `warm`'s positions `float32` instead.
+
+The kernel equals the reference within 2e-6, output and meters, in every
+arrangement tested. 32 sources take a p99 of 1.2 to 1.3 ms a block, where
+they took 3.0. With the window loaded, playing and scrolling miss almost
+nothing: 0 to 3 blocks in 2250, and one run of 10, which was a single
+stall. Repainting still misses most blocks, at 16 to 19 ms each, because
+the rest of the block is still Python.
+
+Nineteen mutations were run: the thirteen named, the thirteenth corrected
+as above, and six more. All were caught but one at first. *The GIL kept*
+survived: a thread counting beside a kernel that held the GIL still got
+the switch interval's slices just before and after it, tens of thousands
+of counts, which cleared a bare threshold. The test now holds the count to
+a third of the thread's own pace over a quarter-second kernel, and catches
+it. Separately, the suite once with bounds checked: clean.
+
+The first full run after the sweep failed a window test waiting for its
+bank. Eight workers had compiled the kernel cold at once. The kernels are
+now compiled once in the test controller before the workers start
+(Notes).
+
+What phase 12 needs: the rest of the block in kernels, called once a
+block, through `compiled.kernel`, held to the Python it replaces in the
+same way. Also `gc.freeze()` after load, since one full collection took
+50 ms (phase 12's Notes).

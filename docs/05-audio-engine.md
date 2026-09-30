@@ -686,6 +686,10 @@ traced memory's peak by 2 KiB:
   snapshot swap.
 - `gc.freeze()` after load; explicit collection on the UI thread only.
 - Every numpy op writes into a preallocated buffer via `out=`.
+- **Compiled kernels run without numba's runtime** (D-138). A kernel that
+  tried to make an array would not compile, and a call makes no record for
+  each array it is handed, which with the runtime on was 48 bytes an array,
+  2.8 KiB a block for the spatial path.
 - **No ufunc broadcasts.** A `(B, 1)` ramp over a `(B, 2)` block allocates
   17 KiB behind `out=`, measured. Buffers are planar, one contiguous row per
   ear, and a ramp is applied a row at a time.

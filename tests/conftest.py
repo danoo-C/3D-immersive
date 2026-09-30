@@ -136,6 +136,31 @@ def _nothing_waits_for_a_person() -> Iterator[None]:
                 setattr(owner, name, original)
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """The audio kernels compiled once, before any worker starts (D-139).
+
+    From a cold cache - after any change to the audio package, and on every
+    CI run - each of eight workers compiled the spatial kernel at once, on
+    its HRTF worker, and a test waiting ten seconds for a bank gave up. So
+    the controller, or a serial run, compiles it first, and every worker
+    loads it from numba's cache. A worker skips this. The synthetic head's
+    bank compiles the one signature SADIE's would: the kernel's types do
+    not depend on the set.
+    """
+    if hasattr(config, "workerinput"):
+        return
+    import tempfile
+
+    from immersive.audio import spatial
+    from immersive.audio.hrtf.bank import Bank, prepare
+    from test_spatial import head
+
+    with tempfile.TemporaryDirectory() as cache:
+        bank = prepare(head(), 256, Path(cache))
+    assert isinstance(bank, Bank)
+    spatial.warm(bank)
+
+
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """A test marked `timing` needs the machine to itself (D-136).
 

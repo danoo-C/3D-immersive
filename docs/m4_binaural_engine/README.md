@@ -23,7 +23,7 @@ channel and project views of the *Parameters pane* in
 | [8 — Level as mixed](phase_8_level_as_mixed.md) | ✅ |
 | [9 — Stereo placement](phase_9_stereo_placement.md) | ✅ |
 | [10 — The benchmark, and the switch interval](phase_10_benchmark.md) | ✅ |
-| [11 — The spatial path, compiled](phase_11_spatial_compiled.md) | in progress |
+| [11 — The spatial path, compiled](phase_11_spatial_compiled.md) | ✅ |
 | [12 — The whole block, compiled](phase_12_block_compiled.md) | not started |
 | [13 — Heard](phase_13_heard.md) | not started |
 
@@ -218,3 +218,14 @@ repainting without pause it missed nearly every block at 5 ms and at 1 ms
 alike. An engine that waits once a block missed none at 1 ms. Taking the
 block off the GIL is a choice left for the user, and it is wanted before
 M5, whose views repaint during playback. The plan's Outcome sets it out.
+
+**Phase 11.** The spatial path is one numba kernel that releases the GIL
+for all of its work, equal to the Python it replaced within 2e-6 (D-138).
+It is compiled on the HRTF worker with one signature (D-139). 32 sources
+take a p99 of 1.2 to 1.3 ms a block, where they took 3.0. With the window
+loaded, playing and scrolling miss almost nothing, and repainting still
+misses, at 16 to 19 ms a block, because the rest of the block is Python.
+Kernels run without numba's runtime, which cost 48 bytes an array per
+call, over D-106's line, and a kernel then cannot make an array at all.
+numba's cache keeps stale code when a called kernel's file changes, so the
+audio package clears it whenever its sources change.

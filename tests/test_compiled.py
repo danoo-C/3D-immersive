@@ -29,10 +29,17 @@ def _makes_an_array(size: int) -> float:
 
 
 def test_a_kernel_runs_without_the_gil() -> None:
-    """A Python thread counts while a kernel spins for a while: it can only
-    count if the kernel let the GIL go."""
+    """A Python thread counts while a kernel spins for a quarter of a
+    second, and keeps at least a third of the pace it keeps alone. Holding
+    the GIL, the kernel would leave it only the switch interval's slices
+    just before and after, a few milliseconds' worth: the sweep found a
+    bare "it counted" passed that way."""
     out = np.zeros(2)
-    _spin(out, 10)  # compiled, or loaded, first
+    began = time.perf_counter()
+    _spin(out, 1_000_000)  # compiled, or loaded, first
+    began = time.perf_counter()
+    _spin(out, 1_000_000)
+    turns = max(int(1_000_000 * 0.25 / (time.perf_counter() - began)), 1_000_000)
     counted = [0]
     stop = threading.Event()
 
@@ -42,18 +49,23 @@ def test_a_kernel_runs_without_the_gil() -> None:
 
     counter = threading.Thread(target=count)
     counter.start()
-    time.sleep(0.02)
-    before = counted[0]
-    began = time.perf_counter()
-    turns = 20_000_000
-    _spin(out, turns)
-    took = time.perf_counter() - began
-    during = counted[0] - before
-    stop.set()
-    counter.join()
+    try:
+        time.sleep(0.02)
+        before, began = counted[0], time.perf_counter()
+        time.sleep(0.1)  # alone: the GIL is free while this thread sleeps
+        pace = (counted[0] - before) / (time.perf_counter() - began)
+        before, began = counted[0], time.perf_counter()
+        _spin(out, turns)
+        took = time.perf_counter() - began
+        during = counted[0] - before
+    finally:
+        stop.set()
+        counter.join()
 
-    assert took > 0.005, "long enough to count through"
-    assert during > 1000, f"{during} counts in {took * 1000:.0f} ms"
+    assert took > 0.1, "long enough that the slices around it do not count"
+    assert during > pace * took / 3, (
+        f"{during} counts in {took * 1000:.0f} ms, at {pace:.0f} a second alone"
+    )
 
 
 def test_a_kernel_cannot_make_an_array() -> None:

@@ -45,3 +45,11 @@ D-137's way out (phase 10's Outcome, option A), D-138, D-139.
 ## Notes
 
 Appended while building.
+
+**From phase 11: collections.** With the spatial path compiled, the
+sporadic misses left while playing or scrolling were single stalls of 30
+to 64 ms, and one full collection was seen to take 50 ms. A collection
+holds the GIL, and a fully compiled block still needs the GIL to enter
+its callback. So this phase's plan should settle `gc.freeze()` after a
+project loads, which 05's checklist asks for and nothing does yet. It
+should also measure what collections cost with the window playing.
