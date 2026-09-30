@@ -40,7 +40,7 @@ from immersive.audio.scheduler import (
     positioned,
 )
 from immersive.core.io.media import Decoded
-from immersive.core.model import Project, paired
+from immersive.core.model import Channel, Position, Project, paired
 
 
 def structure(project: Project, audio: Callable[[str], Decoded | None]) -> Hashable:
@@ -139,6 +139,35 @@ class Feed:
         self._positions = placed
         self._master = overall
         self.release()
+
+    def preview(
+        self, project: Project, channel: Channel, left: Position, right: Position
+    ) -> None:
+        """A position that is not an edit yet (D-144): `channel`'s sides as
+        a drag has them, sent to the engine and heard at the next block. It
+        is recorded as what the engine has, so the edit that ends the drag
+        sends nothing more, and a cancel, which leaves the model as it was,
+        is sent back by the next `update`. A full ring drops it: the next
+        movement sends again."""
+        if self._snapshot is None:
+            return
+        index = next(
+            (n for n, each in enumerate(project.channels) if each is channel), -1
+        )
+        if not 0 <= index < len(self._positions):
+            return
+        generation = self._snapshot.generation
+        was_left, was_right = self._positions[index]
+        now_left: Point = (left.x, left.y, left.z)
+        now_right: Point | None = None
+        engine = self._engine
+        if now_left != was_left:
+            engine.send_position(generation, index, *now_left)
+        if was_right is not None:
+            now_right = (right.x, right.y, right.z)
+            if now_right != was_right:
+                engine.send_position(generation, index, *now_right, side=1)
+        self._positions[index] = (now_left, now_right)
 
     def set_bank(self, bank: Bank | None) -> None:
         """Play the project through `bank` from the next snapshot: every

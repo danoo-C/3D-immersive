@@ -309,3 +309,65 @@ def test_the_bank_and_bypass_rebuild_the_snapshot(bank: object) -> None:
     document.push(SetAttribute(document.project.channels[1], "hrtf_bypass", True))
     assert len(engine.installed) == installed + 2
     assert engine.installed[-1].slots == (0, -1), "the bypassed one flat"
+
+
+# --------------------------------------------------------------------------- #
+# a drag, heard before it is an edit (D-144)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_dragged_position_is_sent_before_it_is_an_edit(bank: object) -> None:
+    from immersive.core.model import Position
+
+    document, engine, feed, _ = fed(0.5)
+    feed.set_bank(bank)  # type: ignore[arg-type]
+    placed = document.project.channels[0]
+    sent, edits = engine.sent(), len(document._stack)
+
+    feed.preview(document.project, placed, Position(2.0, 1.0, 0.5), Position())
+
+    assert engine.sent() == sent + 1 and len(document._stack) == edits
+    block(engine)
+    np.testing.assert_array_equal(engine.installed[-1].positions[0, 0], [2.0, 1.0, 0.5])
+
+    document.push(SetAttribute(placed, "position", Position(2.0, 1.0, 0.5)))
+    assert engine.sent() == sent + 1, "the edit finds the engine already there"
+
+
+def test_a_dragged_pair_sends_both_sides(bank: object) -> None:
+    from immersive.core.model import Pairing, Placement, Position
+
+    document, engine, feed, _ = fed(0.5)
+    feed.set_bank(bank)  # type: ignore[arg-type]
+    placed = document.project.channels[0]
+    document.push(
+        SetAttribute(placed, "placement", Placement(mode=Pairing.LINKED, mono=True))
+    )
+    sent = engine.sent()
+
+    feed.preview(
+        document.project, placed, Position(-1.0, 2.0, 0.0), Position(1.0, 2.0, 0.0)
+    )
+
+    assert engine.sent() == sent + 2
+    block(engine)
+    positions = engine.installed[-1].positions[0]
+    np.testing.assert_array_equal(positions, [[-1.0, 2.0, 0.0], [1.0, 2.0, 0.0]])
+
+
+def test_a_cancelled_drag_is_sent_back_where_the_model_has_it(bank: object) -> None:
+    from immersive.core.model import Position
+
+    document, engine, feed, _ = fed(0.5)
+    feed.set_bank(bank)  # type: ignore[arg-type]
+    placed = document.project.channels[0]
+    where = placed.position
+    feed.preview(document.project, placed, Position(3.0, 3.0, 3.0), Position())
+    block(engine)
+
+    feed.update(document.project)
+
+    block(engine)
+    np.testing.assert_array_equal(
+        engine.installed[-1].positions[0, 0], [where.x, where.y, where.z]
+    )
