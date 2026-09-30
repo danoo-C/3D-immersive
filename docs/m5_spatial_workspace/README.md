@@ -9,7 +9,7 @@ D-135 · Workflow: [09-workflow.md](../09-workflow.md)
 | Phase | Status |
 |---|---|
 | [1 — The ortho views, drawn](phase_1_ortho_views.md) | ✅ |
-| [2 — Dragging, heard](phase_2_dragging.md) | in progress |
+| [2 — Dragging, heard](phase_2_dragging.md) | ✅ |
 | [3 — What an icon says, and the bypass strip](phase_3_icons_and_bypass.md) | not started |
 | [4 — The 3D view](phase_4_view3d.md) | not started |
 | [5 — Measured with the views playing](phase_5_measured.md) | not started |
@@ -92,3 +92,8 @@ every channel's point or pair where its position puts it. A click selects,
 and the selected are ringed and drawn on top. They share one scale, zoomed
 by scroll and panned by middle-drag (D-143), and keys 1 to 3 focus them.
 
+**Phase 2.** A source is dragged in either view and heard moving before the
+release: the drag is held apart from the model and sent to the engine at
+each movement, and the release is one edit (D-144). A pair is dragged by
+either side, the side grabbed leading (D-145). Esc drops a drag in the
+window too, where it is also Stop, and an edit made mid-drag drops it.

@@ -1,6 +1,6 @@
 # Plan — M5 · Phase 2 — Dragging, heard
 
-**Written:** 2026-09-30 · **Status:** in progress
+**Written:** 2026-09-30 · **Status:** ✅ built
 
 ## Approach
 
@@ -97,7 +97,8 @@ by either side, and the side grabbed leads.
 - **Two things now say where a source is**, the model and `Placing`. That
   is only true during a drag, and only for the channel dragged. Every
   reader asks `Placing` first for that channel, and it is cleared at the
-  release, at Esc and on any edit made from elsewhere.
+  release, at Esc and on any edit made from elsewhere. *(The last was
+  missed in the build and added at the close.)*
 - **Mouse tests offscreen.** `QTest` presses and moves a widget without a
   window manager, which the timeline's drag tests already rely on.
 
@@ -111,4 +112,35 @@ by either side, and the side grabbed leads.
 
 ## Outcome
 
-Filled in at the end.
+Built as planned, in the four steps. The close found two holes, both now
+tested:
+
+- **Esc never reached a drag in the window**, because it is also the
+  window's Stop. Mutation 12, a cancel not sent back, survived the first
+  sweep: no window test had ever cancelled a drag. A view now claims Esc
+  from Stop while its mouse is held, and a window test drags while playing,
+  presses Esc, and hears the source back where it was.
+- **An edit made during a drag did not drop it.** The risks above promised
+  it, and nothing did it. Ctrl+Z or Delete while the mouse is held would
+  have left the release pushing an edit against a changed model. Any edit
+  the document reports during a press now drops the drag, as Esc does.
+
+The fourteen named mutations were run, and four more:
+
+| # | Mutation | Caught by |
+|---|---|---|
+| 1-11, 13, 14 | as named | as named, the first time |
+| 12 | a cancel not sending the model's position back | survived; caught after the Esc fix, by the window's Esc test |
+| + | cleared before the edit | the drag heard in the window |
+| + | Esc not claimed from Stop | the window's Esc test |
+| + | an edit mid-drag not dropping it | an edit made during the drag drops it |
+| + | the press kept after the release | after a click or a drag, Esc is Stop's again |
+
+The last was written to check that the release's own edit is not dropped.
+It kept the edit, since the dropping ends the press too. But it left a
+click's press held, and then the view claimed Esc from Stop until the next
+press. The test now asks for Stop back.
+
+What phase 3 needs: `OrthoView.icons()` is the one place an icon's size and
+look are decided, and `Placing` is read there, so an icon dragged keeps
+what it says.

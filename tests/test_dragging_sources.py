@@ -7,11 +7,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 from immersive.app import build_application
 from immersive.core.document import Document
+from immersive.core.edits import SetAttribute
 from immersive.core.model import Pairing, Position, mirror, sides
 from immersive.ui.spatial.ortho_view import OrthoView
 from immersive.ui.spatial.placing import Placing
@@ -142,6 +145,29 @@ def test_esc_drops_the_drag_and_makes_no_edit() -> None:
     assert back.centre == front.point_of(Position(0.0, 1.0, 0.0))
 
 
+def test_an_edit_made_during_the_drag_drops_it() -> None:
+    """Ctrl+Z is the window's, and reaches it while the mouse is held: an
+    undo mid-drag puts the source back, and the release then makes no edit,
+    so the redo is still there."""
+    placed = channel(1, Position(0.0, 1.0, 0.0))
+    document = document_with(placed)
+    top, front = views(document)
+    document.push(SetAttribute(placed, "position", Position(1.0, 1.0, 0.0)))
+    [icon] = top.icons()
+
+    start = press(top, icon.centre)
+    move(top, start + QPoint(40, -40))
+    assert document.undo()
+    assert placed.position == Position(0.0, 1.0, 0.0)
+    [dropped] = front.icons()
+    assert dropped.centre == front.point_of(Position(0.0, 1.0, 0.0))
+    move(top, start + QPoint(60, -60))
+    release(top, start + QPoint(60, -60))
+
+    assert placed.position == Position(0.0, 1.0, 0.0)
+    assert document.can_redo
+
+
 def test_a_click_that_does_not_move_only_selects() -> None:
     placed = channel(1, Position(0.0, 1.0, 0.0))
     document = document_with(placed)
@@ -154,6 +180,33 @@ def test_a_click_that_does_not_move_only_selects() -> None:
 
     assert document.selection.channels() == [placed]
     assert not document.can_undo
+
+
+def test_after_a_click_or_a_drag_esc_is_the_windows_stop_again() -> None:
+    """The view claims Esc from Stop only while the mouse is held."""
+    placed = channel(1, Position(0.0, 1.0, 0.0))
+    top, _ = views(document_with(placed))
+
+    def claimed() -> bool:
+        override = QKeyEvent(
+            QEvent.Type.ShortcutOverride,
+            Qt.Key.Key_Escape,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        override.ignore()
+        QApplication.sendEvent(top, override)
+        return override.isAccepted()
+
+    [icon] = top.icons()
+    at = press(top, icon.centre)
+    assert claimed(), "held"
+    release(top, at)
+    assert not claimed(), "after a click"
+    [icon] = top.icons()
+    at = press(top, icon.centre)
+    move(top, at + QPoint(30, 0))
+    release(top, at + QPoint(30, 0))
+    assert not claimed(), "after a drag"
 
 
 def test_a_linked_pair_dragged_by_its_right_leads_with_its_right() -> None:

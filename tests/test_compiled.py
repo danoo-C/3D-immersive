@@ -33,13 +33,31 @@ def test_a_kernel_runs_without_the_gil() -> None:
     second, and keeps at least a third of the pace it keeps alone. Holding
     the GIL, the kernel would leave it only the switch interval's slices
     just before and after, a few milliseconds' worth: the sweep found a
-    bare "it counted" passed that way."""
+    bare "it counted" passed that way.
+
+    Three tries, and one is enough. A kernel holding the GIL starves the
+    counter every time, but the full suite's other workers can starve it
+    for one try, which failed it once at M5 phase 2."""
     out = np.zeros(2)
-    began = time.perf_counter()
     _spin(out, 1_000_000)  # compiled, or loaded, first
     began = time.perf_counter()
     _spin(out, 1_000_000)
     turns = max(int(1_000_000 * 0.25 / (time.perf_counter() - began)), 1_000_000)
+    tries = [_counted_during(out, turns) for _ in range(3)]
+    assert all(took > 0.1 for _, _, took in tries), (
+        "long enough that the slices around it do not count"
+    )
+    assert any(during > pace * took / 3 for during, pace, took in tries), [
+        f"{during} counts in {took * 1000:.0f} ms, at {pace:.0f} a second alone"
+        for during, pace, took in tries
+    ]
+
+
+def _counted_during(
+    out: npt.NDArray[np.float64], turns: int
+) -> tuple[int, float, float]:
+    """How far a Python thread counts while `_spin` runs `turns`, its pace
+    alone just before, and how long the spin took."""
     counted = [0]
     stop = threading.Event()
 
@@ -61,11 +79,7 @@ def test_a_kernel_runs_without_the_gil() -> None:
     finally:
         stop.set()
         counter.join()
-
-    assert took > 0.1, "long enough that the slices around it do not count"
-    assert during > pace * took / 3, (
-        f"{during} counts in {took * 1000:.0f} ms, at {pace:.0f} a second alone"
-    )
+    return during, pace, took
 
 
 def test_a_kernel_cannot_make_an_array() -> None:

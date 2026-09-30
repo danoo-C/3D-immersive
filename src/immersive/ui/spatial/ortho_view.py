@@ -127,7 +127,7 @@ class OrthoView(QWidget):
         self._panning: QPointF | None = None
         self._placing = placing if placing is not None else Placing()
         self._press: _Press | None = None
-        document.observe(self.update)
+        document.observe(self._project_changed)
         document.selection.observe(self.update)
         scale.observe(self.update)
         self._placing.observe(self.update)
@@ -138,6 +138,16 @@ class OrthoView(QWidget):
 
     def retheme(self) -> None:
         """A theme switch: the colours are read when it paints."""
+        self.update()
+
+    def _project_changed(self) -> None:
+        """Repaint. An edit made while this view's drag goes on - an undo,
+        a delete, anything the window's keys push - drops the drag as Esc
+        does, since it was placed against a model that has changed. The
+        release ends the press before it pushes, so its own edit is not."""
+        if self._press is not None:
+            self._press = None
+            self._placing.cancel()
         self.update()
 
     # ------------------------------------------------------------ geometry
